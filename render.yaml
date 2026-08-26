@@ -1,0 +1,85 @@
+# Render Blueprint — deploys RosterPro as three services:
+#   1. rosterpro-db        PostgreSQL (free tier — see the caveat below)
+#   2. rosterpro-backend   the Node/Express API (free tier — sleeps after
+#                          15 min idle, wakes on the next request)
+#   3. rosterpro-frontend  the built React app, served as static files
+#
+# This file only describes *how to deploy* the existing app — it does not
+# change any application code. To use it: go to Render's dashboard ->
+# New -> Blueprint -> connect this GitHub repo. Render reads this file and
+# creates all three services in one go.
+#
+# IMPORTANT (Option A / fully free, as chosen): Render deletes a free
+# PostgreSQL database 30 days after it's created (14-day grace period to
+# upgrade before the data is actually wiped). This is fine for testing,
+# but don't treat this database as a safe long-term home for real roster
+# data until it's upgraded to a paid plan — see infra note in
+# rosterpro-platform/infra/aws/DEPLOYMENT_GUIDE.md's philosophy, which
+# applies here too: know which backup is authoritative before relying on it.
+
+databases:
+  - name: rosterpro-db
+    databaseName: rosterpro
+    user: rosterpro
+    plan: free
+
+services:
+  # ── Backend API ────────────────────────────────────────────────────────
+  - type: web
+    runtime: node
+    name: rosterpro-backend
+    plan: free
+    rootDir: rosterpro-platform/backend
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rosterpro-db
+          property: connectionString
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: MFA_ENCRYPTION_KEY
+        generateValue: true
+      # Update these two if Render assigns rosterpro-frontend a different
+      # subdomain than expected (e.g. because the name was already taken) —
+      # check the frontend service's actual URL after first deploy.
+      - key: CORS_ORIGIN
+        value: https://rosterpro-frontend.onrender.com
+      - key: APP_URL
+        value: https://rosterpro-frontend.onrender.com
+      # Email/WhatsApp are optional — the app runs fine without them (it
+      # just logs a warning when a notification can't be sent). Add real
+      # values for SMTP_HOST/PORT/USER/PASS/EMAIL_FROM and
+      # TWILIO_ACCOUNT_SID/AUTH_TOKEN/WHATSAPP_FROM later, whenever you're
+      # ready to turn those on, from the service's Environment tab —
+      # no redeploy of this file needed.
+
+  # ── Frontend (static build) ────────────────────────────────────────────
+  - type: web
+    runtime: static
+    name: rosterpro-frontend
+    plan: free
+    rootDir: rosterpro-platform/frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./dist
+    routes:
+      # Forward API calls to the backend so the frontend's existing
+      # relative fetch("/api/...") calls keep working unmodified, even
+      # though frontend and backend are two different Render services.
+      # Update the destination host if rosterpro-backend's actual URL
+      # ends up different (see note above).
+      - type: rewrite
+        source: /api/*
+        destination: https://rosterpro-backend.onrender.com/api/*
+      # SPA fallback: client-side routes (e.g. /roster, /qualifications)
+      # need to resolve to index.html on a direct load/refresh, same as
+      # frontend/nginx.conf's try_files rule does for the AWS/Docker path.
+      - type: rewrite
+        source: /*
+        destination: /index.html
