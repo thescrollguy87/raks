@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import { listStaff } from "../api/staff.js";
@@ -20,12 +20,19 @@ export default function QualificationsPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const canEdit = hasPermission("qualification", "create");
 
+  // Memoized: usePageHeader re-syncs whenever `actions` changes reference,
+  // and this component re-renders on every header-context update — a fresh
+  // JSX element here every render would loop the two forever.
+  const headerActions = useMemo(() => (
+    canEdit && selectedId ? (
+      <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>＋ Add Record</button>
+    ) : null
+  ), [canEdit, selectedId]);
+
   usePageHeader({
     title: "Qualifications, Training & Authorisations",
     subtitle: "AMD · Compliance records",
-    actions: canEdit && selectedId ? (
-      <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>＋ Add Record</button>
-    ) : null,
+    actions: headerActions,
   });
 
   useEffect(() => {

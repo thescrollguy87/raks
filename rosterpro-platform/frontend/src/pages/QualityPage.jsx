@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
@@ -24,10 +24,18 @@ export default function QualityPage() {
   const [error, setError] = useState("");
   const canCreate = hasPermission("audit_finding", "create");
 
+  // Memoized: usePageHeader re-syncs whenever `actions` changes reference,
+  // and this component re-renders on every header-context update — a fresh
+  // JSX element here every render would loop the two forever.
+  const headerActions = useMemo(() => (
+    canCreate ? <button className="btn btn-primary" onClick={handleRaiseFinding}>＋ Raise Finding</button> : null
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [canCreate, stationId]);
+
   usePageHeader({
     title: "Quality — Audit Findings & CAPA",
     subtitle: "AMD Line Maintenance",
-    actions: canCreate ? <button className="btn btn-primary" onClick={handleRaiseFinding}>＋ Raise Finding</button> : null,
+    actions: headerActions,
   });
 
   const load = useCallback(() => {

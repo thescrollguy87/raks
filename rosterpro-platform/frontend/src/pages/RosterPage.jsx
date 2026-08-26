@@ -81,24 +81,32 @@ export default function RosterPage() {
     }
   }
 
+  // actions is memoized because usePageHeader syncs it into context state on
+  // every change — a fresh JSX element here on every render (this component
+  // re-renders whenever the header context updates, since it subscribes to
+  // it) would re-trigger that sync forever. Deps cover every reactive value
+  // the block below, or the handlers it calls, close over.
+  const headerActions = useMemo(() => (
+    <>
+      {canGenerate && roster && !roster.isPublished && (
+        <button className="btn btn-ghost" disabled={generating} onClick={handleGenerate}>
+          {generating ? "Generating…" : "🤖 Generate"}
+        </button>
+      )}
+      {canPublish && roster && !roster.isPublished && (
+        <button className="btn btn-primary" onClick={() => handlePublish()}>✅ Publish</button>
+      )}
+      {canUnpublish && roster?.isPublished && (
+        <button className="btn btn-ghost" onClick={() => handleUnpublish()}>↩ Unpublish</button>
+      )}
+    </>
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [canGenerate, canPublish, canUnpublish, roster, generating, monthKey, stationId]);
+
   usePageHeader({
     title: "Shift Roster",
     subtitle: `AMD · ${monthKey}${roster?.isPublished ? " · Published" : " · Draft"}`,
-    actions: (
-      <>
-        {canGenerate && roster && !roster.isPublished && (
-          <button className="btn btn-ghost" disabled={generating} onClick={handleGenerate}>
-            {generating ? "Generating…" : "🤖 Generate"}
-          </button>
-        )}
-        {canPublish && roster && !roster.isPublished && (
-          <button className="btn btn-primary" onClick={() => handlePublish()}>✅ Publish</button>
-        )}
-        {canUnpublish && roster?.isPublished && (
-          <button className="btn btn-ghost" onClick={() => handleUnpublish()}>↩ Unpublish</button>
-        )}
-      </>
-    ),
+    actions: headerActions,
   });
 
   const shiftDefByCode = useMemo(() => Object.fromEntries(shiftDefs.map(d => [d.code, d])), [shiftDefs]);

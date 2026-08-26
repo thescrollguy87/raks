@@ -10,6 +10,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "prisma:seed": "node prisma/seed.js",
+    "create-admin": "node scripts/create-admin.js",
     "test": "jest --runInBand"
   },
   "prisma": {

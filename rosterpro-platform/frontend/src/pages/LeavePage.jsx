@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import * as leaveApi from "../api/leave.js";
@@ -21,10 +21,17 @@ export default function LeavePage() {
 
   const canApprove = hasPermission("leave", "approve");
 
+  // Memoized: usePageHeader re-syncs whenever `actions` changes reference,
+  // and this component re-renders on every header-context update — a fresh
+  // JSX element here every render would loop the two forever.
+  const headerActions = useMemo(() => (
+    <button className="btn btn-primary" onClick={() => setShowRequestModal(true)}>＋ Request Leave</button>
+  ), []);
+
   usePageHeader({
     title: "Leave & Absence",
     subtitle: "AMD Line Maintenance",
-    actions: <button className="btn btn-primary" onClick={() => setShowRequestModal(true)}>＋ Request Leave</button>,
+    actions: headerActions,
   });
 
   const load = useCallback(() => {

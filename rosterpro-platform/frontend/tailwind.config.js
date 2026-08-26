@@ -16,7 +16,7 @@ export default {
         "navy-lite": "#243D54",
         cyan: "#00C6FF",
         amber: "#F5A623",
-        rp-red: "#E53935",
+        "rp-red": "#E53935",
         "rp-green": "#00C853",
       },
     },
