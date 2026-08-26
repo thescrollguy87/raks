@@ -61,10 +61,13 @@ services:
       # no redeploy of this file needed.
 
   # ── Frontend (static build) ────────────────────────────────────────────
+  # Static sites have no `plan` field — there's no paid/free instance tier
+  # to choose since it's just files served from a CDN, not a running
+  # process; that's what triggered the "no such plan free for service type
+  # web" error on the first attempt.
   - type: web
     runtime: static
     name: rosterpro-frontend
-    plan: free
     rootDir: rosterpro-platform/frontend
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
