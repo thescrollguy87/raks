@@ -30,7 +30,7 @@ services:
     name: rosterpro-backend
     plan: free
     rootDir: rosterpro-platform/backend
-    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && node scripts/create-admin.js
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -59,6 +59,20 @@ services:
       # TWILIO_ACCOUNT_SID/AUTH_TOKEN/WHATSAPP_FROM later, whenever you're
       # ready to turn those on, from the service's Environment tab —
       # no redeploy of this file needed.
+      #
+      # First-login bootstrap: set these three in Render's dashboard
+      # (Environment tab) to whatever you want your own login to be —
+      # `sync: false` means Render prompts for them rather than storing
+      # real values in this git-tracked file. Every build runs
+      # scripts/create-admin.js, which creates/resets that one SUPER_ADMIN
+      # account if these are set, or does nothing at all if they're blank
+      # (safe either way — it never fails the build).
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        sync: false
 
   # ── Frontend (static build) ────────────────────────────────────────────
   # Static sites have no `plan` field — there's no paid/free instance tier

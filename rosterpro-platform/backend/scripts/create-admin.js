@@ -1,17 +1,25 @@
 // One-time bootstrap: there's no signup endpoint (by design — see README),
 // so the very first user has to be created directly. Run with:
 //   node scripts/create-admin.js <email> <password> <full name>
+// or, so it's safe to run unattended on every deploy (see render.yaml),
+// set ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME as env vars instead — with
+// neither CLI args nor those env vars set, this exits quietly (0) rather
+// than failing the build, since most deploys shouldn't create/reset an
+// account.
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const [email, password, ...nameParts] = process.argv.slice(2);
-  const fullName = nameParts.join(" ");
-  if (!email || !password || !fullName) {
-    console.error("Usage: node scripts/create-admin.js <email> <password> <full name>");
-    process.exit(1);
+  const [argEmail, argPassword, ...argNameParts] = process.argv.slice(2);
+  const email = argEmail || process.env.ADMIN_EMAIL;
+  const password = argPassword || process.env.ADMIN_PASSWORD;
+  const fullName = (argNameParts.length ? argNameParts.join(" ") : process.env.ADMIN_NAME) || "Admin";
+
+  if (!email || !password) {
+    console.log("No ADMIN_EMAIL/ADMIN_PASSWORD set (or CLI args given) — skipping admin bootstrap.");
+    return;
   }
 
   const role = await prisma.role.findFirst({ where: { name: "SUPER_ADMIN" } });
