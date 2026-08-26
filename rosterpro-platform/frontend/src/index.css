@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* The prototype's complete, self-contained CSS system — variables, layout,
+   component classes (.card, .btn, .ni, .rt, .tag, etc), and the dark theme.
+   Imported as-is; every component below renders the same class names this
+   file defines, so the UI matches the original prototype exactly. */
+@import "./rosterpro.css";

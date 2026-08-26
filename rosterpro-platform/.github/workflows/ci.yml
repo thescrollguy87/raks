@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call: {} # lets deploy.yml run this same suite as a required first step
+
+jobs:
+  backend-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: rosterpro
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: rosterpro_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rosterpro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: backend/package-lock.json
+      - run: npm install
+      - name: Generate Prisma client
+        run: npx prisma generate
+      - name: Run migrations against the test database
+        run: npx prisma migrate deploy
+        env:
+          DATABASE_URL: postgresql://rosterpro:test_password@localhost:5432/rosterpro_test
+      - name: Unit tests
+        run: npm test
+        env:
+          # Test-only secrets — never reuse these values anywhere real.
+          # The suite mocks every repository/service dependency for the
+          # services under test (see tests/*.test.js), so these mainly
+          # exist to satisfy env.js's fail-fast startup check.
+          NODE_ENV: test
+          DATABASE_URL: postgresql://rosterpro:test_password@localhost:5432/rosterpro_test
+          JWT_ACCESS_SECRET: ci-test-access-secret
+          JWT_REFRESH_SECRET: ci-test-refresh-secret
+          MFA_ENCRYPTION_KEY: ci-test-mfa-key
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm install
+      - name: Production build
+        run: npm run build
+        env:
+          # Placeholder values sufficient to prove the build itself
+          # succeeds — the real values are injected per-environment at
+          # deploy time (see docker-compose.prod.yml's build args).
+          VITE_API_PROXY_TARGET: http://localhost:4000
+          VITE_DEFAULT_STATION_ID: ci-build-placeholder

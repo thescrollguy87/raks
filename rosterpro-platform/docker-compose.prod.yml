@@ -1,0 +1,78 @@
+version: "3.9"
+
+# Production topology. Differences from the root docker-compose.yml (dev):
+#   - no bind-mounted source (dev's `volumes: ./backend:/app` would let a
+#     stale local checkout override what's actually in the built image —
+#     fine for hot-reload in dev, dangerous in prod)
+#   - no Adminer (a raw DB browser has no business being reachable in
+#     production; use RDS's own tools or a bastion + psql if you need to
+#     poke the database directly)
+#   - frontend served as a real nginx container, not the Vite dev server
+#   - explicit restart policies and healthchecks suited to staying up
+#     unattended, not to fast dev iteration
+#
+# This file is one legitimate way to run RosterPro in production (a single
+# Docker host, or docker-compose on an EC2 instance) — see
+# infra/aws/DEPLOYMENT_GUIDE.md for the fuller AWS architecture
+# (RDS instead of a Postgres container, CloudFront+S3 instead of the
+# frontend container, etc), which is the recommended path for anything
+# beyond a single small station's traffic.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-rosterpro}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in your .env — no default in production}
+      POSTGRES_DB: ${DB_NAME:-rosterpro}
+    volumes:
+      - rosterpro_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-rosterpro}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # No published port by default — only the backend container needs to
+    # reach Postgres, and it does so over the compose network by service
+    # name. Uncomment only if you need direct external DB access.
+    # ports:
+    #   - "5432:5432"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${DB_USER:-rosterpro}:${DB_PASSWORD}@postgres:5432/${DB_NAME:-rosterpro}
+    env_file:
+      - ./backend/.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_PROXY_TARGET: ${PUBLIC_API_URL:-http://localhost:4000}
+        VITE_DEFAULT_STATION_ID: ${DEFAULT_STATION_ID:-}
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+volumes:
+  rosterpro_pgdata:

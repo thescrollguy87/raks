@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rosterpro-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rosterpro
+      POSTGRES_PASSWORD: rosterpro_dev_password
+      POSTGRES_DB: rosterpro
+    ports:
+      - "5432:5432"
+    volumes:
+      - rosterpro_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rosterpro"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Lightweight DB browser at http://localhost:8080 — handy in dev, remove
+  # this service (or restrict it) before deploying anywhere near production.
+  adminer:
+    image: adminer:latest
+    container_name: rosterpro-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rosterpro-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://rosterpro:rosterpro_dev_password@postgres:5432/rosterpro
+      NODE_ENV: development
+      PORT: 4000
+    env_file:
+      - ./backend/.env
+    ports:
+      - "4000:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+
+volumes:
+  rosterpro_pgdata:

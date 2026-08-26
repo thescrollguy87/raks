@@ -1,0 +1,750 @@
+// ═══════════════════════════════════════════════════════════════════════════
+// RosterPro Enterprise — PostgreSQL schema (Prisma)
+//
+// Conventions applied to every business table:
+//   id          UUID primary key
+//   createdById / updatedById  → who
+//   createdAt / updatedAt      → when (updatedAt auto-managed by Prisma)
+//   deletedAt   → soft delete (nullable; a row is "live" when deletedAt IS NULL)
+//   version     → optimistic-locking counter, incremented on every update
+//
+// Full change history (old value / new value / who / when / IP / reason) is
+// NOT modeled as a column on each table — it lives centrally in AuditTrail,
+// keyed by (entityType, entityId), so one mechanism covers every table
+// instead of duplicating history columns 20 times. See AuditTrail below.
+// ═══════════════════════════════════════════════════════════════════════════
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Shared enums ────────────────────────────────────────────────────────────
+
+enum RoleName {
+  SUPER_ADMIN
+  AIRLINE_ADMIN
+  STATION_MANAGER
+  LMM
+  SHIFT_ENGINEER
+  AME
+  TECHNICIAN
+  STORE_KEEPER
+  READ_ONLY_AUDITOR
+}
+
+enum StaffCategory {
+  B1
+  B2
+  CM
+  NCS
+  STO
+}
+
+enum LeaveStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum QualificationStatus {
+  VALID
+  EXPIRING
+  EXPIRED
+  BLOCKED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+enum CapaStatus {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+  OVERDUE
+}
+
+enum ToolCalibrationStatus {
+  IN_CALIBRATION
+  VALID
+  DUE
+  OVERDUE
+  QUARANTINED
+}
+
+// ─── Tenancy & organization ─────────────────────────────────────────────────
+
+model Airline {
+  id          String   @id @default(uuid())
+  name        String
+  icaoCode    String   @unique
+  iataCode    String?
+  isActive    Boolean  @default(true)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  stations    Station[]
+  users       User[]
+  aircraft    Aircraft[]
+  flights     Flight[]
+
+  @@map("airlines")
+}
+
+model Station {
+  id          String   @id @default(uuid())
+  airlineId   String
+  airline     Airline  @relation(fields: [airlineId], references: [id])
+  iataCode    String   // e.g. AMD
+  name        String
+  timezone    String   @default("Asia/Kolkata")
+  isActive    Boolean  @default(true)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  users           User[]
+  rosters         Roster[]
+  flights         Flight[]
+  stores          StoreItem[]
+  tools           Tool[]
+  auditFindings   AuditFinding[]
+
+  @@unique([airlineId, iataCode])
+  @@map("stations")
+}
+
+// ─── Identity, roles, RBAC ───────────────────────────────────────────────────
+
+model User {
+  id                String   @id @default(uuid())
+  airlineId         String?
+  airline           Airline? @relation(fields: [airlineId], references: [id])
+  stationId         String?
+  station           Station? @relation(fields: [stationId], references: [id])
+
+  employeeId        String?  @unique
+  fullName          String
+  email             String   @unique
+  phone             String?
+  passwordHash      String
+  category          StaffCategory?
+  designation       String?
+
+  isEmailVerified   Boolean  @default(false)
+  emailVerifyToken  String?
+  emailVerifyExpiry DateTime?
+
+  mfaEnabled        Boolean  @default(false)
+  mfaSecret         String?  // encrypted at rest (see security notes in README)
+
+  passwordResetToken  String?
+  passwordResetExpiry DateTime?
+
+  isActive          Boolean  @default(true)
+  lastLoginAt       DateTime?
+  lastLoginIp       String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  roles             UserRole[]
+  refreshTokens     RefreshToken[]
+  qualifications    Qualification[]
+  licenses          License[]
+  trainings         Training[]
+  authorizations    StaffAuthorization[]
+  leaves            Leave[]           @relation("LeaveOwner")
+  approvedLeaves    Leave[]           @relation("LeaveApprover")
+  shiftAssignments  ShiftAssignment[]
+  notifications     Notification[]
+  toolIssues        ToolIssue[]       @relation("ToolIssuedTo")
+  auditFindingsRaised AuditFinding[]  @relation("FindingRaisedBy")
+  capaOwned         Capa[]            @relation("CapaOwner")
+  activityLogs      ActivityLog[]
+
+  @@index([airlineId])
+  @@index([stationId])
+  @@map("users")
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  isSystem    Boolean  @default(true) // seeded roles vs airline-defined custom roles
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions RolePermission[]
+  users       UserRole[]
+
+  @@map("roles")
+}
+
+// Fine-grained permission, e.g. resource="roster", action="publish"
+model Permission {
+  id          String   @id @default(uuid())
+  resource    String   // "roster" | "staff" | "qualifications" | "reports" | ...
+  action      String   // "create" | "read" | "update" | "delete" | "approve" | "publish" | "export"
+  description String?
+
+  roles       RolePermission[]
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permissionId String
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique // never store the raw token
+  ipAddress  String?
+  userAgent  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ─── Aircraft & flights ──────────────────────────────────────────────────────
+
+model Aircraft {
+  id           String   @id @default(uuid())
+  airlineId    String
+  airline      Airline  @relation(fields: [airlineId], references: [id])
+  registration String   @unique // e.g. VT-ABC
+  type         String   // e.g. B737-8, A320neo
+  msn          String?  // manufacturer serial number
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  flights      Flight[]
+
+  @@map("aircraft")
+}
+
+model Flight {
+  id            String   @id @default(uuid())
+  airlineId     String
+  airline       Airline  @relation(fields: [airlineId], references: [id])
+  stationId     String
+  station       Station  @relation(fields: [stationId], references: [id])
+  aircraftId    String?
+  aircraft      Aircraft? @relation(fields: [aircraftId], references: [id])
+
+  flightNumber  String
+  scheduledIn   DateTime?
+  scheduledOut  DateTime?
+  actualIn      DateTime?
+  actualOut     DateTime?
+  status        String   @default("SCHEDULED") // SCHEDULED | ARRIVED | DEPARTED | DELAYED | CANCELLED
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  engineeringDelays EngineeringDelay[]
+
+  @@index([stationId, scheduledIn])
+  @@map("flights")
+}
+
+model EngineeringDelay {
+  id          String   @id @default(uuid())
+  flightId    String
+  flight      Flight   @relation(fields: [flightId], references: [id])
+  delayCode   String
+  minutes     Int
+  ataChapter  String?
+  description String
+  rectification String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@map("engineering_delays")
+}
+
+// ─── Roster, shifts, leave ───────────────────────────────────────────────────
+
+model ShiftDefinition {
+  id        String   @id @default(uuid())
+  code      String   @unique // M, A, N, G, L, ...
+  name      String
+  startTime String?  // "06:30"
+  endTime   String?  // "14:00"
+  breakMin  Int      @default(0)
+  type      String   // duty | night | off | leave | other
+  color     String   @default("#AABBCC")
+  isActive  Boolean  @default(true)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  assignments ShiftAssignment[]
+
+  @@map("shift_definitions")
+}
+
+model Roster {
+  id          String   @id @default(uuid())
+  stationId   String
+  station     Station  @relation(fields: [stationId], references: [id])
+  monthKey    String   // "2026-09"
+  isPublished Boolean  @default(false)
+  publishedAt DateTime?
+  publishedById String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  assignments ShiftAssignment[]
+
+  @@unique([stationId, monthKey])
+  @@map("rosters")
+}
+
+model ShiftAssignment {
+  id          String   @id @default(uuid())
+  rosterId    String
+  roster      Roster   @relation(fields: [rosterId], references: [id])
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  shiftDate   DateTime @db.Date
+  shiftDefId  String
+  shiftDef    ShiftDefinition @relation(fields: [shiftDefId], references: [id])
+  note        String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@unique([rosterId, userId, shiftDate])
+  @@index([userId, shiftDate])
+  @@map("shift_assignments")
+}
+
+model Leave {
+  id          String      @id @default(uuid())
+  userId      String
+  user        User        @relation("LeaveOwner", fields: [userId], references: [id])
+  leaveType   String      // annual, sick, casual, medical, LWP, ...
+  fromDate    DateTime    @db.Date
+  toDate      DateTime    @db.Date
+  reason      String?
+  status      LeaveStatus @default(PENDING)
+  approvedById String?
+  approvedBy  User?       @relation("LeaveApprover", fields: [approvedById], references: [id])
+  approvedAt  DateTime?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([userId, fromDate, toDate])
+  @@map("leaves")
+}
+
+// ─── Qualifications, licenses, training, authorizations ─────────────────────
+
+model Qualification {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  qualCode     String   // e.g. "B737 B1", "A320 B2"
+  description  String?
+  issuedDate   DateTime @db.Date
+  expiryDate   DateTime @db.Date
+  status       QualificationStatus @default(VALID)
+  attachmentId String?
+  attachment   Attachment? @relation(fields: [attachmentId], references: [id])
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([userId])
+  @@index([expiryDate])
+  @@map("qualifications")
+}
+
+model License {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  licenseNo    String   // e.g. DGCA CAR 66 number
+  category     String   // B1 / B2 / ICAO Type II etc
+  issuingAuthority String @default("DGCA")
+  issuedDate   DateTime @db.Date
+  expiryDate   DateTime @db.Date
+  attachmentId String?
+  attachment   Attachment? @relation(fields: [attachmentId], references: [id])
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([userId])
+  @@index([expiryDate])
+  @@map("licenses")
+}
+
+model Training {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  courseName   String
+  provider     String?
+  completedDate DateTime @db.Date
+  validUntil   DateTime? @db.Date
+  attachmentId String?
+  attachment   Attachment? @relation(fields: [attachmentId], references: [id])
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([userId])
+  @@map("trainings")
+}
+
+// Task/aircraft-type authorizations distinct from the base license
+model StaffAuthorization {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  scope       String   // e.g. "B737-8 Line Maintenance", "A320 Engine Run"
+  grantedDate DateTime @db.Date
+  expiryDate  DateTime? @db.Date
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([userId])
+  @@map("staff_authorizations")
+}
+
+// ─── Tool control & calibration ──────────────────────────────────────────────
+
+model Tool {
+  id              String   @id @default(uuid())
+  stationId       String
+  station         Station  @relation(fields: [stationId], references: [id])
+  toolNo          String
+  description     String
+  calibrationDue  DateTime? @db.Date
+  status          ToolCalibrationStatus @default(VALID)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  issues          ToolIssue[]
+  calibrationLogs ToolCalibrationLog[]
+
+  @@unique([stationId, toolNo])
+  @@map("tools")
+}
+
+model ToolCalibrationLog {
+  id           String   @id @default(uuid())
+  toolId       String
+  tool         Tool     @relation(fields: [toolId], references: [id])
+  calibratedOn DateTime @db.Date
+  nextDue      DateTime @db.Date
+  certificateNo String?
+  attachmentId String?
+  attachment   Attachment? @relation(fields: [attachmentId], references: [id])
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@map("tool_calibration_logs")
+}
+
+model ToolIssue {
+  id          String   @id @default(uuid())
+  toolId      String
+  tool        Tool     @relation(fields: [toolId], references: [id])
+  issuedToId  String
+  issuedTo    User     @relation("ToolIssuedTo", fields: [issuedToId], references: [id])
+  issuedAt    DateTime @default(now())
+  returnedAt  DateTime?
+  workOrderRef String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([toolId])
+  @@index([issuedToId])
+  @@map("tool_issues")
+}
+
+// ─── Stores / inventory ──────────────────────────────────────────────────────
+
+model StoreItem {
+  id            String   @id @default(uuid())
+  stationId     String
+  station       Station  @relation(fields: [stationId], references: [id])
+  partNo        String
+  description   String
+  quantityOnHand Int     @default(0)
+  minStockLevel Int      @default(0)
+  unit          String   @default("EA")
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  movements     StoreMovement[]
+
+  @@unique([stationId, partNo])
+  @@map("store_items")
+}
+
+model StoreMovement {
+  id          String   @id @default(uuid())
+  storeItemId String
+  storeItem   StoreItem @relation(fields: [storeItemId], references: [id])
+  direction   String   // IN | OUT
+  quantity    Int
+  reference   String?  // work order / GRN / issue slip number
+  note        String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([storeItemId])
+  @@map("store_movements")
+}
+
+// ─── Quality: audit findings & CAPA ──────────────────────────────────────────
+
+model AuditFinding {
+  id           String   @id @default(uuid())
+  stationId    String
+  station      Station  @relation(fields: [stationId], references: [id])
+  raisedById   String
+  raisedBy     User     @relation("FindingRaisedBy", fields: [raisedById], references: [id])
+  auditRef     String?
+  category     String   // e.g. "Documentation", "Tooling", "Human Factors"
+  severity     String   // minor | major | critical
+  description  String
+  dueDate      DateTime? @db.Date
+  status       CapaStatus @default(OPEN)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  capas        Capa[]
+
+  @@index([stationId])
+  @@map("audit_findings")
+}
+
+model Capa {
+  id            String   @id @default(uuid())
+  findingId     String
+  finding       AuditFinding @relation(fields: [findingId], references: [id])
+  ownerId       String
+  owner         User     @relation("CapaOwner", fields: [ownerId], references: [id])
+  correctiveAction String
+  rootCause     String?
+  preventiveAction String?
+  targetDate    DateTime @db.Date
+  closedDate    DateTime? @db.Date
+  status        CapaStatus @default(OPEN)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  @@index([findingId])
+  @@map("capas")
+}
+
+// ─── Notifications, attachments, audit trail, activity log ──────────────────
+
+model Notification {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  channel     NotificationChannel
+  kind        String   // daily_reminder | change_alert | leave_approval | password_reset | roster_published | audit_due
+  subject     String?
+  body        String
+  status      NotificationStatus @default(PENDING)
+  error       String?
+  sentAt      DateTime?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([status])
+  @@map("notifications")
+}
+
+model Attachment {
+  id           String   @id @default(uuid())
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  s3Key        String   // storage key in S3; served via CloudFront
+  checksum     String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  deletedAt   DateTime?
+
+  qualifications Qualification[]
+  licenses       License[]
+  trainings      Training[]
+  toolCalibrationLogs ToolCalibrationLog[]
+
+  @@map("attachments")
+}
+
+// Central change-history table. One row per field change on any entity —
+// this is what satisfies "record old value, new value, who, timestamp, IP,
+// reason" without adding those six columns to all twenty business tables.
+model AuditTrail {
+  id          String   @id @default(uuid())
+  entityType  String   // e.g. "ShiftAssignment", "Leave", "Qualification"
+  entityId    String
+  fieldName   String?  // null when the action is create/delete rather than a field update
+  oldValue    String?
+  newValue    String?
+  action      String   // CREATE | UPDATE | DELETE | RESTORE
+  changedById String?
+  changedByName String? // denormalized snapshot in case the user is later deleted
+  ipAddress   String?
+  reason      String?
+  timestamp   DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([changedById])
+  @@map("audit_trail")
+}
+
+// Lighter-weight "who did what" feed for the activity/dashboard views,
+// distinct from AuditTrail's field-level history.
+model ActivityLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String   // "Roster published", "Staff added", "Leave approved", ...
+  detail     String?
+  ipAddress  String?
+  timestamp  DateTime @default(now())
+
+  @@index([userId])
+  @@index([timestamp])
+  @@map("activity_logs")
+}
