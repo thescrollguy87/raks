@@ -5,7 +5,7 @@ import { useStation } from "../store/StationContext.jsx";
 
 
 export default function DashboardPage() {
-  const { stationId } = useStation();
+  const { stationId, loading: stationLoading } = useStation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -23,6 +23,13 @@ export default function DashboardPage() {
     return () => { cancelled = true; };
   }, [stationId]);
 
+  // Order matters: stationLoading must be checked before `loading` below —
+  // otherwise the render right after StationContext resolves a real
+  // stationId (but before this component's own fetch-effect has re-run
+  // for it) would fall through with a stale `loading === false` from an
+  // earlier "no station yet" pass, and crash destructuring `data` (null).
+  if (stationLoading) return <div className="card">Loading dashboard…</div>;
+  if (!stationId) return <div className="ab info">No station has been set up yet — ask an administrator to add one before the dashboard has anything to show.</div>;
   if (loading) return <div className="card">Loading dashboard…</div>;
   if (error) return <div className="ab" style={{ background: "rgba(229,57,53,.12)", color: "var(--rp-red)" }}>{error}</div>;
 

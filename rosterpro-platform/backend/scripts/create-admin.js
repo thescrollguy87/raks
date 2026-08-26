@@ -1,17 +1,44 @@
-// One-time bootstrap: there's no signup endpoint (by design — see README),
-// so the very first user has to be created directly. Run with:
-//   node scripts/create-admin.js <email> <password> <full name>
-// or, so it's safe to run unattended on every deploy (see render.yaml),
-// set ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME as env vars instead — with
-// neither CLI args nor those env vars set, this exits quietly (0) rather
-// than failing the build, since most deploys shouldn't create/reset an
-// account.
+// First-run bootstrap for a brand new deployment. Two independent parts:
+//
+// 1. Ensures at least one Station exists. There is currently no way to
+//    create a Station through the app itself (no POST /api/stations
+//    endpoint, no frontend form for it) — a database with zero stations
+//    leaves Dashboard/Roster/etc with nothing to scope to, which used to
+//    make those screens spin forever (see DashboardPage.jsx /
+//    RosterPage.jsx — fixed to show a message instead, but there's still
+//    nothing useful to show without at least one real station). Always
+//    runs, and is a no-op the moment any station exists.
+//
+// 2. Creates/updates one SUPER_ADMIN login — there's no signup endpoint
+//    (by design — see README) so the very first user has to be created
+//    directly. Run with:
+//      node scripts/create-admin.js <email> <password> <full name>
+//    or, so it's safe to run unattended on every deploy (see render.yaml),
+//    set ADMIN_EMAIL / ADMIN_PASSWORD / ADMIN_NAME as env vars instead —
+//    with neither CLI args nor those env vars set, this part is skipped
+//    rather than failing the build, since most deploys shouldn't
+//    create/reset an account.
 const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
 
-async function main() {
+async function ensureDefaultStation() {
+  const existing = await prisma.station.findFirst();
+  if (existing) return;
+
+  const airline = await prisma.airline.upsert({
+    where: { icaoCode: "DEFAULT" },
+    update: {},
+    create: { name: "Default Airline", icaoCode: "DEFAULT", iataCode: "DF" },
+  });
+  const station = await prisma.station.create({
+    data: { airlineId: airline.id, iataCode: "AMD", name: "Ahmedabad Line Maintenance" },
+  });
+  console.log(`No stations existed — created a default one: ${station.name} (${station.iataCode}). Rename/replace it once you have real station data.`);
+}
+
+async function ensureAdmin() {
   const [argEmail, argPassword, ...argNameParts] = process.argv.slice(2);
   const email = argEmail || process.env.ADMIN_EMAIL;
   const password = argPassword || process.env.ADMIN_PASSWORD;
@@ -42,6 +69,11 @@ async function main() {
   });
 
   console.log(`SUPER_ADMIN ready: ${user.email}`);
+}
+
+async function main() {
+  await ensureDefaultStation();
+  await ensureAdmin();
 }
 
 main()

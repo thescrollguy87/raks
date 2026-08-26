@@ -26,7 +26,7 @@ function shiftMonth(monthKey, delta) {
 
 export default function RosterPage() {
   const { hasPermission } = useAuth();
-  const { stationId } = useStation();
+  const { stationId, loading: stationLoading } = useStation();
   const [searchParams] = useSearchParams();
   const [monthKey, setMonthKey] = useState(() => searchParams.get("month") || new Date().toISOString().slice(0, 7));
   const [catFilter, setCatFilter] = useState("ALL");
@@ -156,6 +156,12 @@ export default function RosterPage() {
   const byCategory = CATEGORIES.map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
     .filter(g => g.staff.length > 0);
 
+  // Order matters here for the same reason as DashboardPage.jsx: check
+  // stationLoading (still figuring out which station to use) before the
+  // "no station" message, so a real stationId arriving doesn't briefly
+  // read as "none" while this component's own load() hasn't re-run yet.
+  if (stationLoading) return <div className="card">Loading roster…</div>;
+  if (!stationId) return <div className="ab info">No station has been set up yet — ask an administrator to add one before a roster can be built.</div>;
   if (loading) return <div className="card">Loading roster…</div>;
   if (error) return <div className="ab" style={{ background: "rgba(229,57,53,.12)", color: "var(--rp-red)" }}>{error}</div>;
 
