@@ -37,10 +37,10 @@ describe("reportDataService.getRosterReportData", () => {
 
     const report = await reportDataService.getRosterReportData("station-1", "2026-09");
 
-    expect(report.header).toHaveLength(3 + 30);
-    expect(report.rows[0][3]).toBe("M"); // day 1
-    expect(report.rows[0][4]).toBe("O"); // day 2 - no assignment
-    expect(report.rows[0][5]).toBe("N"); // day 3
+    expect(report.header).toHaveLength(4 + 30);
+    expect(report.rows[0][4]).toBe("M"); // day 1
+    expect(report.rows[0][5]).toBe("O"); // day 2 - no assignment
+    expect(report.rows[0][6]).toBe("N"); // day 3
   });
 });
 

@@ -382,7 +382,7 @@ model ShiftAssignment {
   rosterId    String
   roster      Roster   @relation(fields: [rosterId], references: [id])
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   shiftDate   DateTime @db.Date
   shiftDefId  String
   shiftDef    ShiftDefinition @relation(fields: [shiftDefId], references: [id])
@@ -403,14 +403,14 @@ model ShiftAssignment {
 model Leave {
   id          String      @id @default(uuid())
   userId      String
-  user        User        @relation("LeaveOwner", fields: [userId], references: [id])
+  user        User        @relation("LeaveOwner", fields: [userId], references: [id], onDelete: Cascade)
   leaveType   String      // annual, sick, casual, medical, LWP, ...
   fromDate    DateTime    @db.Date
   toDate      DateTime    @db.Date
   reason      String?
   status      LeaveStatus @default(PENDING)
   approvedById String?
-  approvedBy  User?       @relation("LeaveApprover", fields: [approvedById], references: [id])
+  approvedBy  User?       @relation("LeaveApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt  DateTime?
 
   createdById String?
@@ -429,7 +429,7 @@ model Leave {
 model Qualification {
   id           String   @id @default(uuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   qualCode     String   // e.g. "B737 B1", "A320 B2"
   description  String?
   issuedDate   DateTime @db.Date
@@ -453,7 +453,7 @@ model Qualification {
 model License {
   id           String   @id @default(uuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   licenseNo    String   // e.g. DGCA CAR 66 number
   category     String   // B1 / B2 / ICAO Type II etc
   issuingAuthority String @default("DGCA")
@@ -477,7 +477,7 @@ model License {
 model Training {
   id           String   @id @default(uuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id])
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   courseName   String
   provider     String?
   completedDate DateTime @db.Date
@@ -500,7 +500,7 @@ model Training {
 model StaffAuthorization {
   id          String   @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   scope       String   // e.g. "B737-8 Line Maintenance", "A320 Engine Run"
   grantedDate DateTime @db.Date
   expiryDate  DateTime? @db.Date
@@ -561,8 +561,8 @@ model ToolIssue {
   id          String   @id @default(uuid())
   toolId      String
   tool        Tool     @relation(fields: [toolId], references: [id])
-  issuedToId  String
-  issuedTo    User     @relation("ToolIssuedTo", fields: [issuedToId], references: [id])
+  issuedToId  String?
+  issuedTo    User?    @relation("ToolIssuedTo", fields: [issuedToId], references: [id], onDelete: SetNull)
   issuedAt    DateTime @default(now())
   returnedAt  DateTime?
   workOrderRef String?
@@ -675,7 +675,7 @@ model Capa {
 model Notification {
   id          String   @id @default(uuid())
   userId      String
-  user        User     @relation(fields: [userId], references: [id])
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   channel     NotificationChannel
   kind        String   // daily_reminder | change_alert | leave_approval | password_reset | roster_published | audit_due
   subject     String?
@@ -738,7 +738,7 @@ model AuditTrail {
 model ActivityLog {
   id         String   @id @default(uuid())
   userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   action     String   // "Roster published", "Staff added", "Leave approved", ...
   detail     String?
   ipAddress  String?

@@ -91,10 +91,53 @@ function flattenRolesAndPermissions(userWithRoles) {
   return { roles, permissions: [...permissionSet] };
 }
 
+function create(data) {
+  return prisma.user.create({ data, include: userInclude });
+}
+
+function update(id, data) {
+  return prisma.user.update({
+    where: { id },
+    data: { ...data, version: { increment: 1 } },
+    include: userInclude,
+  });
+}
+
+function setActive(id, isActive) {
+  return prisma.user.update({
+    where: { id },
+    data: { isActive, version: { increment: 1 } },
+    include: userInclude,
+  });
+}
+
+// Replaces the user's entire role set — matches the seeded "users:assign_role"
+// permission, which anticipates exactly this (not incremental add/remove).
+function setRoles(userId, roleNames) {
+  return prisma.$transaction(async (tx) => {
+    const roles = await tx.role.findMany({ where: { name: { in: roleNames } } });
+    await tx.userRole.deleteMany({ where: { userId } });
+    await tx.userRole.createMany({ data: roles.map(r => ({ userId, roleId: r.id })) });
+  });
+}
+
+// Real, irreversible delete — distinct from setActive(false), which is the
+// reversible "remove from future scheduling but keep history" action. Only
+// safe because every dependent table that's meaningless without the user
+// (qualifications, licenses, trainings, authorizations, leaves, shift
+// assignments, notifications, roles, refresh tokens) cascades, and tables
+// that represent someone else's/shared history (tool issues, activity log)
+// just detach (SetNull) rather than losing the record itself. See the
+// user_delete_cascades migration for the full mapping.
+function hardDelete(id) {
+  return prisma.user.delete({ where: { id } });
+}
+
 module.exports = {
   findByEmail, findById, updateLoginMeta, updatePasswordHash,
   setPasswordResetToken, findByPasswordResetToken,
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,
   flattenRolesAndPermissions, findContactsByRoleAtStation,
+  create, update, setActive, setRoles, hardDelete,
 };

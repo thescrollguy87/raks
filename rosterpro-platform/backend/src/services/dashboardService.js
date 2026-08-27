@@ -160,7 +160,47 @@ async function staffWorkloadWidget(stationId, monthKey) {
   return { monthKey, staffCount: workload.length, avgDaysOnDuty, overloaded, workload };
 }
 
+// ── 7. Today snapshot ─────────────────────────────────────────────────────
+// Total headcount, who's actually on duty today broken down by category,
+// and whether today specifically has a coverage gap — the "walk up to the
+// dashboard this morning" view, distinct from rosterCoverageWidget's
+// whole-month violation count.
+async function todayWidget(stationId) {
+  const [totalStaff, monthKey] = await Promise.all([
+    rosterRepo.getActiveStaffContacts(stationId).then(s => s.length),
+    Promise.resolve(new Date().toISOString().slice(0, 7)),
+  ]);
+
+  const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const byCategory = { B1: 0, B2: 0, CM: 0, NCS: 0, STO: 0 };
+  let onDutyToday = 0;
+  const gaps = [];
+
+  if (roster) {
+    const staff = await rosterRepo.getRosterGrid(stationId, roster.id);
+    const onDutyByShift = { M: { B1: 0, B2: 0 }, A: { B1: 0, B2: 0 }, N: { B1: 0, B2: 0 } };
+
+    for (const s of staff) {
+      const todayShift = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayStr);
+      if (!todayShift || (todayShift.shiftDef.type !== "duty" && todayShift.shiftDef.type !== "night")) continue;
+      onDutyToday++;
+      if (s.category) byCategory[s.category] = (byCategory[s.category] || 0) + 1;
+      const shiftKey = todayShift.shiftDef.type === "night" ? "N" : todayShift.shiftDef.code;
+      if (onDutyByShift[shiftKey] && s.category === "B1") onDutyByShift[shiftKey].B1++;
+      if (onDutyByShift[shiftKey] && s.category === "B2") onDutyByShift[shiftKey].B2++;
+    }
+
+    for (const [shiftKey, counts] of Object.entries(onDutyByShift)) {
+      if (counts.B1 === 0) gaps.push({ shift: shiftKey, issue: "No B1 AME assigned" });
+      if (shiftKey === "N" && counts.B2 === 0) gaps.push({ shift: shiftKey, issue: "No B2 AME assigned on Night" });
+    }
+  }
+
+  return { date: todayStr, totalStaff, onDutyToday, byCategory, gaps };
+}
+
 module.exports = {
   qualificationExpiryWidget, leaveBalanceWidget, rosterCoverageWidget,
-  flightCoverageWidget, dgcaComplianceWidget, staffWorkloadWidget,
+  flightCoverageWidget, dgcaComplianceWidget, staffWorkloadWidget, todayWidget,
 };

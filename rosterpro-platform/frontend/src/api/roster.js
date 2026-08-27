@@ -20,8 +20,12 @@ export function listArchive(stationId) {
   return api.get("/api/roster/archive", { stationId });
 }
 
-export function generateRoster(stationId, monthKey) {
-  return api.post("/api/roster/generate", { stationId, monthKey });
+export function importRoster(stationId, monthKey, file) {
+  return api.upload("/api/roster/import", { stationId, monthKey }, file);
+}
+
+export function generateRoster(stationId, monthKey, options = {}) {
+  return api.post("/api/roster/generate", { stationId, monthKey, ...options });
 }
 
 export function publishRoster(rosterId) {

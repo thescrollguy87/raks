@@ -14,7 +14,7 @@ const PERMISSIONS = [
   // resource        action
   ["roster", "read"], ["roster", "create"], ["roster", "update"], ["roster", "publish"], ["roster", "unpublish"], ["roster", "delete"],
   ["shift", "read"], ["shift", "update"],
-  ["staff", "read"], ["staff", "create"], ["staff", "update"], ["staff", "deactivate"],
+  ["staff", "read"], ["staff", "create"], ["staff", "update"], ["staff", "deactivate"], ["staff", "delete"],
   ["leave", "read"], ["leave", "request"], ["leave", "approve"],
   ["qualification", "read"], ["qualification", "create"], ["qualification", "update"],
   ["license", "read"], ["license", "create"], ["license", "update"],

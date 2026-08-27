@@ -53,10 +53,10 @@ function getRosterGrid(stationId, rosterId) {
     where: { stationId, isActive: true, deletedAt: null },
     orderBy: { fullName: "asc" },
     select: {
-      id: true, fullName: true, category: true, designation: true,
+      id: true, fullName: true, category: true, designation: true, employeeId: true, email: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
-        select: { shiftDate: true, shiftDefId: true, shiftDef: { select: { code: true, name: true, color: true, type: true } }, note: true },
+        select: { shiftDate: true, shiftDefId: true, shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } }, note: true },
       },
     },
   });
@@ -79,7 +79,7 @@ function getActiveStaffContacts(stationId) {
 function getActiveStaffForGeneration(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    select: { id: true, fullName: true, category: true },
+    select: { id: true, fullName: true, category: true, employeeId: true },
     orderBy: { fullName: "asc" },
   });
 }

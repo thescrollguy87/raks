@@ -1,6 +1,8 @@
 const rosterService = require("../services/rosterService");
 const rosterGenerationService = require("../services/rosterGenerationService");
+const rosterImportService = require("../services/rosterImportService");
 const asyncHandler = require("../utils/asyncHandler");
+const ApiError = require("../utils/ApiError");
 
 const getGrid = asyncHandler(async (req, res) => {
   const { stationId, monthKey } = req.query;
@@ -36,7 +38,8 @@ const shiftDefinitions = asyncHandler(async (req, res) => {
 });
 
 const generate = asyncHandler(async (req, res) => {
-  const result = await rosterGenerationService.generateRoster(req.body.stationId, req.body.monthKey, req.user, req);
+  const { stationId, monthKey, preview, continueFromPrevious } = req.body;
+  const result = await rosterGenerationService.generateRoster(stationId, monthKey, req.user, req, { preview, continueFromPrevious });
   res.json(result);
 });
 
@@ -45,4 +48,11 @@ const archive = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive };
+const importRoster = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest("No file uploaded");
+  const { stationId, monthKey } = req.query;
+  const result = await rosterImportService.importRoster(stationId, monthKey, req.file.buffer, req.user, req);
+  res.json(result);
+});
+
+module.exports = { getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster };

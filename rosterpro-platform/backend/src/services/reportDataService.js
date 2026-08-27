@@ -27,14 +27,17 @@ async function getRosterReportData(stationId, monthKey) {
   const nDays = daysInMonth(monthKey);
   const dayLabels = Array.from({ length: nDays }, (_, i) => dateLabel(monthKey, i + 1));
 
-  const header = ["Name", "Category", "Designation", ...dayLabels];
+  // Employee ID leads the row so a re-import (see rosterImportService) can
+  // match staff reliably even if two people share a similar name — name
+  // alone is the fallback, not the primary key.
+  const header = ["Employee ID", "Name", "Category", "Designation", ...dayLabels];
   const rows = staff.map(s => {
     const byDate = {};
     for (const sa of s.shiftAssignments) {
       const key = new Date(sa.shiftDate).toISOString().slice(0, 10);
       byDate[key] = sa.shiftDef.code;
     }
-    return [s.fullName, s.category || "", s.designation || "", ...dayLabels.map(d => byDate[d] || "O")];
+    return [s.employeeId || "", s.fullName, s.category || "", s.designation || "", ...dayLabels.map(d => byDate[d] || "O")];
   });
 
   return { header, rows, meta: { stationId, monthKey, isPublished: roster.isPublished, staffCount: staff.length } };

@@ -1,5 +1,6 @@
 const asyncHandler = require("../utils/asyncHandler");
 const userListRepo = require("../repositories/userListRepository");
+const userService = require("../services/userService");
 
 // This endpoint is the reference implementation for how every Module 4
 // domain list endpoint should look: requireAuth + requirePermission in the
@@ -23,4 +24,34 @@ const list = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { list };
+const create = asyncHandler(async (req, res) => {
+  const result = await userService.createStaff(req.body, req.user, req);
+  res.status(201).json(result);
+});
+
+const update = asyncHandler(async (req, res) => {
+  const result = await userService.updateStaff(req.params.id, req.body, req.user, req);
+  res.json(result);
+});
+
+const deactivate = asyncHandler(async (req, res) => {
+  const result = await userService.setActive(req.params.id, false, req.user, req);
+  res.json(result);
+});
+
+const reactivate = asyncHandler(async (req, res) => {
+  const result = await userService.setActive(req.params.id, true, req.user, req);
+  res.json(result);
+});
+
+const assignRoles = asyncHandler(async (req, res) => {
+  const result = await userService.assignRoles(req.params.id, req.body.roles, req.user, req);
+  res.json(result);
+});
+
+const remove = asyncHandler(async (req, res) => {
+  const result = await userService.deleteStaff(req.params.id, req.user, req);
+  res.json(result);
+});
+
+module.exports = { list, create, update, deactivate, reactivate, assignRoles, remove };

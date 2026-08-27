@@ -39,6 +39,8 @@ const rosterQuerySchema = z.object({
 const generateRosterSchema = z.object({
   stationId: z.string().uuid(),
   monthKey: monthKey,
+  preview: z.boolean().optional(),
+  continueFromPrevious: z.boolean().optional(),
 });
 
 module.exports = {

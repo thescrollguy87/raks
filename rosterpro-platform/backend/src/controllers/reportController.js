@@ -1,4 +1,5 @@
 const reportService = require("../services/reportService");
+const baRosterService = require("../services/baRosterService");
 const asyncHandler = require("../utils/asyncHandler");
 
 const download = asyncHandler(async (req, res) => {
@@ -16,4 +17,12 @@ const emailReport = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { download, emailReport };
+const downloadBARoster = asyncHandler(async (req, res) => {
+  const { stationId, date } = req.query;
+  const { buffer, filename } = await baRosterService.generateBARosterExcel(stationId, date);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(buffer);
+});
+
+module.exports = { download, emailReport, downloadBARoster };

@@ -14,5 +14,6 @@ router.get("/:stationId/roster-coverage", ctrl.rosterCoverage);
 router.get("/:stationId/flight-coverage", ctrl.flightCoverage);
 router.get("/:stationId/dgca-compliance", ctrl.dgcaCompliance);
 router.get("/:stationId/staff-workload", ctrl.staffWorkload);
+router.get("/:stationId/today", ctrl.today);
 
 module.exports = router;

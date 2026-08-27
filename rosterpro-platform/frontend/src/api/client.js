@@ -114,6 +114,29 @@ export const api = {
   post: (path, body) => request(path, { method: "POST", body }),
   patch: (path, body, query) => request(path, { method: "PATCH", body, query }),
   delete: (path, query) => request(path, { method: "DELETE", query }),
+  // Multipart file upload (roster import) — separate from the JSON-only
+  // path above since FormData must NOT get a manually-set Content-Type
+  // (the browser sets its own boundary) or JSON.stringify'd.
+  async upload(path, query, file) {
+    const url = query ? `${path}?${new URLSearchParams(cleanQuery(query))}` : path;
+    const formData = new FormData();
+    formData.append("file", file);
+    const doFetch = (token) => fetch(url, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    let res = await doFetch(getAccessToken());
+    if (res.status === 401 && getRefreshToken()) {
+      const newToken = await refreshAccessToken().catch(() => null);
+      if (!newToken) { clearSession(); window.location.href = "/login"; throw new ApiError(401, "Session expired"); }
+      res = await doFetch(newToken);
+    }
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await res.json().catch(() => null) : null;
+    if (!res.ok) throw new ApiError(res.status, data?.error || res.statusText, data?.details);
+    return data;
+  },
   // For file downloads (reports) — returns the Blob and the filename
   // parsed out of the Content-Disposition header the backend sets.
   async download(path, query) {

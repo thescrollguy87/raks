@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { getDashboardSummary } from "../api/dashboard.js";
+import { listActivity } from "../api/audit.js";
 import { useStation } from "../store/StationContext.jsx";
-
 
 export default function DashboardPage() {
   const { stationId, loading: stationLoading } = useStation();
   const [data, setData] = useState(null);
+  const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -16,8 +17,11 @@ export default function DashboardPage() {
     if (!stationId) return;
     let cancelled = false;
     setLoading(true);
-    getDashboardSummary(stationId)
-      .then(d => { if (!cancelled) setData(d); })
+    Promise.all([
+      getDashboardSummary(stationId),
+      listActivity({ pageSize: 8 }).catch(() => ({ items: [] })), // recent-changes feed is a nice-to-have; don't block the dashboard on it
+    ])
+      .then(([d, a]) => { if (!cancelled) { setData(d); setActivity(a.items || a); } })
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -33,10 +37,49 @@ export default function DashboardPage() {
   if (loading) return <div className="card">Loading dashboard…</div>;
   if (error) return <div className="ab" style={{ background: "rgba(229,57,53,.12)", color: "var(--rp-red)" }}>{error}</div>;
 
-  const { qualificationExpiry, leaveBalance, dgcaCompliance, flightCoverage, rosterCoverage, staffWorkload } = data;
+  const { qualificationExpiry, leaveBalance, dgcaCompliance, flightCoverage, rosterCoverage, staffWorkload, today } = data;
+  const alerts = rosterCoverage?.violations || [];
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
+      <Widget title="👥 Staff">
+        <StatRow label="Total Active Staff" value={dgcaCompliance.totalActiveStaff} />
+        <StatRow label="On Duty Today" value={today.onDutyToday} />
+      </Widget>
+
+      <Widget title="📊 Today's Coverage by Category">
+        {Object.entries(today.byCategory).some(([, n]) => n > 0) ? (
+          Object.entries(today.byCategory).map(([cat, n]) => (
+            <StatRow key={cat} label={cat} value={n} />
+          ))
+        ) : <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No one on duty today.</div>}
+        {today.gaps.length > 0 && (
+          <div style={{ marginTop: 4 }}>
+            {today.gaps.map((g, i) => (
+              <div key={i} className="ab" style={{ background: "rgba(229,57,53,.12)", color: "var(--rp-red)", fontSize: 10, padding: "4px 8px" }}>
+                ⚠ {g.shift}: {g.issue}
+              </div>
+            ))}
+          </div>
+        )}
+      </Widget>
+
+      <Widget title="🚨 Compliance Alerts">
+        {alerts.length === 0 ? (
+          <div style={{ fontSize: 11, color: "var(--rp-green)" }}>✅ No coverage gaps this month.</div>
+        ) : (
+          <>
+            <StatRow label="Coverage Gaps (this month)" value={alerts.length} tone="red" />
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, marginTop: 4 }}>
+              {alerts.slice(0, 5).map((a, i) => (
+                <div key={i} style={{ fontSize: 10, color: "var(--text-dim)" }}>{a.date} · {a.shift} — {a.issue}</div>
+              ))}
+              {alerts.length > 5 && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>+{alerts.length - 5} more</div>}
+            </div>
+          </>
+        )}
+      </Widget>
+
       <Widget title="🎓 Qualification Expiry">
         <StatRow label="Expired" value={qualificationExpiry.qualifications.expired + qualificationExpiry.licenses.expired} tone="red" />
         <StatRow label="Expiring (30 days)" value={qualificationExpiry.qualifications.expiring + qualificationExpiry.licenses.expiring} tone="amber" />
@@ -75,13 +118,34 @@ export default function DashboardPage() {
           </>
         ) : <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No roster generated yet this month.</div>}
       </Widget>
+
+      <Widget title="🕐 Recent Changes" wide>
+        {!activity || activity.length === 0 ? (
+          <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No recent activity.</div>
+        ) : (
+          <div className="timeline">
+            {activity.map(a => (
+              <div className="tl-item" key={a.id}>
+                <div className="tl-dot change" />
+                <div className="tl-content">
+                  <div className="tl-hdr">
+                    <span className="tl-user">{a.action}</span>
+                    <span className="tl-ts">{new Date(a.timestamp).toLocaleString()}</span>
+                  </div>
+                  {a.detail && <div className="tl-action">{a.detail}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Widget>
     </div>
   );
 }
 
-function Widget({ title, children }) {
+function Widget({ title, children, wide }) {
   return (
-    <div className="card">
+    <div className="card" style={wide ? { gridColumn: "1 / -1" } : undefined}>
       <div className="card-title">{title}</div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>{children}</div>
     </div>

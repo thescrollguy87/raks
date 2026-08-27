@@ -25,4 +25,9 @@ const emailReportSchema = z.object({
   toEmail: z.string().email(),
 });
 
-module.exports = { reportQuerySchema, emailReportSchema };
+const baRosterQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected date as YYYY-MM-DD"),
+});
+
+module.exports = { reportQuerySchema, emailReportSchema, baRosterQuerySchema };

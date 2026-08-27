@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
@@ -38,6 +38,8 @@ export default function RosterPage() {
   const [editingCell, setEditingCell] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef(null);
 
   const canEdit = hasPermission("shift", "update");
   const canPublish = hasPermission("roster", "publish");
@@ -81,6 +83,27 @@ export default function RosterPage() {
     }
   }
 
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same filename later
+    if (!file) return;
+    if (!confirm(`Import "${file.name}" into ${monthKey}? This will overwrite existing shifts for every matched staff member in this month.`)) return;
+    setImporting(true);
+    try {
+      const result = await rosterApi.importRoster(stationId, monthKey, file);
+      let msg = `Imported: ${result.staffUpdated} staff updated, ${result.assignmentCount} shifts.`;
+      if (result.notFound.length) msg += `\n\n${result.notFound.length} name(s) in the file don't match any staff at this station (add them via Staff Registry first): ${result.notFound.slice(0, 5).join(", ")}${result.notFound.length > 5 ? "…" : ""}`;
+      if (result.invalidCodes.length) msg += `\n\nUnrecognized shift code(s), skipped: ${result.invalidCodes.join(", ")}`;
+      if (result.duplicates.length) msg += `\n\n${result.duplicates.length} duplicate row(s) in the file — only the last occurrence of each was used.`;
+      alert(msg);
+      await load();
+    } catch (err) {
+      alert(`Import failed: ${err.message}`);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   // actions is memoized because usePageHeader syncs it into context state on
   // every change — a fresh JSX element here on every render (this component
   // re-renders whenever the header context updates, since it subscribes to
@@ -88,6 +111,14 @@ export default function RosterPage() {
   // the block below, or the handlers it calls, close over.
   const headerActions = useMemo(() => (
     <>
+      {canEdit && roster && !roster.isPublished && (
+        <>
+          <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleImportFile} />
+          <button className="btn btn-ghost" disabled={importing} onClick={() => importInputRef.current?.click()}>
+            {importing ? "Importing…" : "⬆ Import Excel"}
+          </button>
+        </>
+      )}
       {canGenerate && roster && !roster.isPublished && (
         <button className="btn btn-ghost" disabled={generating} onClick={handleGenerate}>
           {generating ? "Generating…" : "🤖 Generate"}
@@ -101,7 +132,7 @@ export default function RosterPage() {
       )}
     </>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [canGenerate, canPublish, canUnpublish, roster, generating, monthKey, stationId]);
+  ), [canEdit, canGenerate, canPublish, canUnpublish, roster, generating, importing, monthKey, stationId]);
 
   usePageHeader({
     title: "Shift Roster",

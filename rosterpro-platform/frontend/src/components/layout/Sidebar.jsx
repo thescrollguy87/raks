@@ -11,6 +11,7 @@ const NAV_SECTIONS = [
   { label: "Main", items: [
     { to: "/", icon: "📊", label: "Dashboard" },
     { to: "/roster", icon: "📅", label: "Shift Roster" },
+    { to: "/auto-roster", icon: "🤖", label: "Auto-Roster Generator", permission: ["roster", "update"] },
     { to: "/coverage", icon: "📈", label: "Daily Coverage", permission: ["roster", "read"] },
     { to: "/leave", icon: "🏖", label: "Leave & Absence", permission: ["leave", "read"] },
   ]},

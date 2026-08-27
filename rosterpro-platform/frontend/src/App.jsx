@@ -4,6 +4,7 @@ import AppLayout from "./components/layout/AppLayout.jsx";
 import LoginPage from "./pages/LoginPage.jsx";
 import DashboardPage from "./pages/DashboardPage.jsx";
 import RosterPage from "./pages/RosterPage.jsx";
+import AutoRosterPage from "./pages/AutoRosterPage.jsx";
 import StaffPage from "./pages/StaffPage.jsx";
 import LeavePage from "./pages/LeavePage.jsx";
 import QualificationsPage from "./pages/QualificationsPage.jsx";
@@ -23,6 +24,10 @@ export default function App() {
       <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/roster" element={<RosterPage />} />
+        <Route
+          path="/auto-roster"
+          element={<ProtectedRoute permission={["roster", "update"]}><AutoRosterPage /></ProtectedRoute>}
+        />
         <Route path="/leave" element={<LeavePage />} />
         <Route path="/compliance-rules" element={<ComplianceRulesPage />} />
         <Route

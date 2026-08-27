@@ -22,18 +22,23 @@
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 
-function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds }) {
+// rotationOffsetByUser lets a caller continue each staff member's rotation
+// from a previous month instead of restarting everyone at phase 0 (see
+// rosterGenerationService's "continue from previous roster" option) —
+// defaults to each staff's index in the list, same as before this existed.
+function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, rotationOffsetByUser }) {
   const blocked = new Set(blockedUserIds || []);
   const grid = {}; // userId -> array of nDays codes (1-indexed access via day-1)
 
   // Step 1 + 2 + 3: base rotation, blocked staff, leave overrides.
   staff.forEach((s, idx) => {
+    const offset = rotationOffsetByUser?.[s.id] ?? idx;
     const codes = new Array(nDays);
     for (let day = 1; day <= nDays; day++) {
       if (blocked.has(s.id)) { codes[day - 1] = "O"; continue; }
       const onLeave = leaveByUserDay?.[s.id]?.has(day);
       if (onLeave) { codes[day - 1] = "L"; continue; }
-      codes[day - 1] = ROTATION[(day - 1 + idx) % ROTATION.length];
+      codes[day - 1] = ROTATION[(day - 1 + offset) % ROTATION.length];
     }
     grid[s.id] = codes;
   });

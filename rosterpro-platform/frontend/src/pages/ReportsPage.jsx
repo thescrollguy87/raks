@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
-import { downloadReport, emailReport } from "../api/reports.js";
+import { downloadReport, emailReport, downloadBARoster } from "../api/reports.js";
 import { useStation } from "../store/StationContext.jsx";
 
 const REPORT_TYPES = [
@@ -23,6 +23,9 @@ export default function ReportsPage() {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
+  const [baDate, setBaDate] = useState(new Date().toISOString().slice(0, 10));
+  const [baBusy, setBaBusy] = useState(false);
+  const [baMessage, setBaMessage] = useState(null);
 
   usePageHeader({ title: "Reports", subtitle: "Excel, PDF & CSV export" });
 
@@ -56,8 +59,39 @@ export default function ReportsPage() {
     }
   }
 
+  async function handleBARoster() {
+    setBaBusy(true);
+    setBaMessage(null);
+    try {
+      await downloadBARoster(stationId, baDate);
+      setBaMessage({ tone: "green", text: "BA Roster exported." });
+    } catch (err) {
+      setBaMessage({ tone: "red", text: err.message });
+    } finally {
+      setBaBusy(false);
+    }
+  }
+
   return (
-    <div className="card" style={{ maxWidth: 480 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
+    <div className="card">
+      <div className="card-title">🫁 Daily BA (Breath Analyser) Roster Export</div>
+      <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
+        Pick a date to export the on-duty staff list in the exact format required for the BA test portal upload.
+      </div>
+      <div className="fg" style={{ marginBottom: 12 }}>
+        <label className="fl">Date</label>
+        <input className="fi" type="date" value={baDate} onChange={(e) => setBaDate(e.target.value)} />
+      </div>
+      {baMessage && (
+        <div className="ab" style={{ background: baMessage.tone === "green" ? "rgba(0,200,83,.1)" : "rgba(229,57,53,.12)", color: baMessage.tone === "green" ? "var(--rp-green)" : "var(--rp-red)", marginBottom: 12 }}>
+          {baMessage.text}
+        </div>
+      )}
+      <button className="btn btn-primary" disabled={baBusy} onClick={handleBARoster}>⬇ Export BA Roster</button>
+    </div>
+
+    <div className="card">
       <div className="card-title">Generate a Report</div>
 
       <div className="fg" style={{ margin: "12px 0" }}>
@@ -104,6 +138,7 @@ export default function ReportsPage() {
         </div>
         <button className="btn btn-ghost" disabled={busy} onClick={handleEmail}>✉ Email Report</button>
       </div>
+    </div>
     </div>
   );
 }
