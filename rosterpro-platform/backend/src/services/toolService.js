@@ -12,7 +12,7 @@ async function createTool(body, actor, req) {
     createdById: actor.sub, updatedById: actor.sub,
   };
   const tool = await repo.create(data);
-  await auditTrail.recordCreate("Tool", tool.id, actor, req);
+  await auditTrail.recordCreate("Tool", tool.id, tool.stationId, actor, req);
   return tool;
 }
 
@@ -32,7 +32,7 @@ async function recordCalibration(toolId, body, actor, req) {
   const updated = await repo.updateStatus(toolId, "VALID", nextDue);
 
   await auditTrail.recordUpdate(
-    "Tool", toolId,
+    "Tool", toolId, tool.stationId,
     { status: tool.status, calibrationDue: tool.calibrationDue?.toISOString() },
     { status: "VALID", calibrationDue: nextDue.toISOString() },
     actor, req, `Calibrated ${body.calibratedOn}, next due ${body.nextDue}`
@@ -55,7 +55,7 @@ async function issueTool(toolId, body, actor, req) {
     toolId, issuedToId: body.issuedToId, workOrderRef: body.workOrderRef || null,
     createdById: actor.sub, updatedById: actor.sub,
   });
-  await auditTrail.logActivity("Tool issued", `${tool.toolNo} → ${body.issuedToId}`, actor, req);
+  await auditTrail.logActivity("Tool issued", `${tool.toolNo} → ${body.issuedToId}`, tool.stationId, actor, req);
   return issue;
 }
 
@@ -66,7 +66,7 @@ async function returnTool(issueId, actor, req) {
   if (issue.returnedAt) throw ApiError.conflict("This tool issue is already marked returned");
 
   const updated = await repo.returnIssue(issueId, actor.sub);
-  await auditTrail.logActivity("Tool returned", issue.toolId, actor, req);
+  await auditTrail.logActivity("Tool returned", issue.toolId, issue.tool.stationId, actor, req);
   return updated;
 }
 

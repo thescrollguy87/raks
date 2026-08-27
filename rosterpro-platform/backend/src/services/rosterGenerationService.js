@@ -131,7 +131,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   await auditTrail.logActivity(
     "Roster generated",
     `${stationId} — ${monthKey}: ${staff.length} staff, ${blockedUserIds.length} blocked, ${violations.length} coverage gaps`,
-    actor, req
+    stationId, actor, req
   );
 
   return {

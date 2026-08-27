@@ -11,7 +11,7 @@ async function createFlight(body, actor, req) {
     scheduledOut: body.scheduledOut ? new Date(body.scheduledOut) : null,
     createdById: actor.sub, updatedById: actor.sub,
   });
-  await auditTrail.recordCreate("Flight", flight.id, actor, req);
+  await auditTrail.recordCreate("Flight", flight.id, flight.stationId, actor, req);
   return flight;
 }
 
@@ -27,7 +27,7 @@ async function updateFlightStatus(id, body, actor, req) {
     updatedById: actor.sub,
   };
   const updated = await repo.updateFlightStatus(id, data);
-  await auditTrail.recordUpdate("Flight", id, { status: existing.status }, { status: body.status }, actor, req);
+  await auditTrail.recordUpdate("Flight", id, existing.stationId, { status: existing.status }, { status: body.status }, actor, req);
   return updated;
 }
 
@@ -42,9 +42,9 @@ async function recordDelay(body, actor, req) {
     rectification: body.rectification || null,
     createdById: actor.sub, updatedById: actor.sub,
   });
-  await auditTrail.recordCreate("EngineeringDelay", delay.id, actor, req);
+  await auditTrail.recordCreate("EngineeringDelay", delay.id, flight.stationId, actor, req);
   await auditTrail.logActivity(
-    "Engineering delay logged", `${flight.flightNumber}: ${body.delayCode} (${body.minutes}min)`, actor, req
+    "Engineering delay logged", `${flight.flightNumber}: ${body.delayCode} (${body.minutes}min)`, flight.stationId, actor, req
   );
   return delay;
 }

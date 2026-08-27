@@ -12,6 +12,7 @@ async function assertActorSharesStationWith(actor, userId) {
   const target = await userRepo.findStationId(userId);
   if (!target) throw ApiError.notFound("Staff member not found");
   assertOwnStation(actor, target.stationId);
+  return target.stationId;
 }
 
 const EXPIRING_WINDOW_DAYS = 30;
@@ -34,7 +35,7 @@ function toDate(iso) { return iso ? new Date(iso + "T00:00:00.000Z") : null; }
 // ── Qualifications ───────────────────────────────────────────────────────────
 
 async function createQualification(body, actor, req) {
-  await assertActorSharesStationWith(actor, body.userId);
+  const stationId = await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, qualCode: body.qualCode, description: body.description || null,
     issuedDate: toDate(body.issuedDate), expiryDate: toDate(body.expiryDate),
@@ -43,14 +44,14 @@ async function createQualification(body, actor, req) {
     createdById: actor.sub, updatedById: actor.sub,
   };
   const record = await repo.qualification.create(data);
-  await auditTrail.recordCreate("Qualification", record.id, actor, req);
+  await auditTrail.recordCreate("Qualification", record.id, stationId, actor, req);
   return record;
 }
 
 async function updateQualification(id, body, actor, req) {
   const existing = await repo.qualification.findById(id);
   if (!existing) throw ApiError.notFound("Qualification not found");
-  await assertActorSharesStationWith(actor, existing.userId);
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
 
   const newExpiry = body.expiryDate ? toDate(body.expiryDate) : existing.expiryDate;
   const data = {
@@ -63,7 +64,7 @@ async function updateQualification(id, body, actor, req) {
   };
   const updated = await repo.qualification.update(id, data);
   await auditTrail.recordUpdate(
-    "Qualification", id,
+    "Qualification", id, stationId,
     { qualCode: existing.qualCode, expiryDate: existing.expiryDate?.toISOString() },
     { qualCode: updated.qualCode, expiryDate: updated.expiryDate?.toISOString() },
     actor, req
@@ -74,9 +75,9 @@ async function updateQualification(id, body, actor, req) {
 async function deleteQualification(id, actor, req, reason) {
   const existing = await repo.qualification.findById(id);
   if (!existing) throw ApiError.notFound("Qualification not found");
-  await assertActorSharesStationWith(actor, existing.userId);
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
   await repo.qualification.softDelete(id, actor.sub);
-  await auditTrail.recordDelete("Qualification", id, actor, req, reason);
+  await auditTrail.recordDelete("Qualification", id, stationId, actor, req, reason);
 }
 
 function listQualificationsForUser(userId) {
@@ -96,7 +97,7 @@ function listExpiringQualifications(days = EXPIRING_WINDOW_DAYS) {
 // ── Licenses ──────────────────────────────────────────────────────────────
 
 async function createLicense(body, actor, req) {
-  await assertActorSharesStationWith(actor, body.userId);
+  const stationId = await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, licenseNo: body.licenseNo, category: body.category,
     issuingAuthority: body.issuingAuthority || "DGCA",
@@ -105,14 +106,14 @@ async function createLicense(body, actor, req) {
     createdById: actor.sub, updatedById: actor.sub,
   };
   const record = await repo.license.create(data);
-  await auditTrail.recordCreate("License", record.id, actor, req);
+  await auditTrail.recordCreate("License", record.id, stationId, actor, req);
   return record;
 }
 
 async function updateLicense(id, body, actor, req) {
   const existing = await repo.license.findById(id);
   if (!existing) throw ApiError.notFound("License not found");
-  await assertActorSharesStationWith(actor, existing.userId);
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
   const data = {
     licenseNo: body.licenseNo ?? existing.licenseNo,
     category: body.category ?? existing.category,
@@ -123,7 +124,7 @@ async function updateLicense(id, body, actor, req) {
   };
   const updated = await repo.license.update(id, data);
   await auditTrail.recordUpdate(
-    "License", id,
+    "License", id, stationId,
     { licenseNo: existing.licenseNo, expiryDate: existing.expiryDate?.toISOString() },
     { licenseNo: updated.licenseNo, expiryDate: updated.expiryDate?.toISOString() },
     actor, req
@@ -143,7 +144,7 @@ function listExpiringLicenses(days = EXPIRING_WINDOW_DAYS) {
 // ── Training ──────────────────────────────────────────────────────────────
 
 async function createTraining(body, actor, req) {
-  await assertActorSharesStationWith(actor, body.userId);
+  const stationId = await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, courseName: body.courseName, provider: body.provider || null,
     completedDate: toDate(body.completedDate), validUntil: toDate(body.validUntil),
@@ -151,7 +152,7 @@ async function createTraining(body, actor, req) {
     createdById: actor.sub, updatedById: actor.sub,
   };
   const record = await repo.training.create(data);
-  await auditTrail.recordCreate("Training", record.id, actor, req);
+  await auditTrail.recordCreate("Training", record.id, stationId, actor, req);
   return record;
 }
 
@@ -163,14 +164,14 @@ function listTrainingForUser(userId) {
 // ── Authorizations ───────────────────────────────────────────────────────────
 
 async function createAuthorization(body, actor, req) {
-  await assertActorSharesStationWith(actor, body.userId);
+  const stationId = await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, scope: body.scope,
     grantedDate: toDate(body.grantedDate), expiryDate: toDate(body.expiryDate),
     createdById: actor.sub, updatedById: actor.sub,
   };
   const record = await repo.authorization.create(data);
-  await auditTrail.recordCreate("StaffAuthorization", record.id, actor, req);
+  await auditTrail.recordCreate("StaffAuthorization", record.id, stationId, actor, req);
   return record;
 }
 

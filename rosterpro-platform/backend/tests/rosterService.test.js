@@ -75,7 +75,7 @@ describe("rosterService.upsertShift", () => {
 
     expect(result.changed).toBe(true);
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
-      "ShiftAssignment", "sa-1",
+      "ShiftAssignment", "sa-1", "station-1",
       { shiftDefId: "def-OLD" }, { shiftDefId: "def-M" },
       actor, expect.any(Object), undefined
     );
@@ -131,7 +131,7 @@ describe("rosterService.publishRoster", () => {
     await rosterService.publishRoster("roster-1", actor, {});
 
     expect(auditTrail.recordUpdate).toHaveBeenCalled();
-    expect(auditTrail.logActivity).toHaveBeenCalledWith("Roster published", expect.any(String), actor, {});
+    expect(auditTrail.logActivity).toHaveBeenCalledWith("Roster published", expect.any(String), "station-1", actor, {});
   });
 
   it("fans the publish notification out to every active station staff member", async () => {
@@ -172,7 +172,7 @@ describe("rosterService.unpublishRoster", () => {
 
     expect(result.isPublished).toBe(false);
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
-      "Roster", "roster-1", { isPublished: true }, { isPublished: false }, actor, {}, "Staff went on emergency leave"
+      "Roster", "roster-1", "station-1", { isPublished: true }, { isPublished: false }, actor, {}, "Staff went on emergency leave"
     );
   });
 });

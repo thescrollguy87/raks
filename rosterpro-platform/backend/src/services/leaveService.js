@@ -17,10 +17,12 @@ function daysBetweenInclusive(from, to) {
 
 async function requestLeave(body, actor, req) {
   const targetUserId = body.userId || actor.sub;
+  let targetStationId = actor.stationId;
   if (targetUserId !== actor.sub) {
     const target = await userRepo.findStationId(targetUserId);
     if (!target) throw ApiError.notFound("Staff member not found");
     assertOwnStation(actor, target.stationId);
+    targetStationId = target.stationId;
   }
   const fromDate = toDateOnly(body.fromDate);
   const toDate = toDateOnly(body.toDate);
@@ -32,8 +34,8 @@ async function requestLeave(body, actor, req) {
     userId: targetUserId, leaveType: body.leaveType, fromDate, toDate,
     reason: body.reason, actorId: actor.sub,
   });
-  await auditTrail.recordCreate("Leave", leave.id, actor, req);
-  await auditTrail.logActivity("Leave requested", `${body.leaveType} ${body.fromDate}→${body.toDate}`, actor, req);
+  await auditTrail.recordCreate("Leave", leave.id, targetStationId, actor, req);
+  await auditTrail.logActivity("Leave requested", `${body.leaveType} ${body.fromDate}→${body.toDate}`, targetStationId, actor, req);
   return leave;
 }
 
@@ -45,11 +47,11 @@ async function decideLeave(leaveId, { decision, reason }, actor, req) {
 
   const updated = await leaveRepo.decide(leaveId, decision, actor.sub, actor.sub);
   await auditTrail.recordUpdate(
-    "Leave", leaveId, { status: leave.status }, { status: decision }, actor, req, reason
+    "Leave", leaveId, leave.user.stationId, { status: leave.status }, { status: decision }, actor, req, reason
   );
   await auditTrail.logActivity(
     decision === "APPROVED" ? "Leave approved" : "Leave rejected",
-    `${leave.user.fullName}: ${leave.leaveType}`, actor, req
+    `${leave.user.fullName}: ${leave.leaveType}`, leave.user.stationId, actor, req
   );
 
   notifyLeaveDecisionAsync(leave, decision, reason, actor, req);
@@ -69,7 +71,7 @@ async function notifyLeaveDecisionAsync(leave, decision, reason, actor, req) {
       decision, reason,
     });
   } catch (err) {
-    await auditTrail.logActivity("Notification error", `Leave decision alert: ${err.message}`, actor, req);
+    await auditTrail.logActivity("Notification error", `Leave decision alert: ${err.message}`, leave.user.stationId, actor, req);
   }
 }
 
@@ -85,7 +87,7 @@ async function cancelLeave(leaveId, actor, req) {
   if (!["PENDING", "APPROVED"].includes(leave.status)) throw ApiError.conflict(`Cannot cancel a ${leave.status.toLowerCase()} leave`);
 
   const updated = await leaveRepo.cancel(leaveId, actor.sub);
-  await auditTrail.recordUpdate("Leave", leaveId, { status: leave.status }, { status: "CANCELLED" }, actor, req);
+  await auditTrail.recordUpdate("Leave", leaveId, leave.user.stationId, { status: leave.status }, { status: "CANCELLED" }, actor, req);
   return updated;
 }
 

@@ -28,7 +28,7 @@ describe("leaveService.requestLeave", () => {
     );
 
     expect(result.id).toBe("leave-1");
-    expect(auditTrail.recordCreate).toHaveBeenCalledWith("Leave", "leave-1", actor, {});
+    expect(auditTrail.recordCreate).toHaveBeenCalledWith("Leave", "leave-1", "station-1", actor, {});
   });
 
   it("rejects an overlapping leave request", async () => {
@@ -58,7 +58,7 @@ describe("leaveService.decideLeave", () => {
 
     expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", managerActor.sub, managerActor.sub);
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
-      "Leave", "leave-1", { status: "PENDING" }, { status: "APPROVED" }, managerActor, {}, undefined
+      "Leave", "leave-1", "station-1", { status: "PENDING" }, { status: "APPROVED" }, managerActor, {}, undefined
     );
   });
 
@@ -81,7 +81,7 @@ describe("leaveService.decideLeave", () => {
 
 describe("leaveService.cancelLeave", () => {
   it("lets the leave owner cancel their own pending request", async () => {
-    leaveRepo.findById.mockResolvedValue({ id: "leave-1", userId: actor.sub, status: "PENDING" });
+    leaveRepo.findById.mockResolvedValue({ id: "leave-1", userId: actor.sub, status: "PENDING", user: { stationId: "station-1" } });
     leaveRepo.cancel.mockResolvedValue({ id: "leave-1", status: "CANCELLED" });
     const result = await leaveService.cancelLeave("leave-1", actor, {});
     expect(result.status).toBe("CANCELLED");

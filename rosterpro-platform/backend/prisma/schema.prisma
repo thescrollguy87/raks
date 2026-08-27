@@ -726,10 +726,16 @@ model AuditTrail {
   changedByName String? // denormalized snapshot in case the user is later deleted
   ipAddress   String?
   reason      String?
+  // Which station the audited entity belongs to — not the actor's station,
+  // since an airline-wide admin acting on one station's record must still
+  // be filterable by that station. Null for entities with no station of
+  // their own (a platform-level User's core fields, an Airline record).
+  stationId   String?
   timestamp   DateTime @default(now())
 
   @@index([entityType, entityId])
   @@index([changedById])
+  @@index([stationId])
   @@map("audit_trail")
 }
 
@@ -742,9 +748,15 @@ model ActivityLog {
   action     String   // "Roster published", "Staff added", "Leave approved", ...
   detail     String?
   ipAddress  String?
+  // Station the activity is ABOUT (the affected roster/staff/tool/etc.'s
+  // station), not necessarily the actor's own — same reasoning as
+  // AuditTrail.stationId above. Null for account-level activity with no
+  // single station (login, password reset) tied to an airline-wide actor.
+  stationId  String?
   timestamp  DateTime @default(now())
 
   @@index([userId])
   @@index([timestamp])
+  @@index([stationId])
   @@map("activity_logs")
 }

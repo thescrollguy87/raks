@@ -56,7 +56,7 @@ async function login({ email, password, mfaCode }, req) {
   const { roles, permissions } = userRepo.flattenRolesAndPermissions(user);
   const tokens = await issueTokenPair(user, roles, permissions, req);
   await userRepo.updateLoginMeta(user.id, req?.ip);
-  await auditTrail.logActivity("Login", user.email, { sub: user.id, name: user.fullName }, req);
+  await auditTrail.logActivity("Login", user.email, user.stationId, { sub: user.id, name: user.fullName }, req);
 
   return { ...tokens, user: toPublicUser(user, roles) };
 }
@@ -96,7 +96,7 @@ async function forgotPassword({ email }, req) {
   const token = crypto.randomBytes(32).toString("hex");
   await userRepo.setPasswordResetToken(user.id, token, new Date(Date.now() + MS_1_HOUR));
   await emailService.sendPasswordResetEmail(user, token);
-  await auditTrail.logActivity("Password reset requested", user.email, null, req);
+  await auditTrail.logActivity("Password reset requested", user.email, user.stationId, null, req);
   return { ok: true };
 }
 
@@ -110,7 +110,7 @@ async function resetPassword({ token, newPassword }, req) {
   const passwordHash = await hashPassword(newPassword);
   await userRepo.updatePasswordHash(user.id, passwordHash);
   await refreshTokenRepo.revokeAllForUser(user.id); // force re-login everywhere
-  await auditTrail.logActivity("Password reset completed", user.email, null, req);
+  await auditTrail.logActivity("Password reset completed", user.email, user.stationId, null, req);
   return { ok: true };
 }
 
@@ -127,7 +127,7 @@ async function changePassword(userId, { currentPassword, newPassword }, req) {
   const passwordHash = await hashPassword(newPassword);
   await userRepo.updatePasswordHash(user.id, passwordHash);
   await refreshTokenRepo.revokeAllForUser(user.id);
-  await auditTrail.logActivity("Password changed", user.email, { sub: userId, name: user.fullName }, req);
+  await auditTrail.logActivity("Password changed", user.email, user.stationId, { sub: userId, name: user.fullName }, req);
   return { ok: true };
 }
 
@@ -163,7 +163,7 @@ async function verifyAndEnableMfa(userId, { code }, req) {
   if (!user?.mfaSecret) throw ApiError.badRequest("Call setup first to generate a secret");
   if (!mfaService.verifyCode(user.mfaSecret, code)) throw ApiError.unauthorized("Invalid MFA code");
   await userRepo.setMfaEnabled(userId, true);
-  await auditTrail.logActivity("MFA enabled", user.email, { sub: userId, name: user.fullName }, req);
+  await auditTrail.logActivity("MFA enabled", user.email, user.stationId, { sub: userId, name: user.fullName }, req);
   return { ok: true };
 }
 
@@ -171,7 +171,7 @@ async function disableMfa(userId, req) {
   const user = await userRepo.findById(userId);
   await userRepo.setMfaEnabled(userId, false);
   await userRepo.setMfaSecret(userId, null);
-  await auditTrail.logActivity("MFA disabled", user?.email, { sub: userId, name: user?.fullName }, req);
+  await auditTrail.logActivity("MFA disabled", user?.email, user?.stationId, { sub: userId, name: user?.fullName }, req);
   return { ok: true };
 }
 

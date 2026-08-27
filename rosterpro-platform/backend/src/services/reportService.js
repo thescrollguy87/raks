@@ -60,7 +60,7 @@ async function emailReport(type, format, params, toEmail, actor, req) {
     `Attached: ${report.title} (generated ${new Date().toLocaleDateString("en-GB")}).`,
     report.filename, report.buffer, report.contentType
   );
-  await auditTrail.logActivity("Report emailed", `${report.title} → ${toEmail}`, actor, req);
+  await auditTrail.logActivity("Report emailed", `${report.title} → ${toEmail}`, params.stationId || null, actor, req);
   return { sent: true, filename: report.filename };
 }
 

@@ -12,11 +12,13 @@ function entityHistory(entityType, entityId) {
 
 // Paginated, filterable feed across ALL entities — "show me everything
 // changed this week" rather than needing to already know which record to
-// look at.
-async function listAuditTrail({ entityType, changedById, from, to, page = 1, pageSize = 50 }) {
+// look at. stationId filters to the entity's own station (a real column on
+// the row, not derived from who made the change).
+async function listAuditTrail({ entityType, changedById, stationId, from, to, page = 1, pageSize = 50 }) {
   const where = {
     ...(entityType ? { entityType } : {}),
     ...(changedById ? { changedById } : {}),
+    ...(stationId ? { stationId } : {}),
     ...(from || to ? { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
   const [total, items] = await Promise.all([
@@ -31,18 +33,13 @@ async function listAuditTrail({ entityType, changedById, from, to, page = 1, pag
 
 // The lighter-weight "who did what" feed — one line per action, not
 // field-level detail. This is what a dashboard activity widget or a
-// station manager's daily "what happened" check actually wants.
-//
-// stationId scopes to activity performed by people at that station (via the
-// userId -> User.stationId relation) — the closest available proxy for
-// "this station's activity" since ActivityLog rows don't carry their own
-// stationId. A system-generated entry (userId null) has no station to match
-// and is excluded when scoping is requested, which is the safe direction to
-// err in here.
+// station manager's daily "what happened" check actually wants. stationId
+// filters to the affected entity's own station (a real column on the row),
+// not the acting user's station.
 async function listActivity({ userId, stationId, from, to, page = 1, pageSize = 50 }) {
   const where = {
     ...(userId ? { userId } : {}),
-    ...(stationId ? { user: { stationId } } : {}),
+    ...(stationId ? { stationId } : {}),
     ...(from || to ? { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
   const [total, items] = await Promise.all([

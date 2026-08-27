@@ -9,8 +9,8 @@ async function getOrCreateRoster(stationId, monthKey, actor) {
   let roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
   if (!roster) {
     roster = await rosterRepo.createRoster(stationId, monthKey, actor.sub);
-    await auditTrail.recordCreate("Roster", roster.id, actor, null);
-    await auditTrail.logActivity("Roster created", `${stationId} — ${monthKey}`, actor, null);
+    await auditTrail.recordCreate("Roster", roster.id, stationId, actor, null);
+    await auditTrail.logActivity("Roster created", `${stationId} — ${monthKey}`, stationId, actor, null);
   }
   return roster;
 }
@@ -29,12 +29,12 @@ async function publishRoster(rosterId, actor, req) {
 
   const updated = await rosterRepo.publishRoster(rosterId, actor.sub);
   await auditTrail.recordUpdate(
-    "Roster", rosterId,
+    "Roster", rosterId, roster.stationId,
     { isPublished: roster.isPublished },
     { isPublished: true },
     actor, req, "Roster published"
   );
-  await auditTrail.logActivity("Roster published", `${roster.stationId} — ${roster.monthKey}`, actor, req);
+  await auditTrail.logActivity("Roster published", `${roster.stationId} — ${roster.monthKey}`, roster.stationId, actor, req);
 
   // Fan out "your roster is published" to every active staff member at the
   // station — fire-and-forget: notificationService never throws, so a
@@ -44,7 +44,7 @@ async function publishRoster(rosterId, actor, req) {
     rosterRepo.getActiveStaffContacts(roster.stationId),
   ]);
   notificationService.notifyRosterPublished(staff, { stationName: station?.name || roster.stationId, monthKey: roster.monthKey })
-    .catch(err => auditTrail.logActivity("Notification error", `Roster published fan-out: ${err.message}`, actor, req));
+    .catch(err => auditTrail.logActivity("Notification error", `Roster published fan-out: ${err.message}`, roster.stationId, actor, req));
 
   return updated;
 }
@@ -62,12 +62,12 @@ async function unpublishRoster(rosterId, reason, actor, req) {
 
   const updated = await rosterRepo.unpublishRoster(rosterId, actor.sub);
   await auditTrail.recordUpdate(
-    "Roster", rosterId,
+    "Roster", rosterId, roster.stationId,
     { isPublished: true },
     { isPublished: false },
     actor, req, reason
   );
-  await auditTrail.logActivity("Roster unpublished", `${roster.stationId} — ${roster.monthKey}: ${reason}`, actor, req);
+  await auditTrail.logActivity("Roster unpublished", `${roster.stationId} — ${roster.monthKey}: ${reason}`, roster.stationId, actor, req);
 
   // More urgent than the publish notification — staff may already be
   // relying on shifts that are now subject to change.
@@ -76,7 +76,7 @@ async function unpublishRoster(rosterId, reason, actor, req) {
     rosterRepo.getActiveStaffContacts(roster.stationId),
   ]);
   notificationService.notifyRosterUnpublished(staff, { stationName: station?.name || roster.stationId, monthKey: roster.monthKey, reason })
-    .catch(err => auditTrail.logActivity("Notification error", `Roster unpublished fan-out: ${err.message}`, actor, req));
+    .catch(err => auditTrail.logActivity("Notification error", `Roster unpublished fan-out: ${err.message}`, roster.stationId, actor, req));
 
   return updated;
 }
@@ -86,7 +86,7 @@ async function unpublishRoster(rosterId, reason, actor, req) {
 // change alert — deliberately not awaited by the caller, so a slow or
 // failing notification never delays the API response for the shift edit
 // itself. Every failure path logs to the activity log rather than throwing.
-async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate, actor, req) {
+async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate, stationId, actor, req) {
   try {
     const [user, oldDef] = await Promise.all([
       userRepo.findById(userId),
@@ -95,7 +95,7 @@ async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate,
     if (!user) return;
     await notificationService.notifyShiftChanged(user, { shiftDate, oldCode: oldDef?.code || null, newCode });
   } catch (err) {
-    await auditTrail.logActivity("Notification error", `Shift change alert: ${err.message}`, actor, req);
+    await auditTrail.logActivity("Notification error", `Shift change alert: ${err.message}`, stationId, actor, req);
   }
 }
 
@@ -122,7 +122,7 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
   const changed = !before || before.shiftDefId !== shiftDef.id;
   if (changed) {
     await auditTrail.recordUpdate(
-      "ShiftAssignment", updated.id,
+      "ShiftAssignment", updated.id, stationId,
       { shiftDefId: before?.shiftDefId || "—" },
       { shiftDefId: shiftDef.id },
       actor, req, reason
@@ -132,7 +132,7 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
     // WhatsApp, fired only when the value genuinely changed (see the check
     // above), never on a no-op save. Runs after the response-critical work
     // above; failures are logged, never thrown back at the caller.
-    notifyShiftChangeAsync(userId, before?.shiftDefId, shiftDef.code, shiftDate, actor, req);
+    notifyShiftChangeAsync(userId, before?.shiftDefId, shiftDef.code, shiftDate, stationId, actor, req);
   }
 
   return { assignment: updated, changed, shiftCode: shiftDef.code, previousShiftDefId: before?.shiftDefId || null };
@@ -157,7 +157,7 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
   }));
 
   const results = await rosterRepo.bulkUpsertAssignments(rows);
-  await auditTrail.logActivity("Bulk roster update", `${stationId} — ${monthKey}: ${results.length} shifts`, actor, req);
+  await auditTrail.logActivity("Bulk roster update", `${stationId} — ${monthKey}: ${results.length} shifts`, stationId, actor, req);
   // Field-level diffing for each of potentially hundreds of cells is
   // deliberately skipped here — the single activity-log entry above is what
   // a generated-roster "apply" should produce. Manual edits go through

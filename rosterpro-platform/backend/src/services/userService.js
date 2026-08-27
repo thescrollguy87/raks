@@ -44,8 +44,8 @@ async function createStaff(body, actor, req) {
   await userRepo.setRoles(user.id, body.roles);
   const withRoles = await userRepo.findById(user.id);
 
-  await auditTrail.recordCreate("User", user.id, actor, req);
-  await auditTrail.logActivity("Staff added", `${user.fullName} (${body.roles.join(", ")})`, actor, req);
+  await auditTrail.recordCreate("User", user.id, user.stationId, actor, req);
+  await auditTrail.logActivity("Staff added", `${user.fullName} (${body.roles.join(", ")})`, user.stationId, actor, req);
   return toPublicShape(withRoles);
 }
 
@@ -61,7 +61,7 @@ async function updateStaff(id, body, actor, req) {
   const data = isAdmin ? { ...body } : { ...body, stationId: before.stationId };
 
   const after = await userRepo.update(id, { ...data, updatedById: actor.sub });
-  await auditTrail.recordUpdate("User", id, before, body, actor, req);
+  await auditTrail.recordUpdate("User", id, before.stationId, before, body, actor, req);
   return toPublicShape(after);
 }
 
@@ -74,7 +74,7 @@ async function setActive(id, isActive, actor, req) {
   const updated = await userRepo.setActive(id, isActive);
   await auditTrail.logActivity(
     isActive ? "Staff reactivated" : "Staff marked inactive",
-    user.fullName, actor, req
+    user.fullName, user.stationId, actor, req
   );
   return toPublicShape(updated);
 }
@@ -86,7 +86,7 @@ async function assignRoles(id, roleNames, actor, req) {
 
   await userRepo.setRoles(id, roleNames);
   const updated = await userRepo.findById(id);
-  await auditTrail.logActivity("Roles updated", `${user.fullName}: ${roleNames.join(", ")}`, actor, req);
+  await auditTrail.logActivity("Roles updated", `${user.fullName}: ${roleNames.join(", ")}`, user.stationId, actor, req);
   return toPublicShape(updated);
 }
 
@@ -104,7 +104,7 @@ async function deleteStaff(id, actor, req) {
   if (!user) throw ApiError.notFound("Staff member not found");
   assertOwnStation(actor, user.stationId);
 
-  await auditTrail.recordDelete("User", id, actor, req);
+  await auditTrail.recordDelete("User", id, user.stationId, actor, req);
   try {
     await userRepo.hardDelete(id);
   } catch (err) {
@@ -115,7 +115,7 @@ async function deleteStaff(id, actor, req) {
     }
     throw err;
   }
-  await auditTrail.logActivity("Staff deleted", user.fullName, actor, req);
+  await auditTrail.logActivity("Staff deleted", user.fullName, user.stationId, actor, req);
   return { ok: true };
 }
 
