@@ -9,8 +9,6 @@ import LeavePage from "./pages/LeavePage.jsx";
 import QualificationsPage from "./pages/QualificationsPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
 import ToolControlPage from "./pages/ToolControlPage.jsx";
-import StoresPage from "./pages/StoresPage.jsx";
-import QualityPage from "./pages/QualityPage.jsx";
 import ChangeHistoryPage from "./pages/ChangeHistoryPage.jsx";
 import FlightsPage from "./pages/FlightsPage.jsx";
 import CoveragePage from "./pages/CoveragePage.jsx";
@@ -42,14 +40,6 @@ export default function App() {
         <Route
           path="/tools"
           element={<ProtectedRoute permission={["tool", "read"]}><ToolControlPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/stores"
-          element={<ProtectedRoute permission={["store", "read"]}><StoresPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/quality"
-          element={<ProtectedRoute permission={["audit_finding", "read"]}><QualityPage /></ProtectedRoute>}
         />
         <Route
           path="/history"

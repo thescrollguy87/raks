@@ -16,8 +16,6 @@ const NAV_SECTIONS = [
   ]},
   { label: "Operations", items: [
     { to: "/tools", icon: "🔧", label: "Tool Control", permission: ["tool", "read"] },
-    { to: "/stores", icon: "📦", label: "Stores", permission: ["store", "read"] },
-    { to: "/quality", icon: "🛡️", label: "Quality / CAPA", permission: ["audit_finding", "read"] },
     { to: "/flights", icon: "✈️", label: "Flights", permission: ["flight", "read"] },
   ]},
   { label: "Records", items: [

@@ -86,22 +86,6 @@ function notifyToolCalibrationDue(users, { toolNo, description, calibrationDue }
   return Promise.all(users.map(u => dispatch(u, "EMAIL", "audit_due", subject, body)));
 }
 
-// ── Stores ────────────────────────────────────────────────────────────────
-
-function notifyLowStock(users, { partNo, description, quantityOnHand, minStockLevel }) {
-  const subject = `Low stock: ${partNo}`;
-  const body = `${partNo} (${description}) is at ${quantityOnHand} on hand, below the minimum level of ${minStockLevel}. Please reorder.`;
-  return Promise.all(users.map(u => dispatch(u, "EMAIL", "audit_due", subject, body)));
-}
-
-// ── Quality ───────────────────────────────────────────────────────────────
-
-function notifyCapaOverdue(user, { correctiveAction, targetDate }) {
-  const subject = `CAPA overdue: target date ${targetDate}`;
-  const body = `A corrective action assigned to you is overdue:\n"${correctiveAction}"\nTarget date was ${targetDate}. Please update its status in RosterPro.`;
-  return dispatch(user, "EMAIL", "audit_due", subject, body);
-}
-
 // ── Daily reminder (requirement #2 from the original ask) ───────────────────
 
 async function notifyDailyShiftReminder(user, { shiftDate, shiftLabel }) {
@@ -117,5 +101,5 @@ module.exports = {
   dispatch, dispatchAll,
   notifyRosterPublished, notifyRosterUnpublished, notifyShiftChanged,
   notifyLeaveDecision, notifyQualificationExpiring, notifyToolCalibrationDue,
-  notifyLowStock, notifyCapaOverdue, notifyDailyShiftReminder,
+  notifyDailyShiftReminder,
 };

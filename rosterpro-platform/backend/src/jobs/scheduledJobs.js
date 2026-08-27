@@ -7,7 +7,6 @@ const userRepo = require("../repositories/userRepository");
 const notificationService = require("../services/notificationService");
 const complianceService = require("../services/complianceService");
 const toolService = require("../services/toolService");
-const qualityService = require("../services/qualityService");
 
 function shiftLabel(shiftDef) {
   if (!shiftDef.startTime) return shiftDef.name;
@@ -77,26 +76,6 @@ async function runToolCalibrationReminders() {
   }
 }
 
-// ── Job 4: overdue CAPA / audit findings ─────────────────────────────────────
-async function runOverdueQualityReminders() {
-  const { overdueFindings, overdueCapas } = await qualityService.listOverdue();
-  logger.info(`[job:quality-overdue] ${overdueFindings.length} overdue findings, ${overdueCapas.length} overdue CAPAs`);
-
-  for (const capa of overdueCapas) {
-    if (!capa.owner) continue;
-    await notificationService.notifyCapaOverdue(capa.owner, {
-      correctiveAction: capa.correctiveAction, targetDate: capa.targetDate.toISOString().slice(0, 10),
-    });
-  }
-  for (const finding of overdueFindings) {
-    if (!finding.raisedBy) continue;
-    await notificationService.notifyCapaOverdue(finding.raisedBy, {
-      correctiveAction: `[Finding, no CAPA opened yet] ${finding.description}`,
-      targetDate: finding.dueDate?.toISOString().slice(0, 10) || "unspecified",
-    });
-  }
-}
-
 function startScheduler() {
   // Daily reminder: defaults to 18:00 station-local time, so staff get
   // tomorrow's shift the evening before.
@@ -104,19 +83,18 @@ function startScheduler() {
     runDailyShiftReminders().catch(err => logger.error(`[job:daily-reminder] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  // Compliance/tool/quality checks run once a day in the early morning —
-  // there's no reason these need to be more frequent than daily, and
-  // running them off-peak avoids competing with normal daytime traffic.
+  // Compliance/tool checks run once a day in the early morning — there's
+  // no reason these need to be more frequent than daily, and running them
+  // off-peak avoids competing with normal daytime traffic.
   cron.schedule("0 6 * * *", () => {
     runComplianceExpiryReminders().catch(err => logger.error(`[job:compliance-expiry] failed: ${err.message}`));
     runToolCalibrationReminders().catch(err => logger.error(`[job:tool-calibration] failed: ${err.message}`));
-    runOverdueQualityReminders().catch(err => logger.error(`[job:quality-overdue] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance/tool/quality checks @06:00");
+  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance/tool checks @06:00");
 }
 
 module.exports = {
   startScheduler,
-  runDailyShiftReminders, runComplianceExpiryReminders, runToolCalibrationReminders, runOverdueQualityReminders,
+  runDailyShiftReminders, runComplianceExpiryReminders, runToolCalibrationReminders,
 };
