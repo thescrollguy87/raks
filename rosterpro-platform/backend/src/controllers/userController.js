@@ -16,9 +16,13 @@ const list = asyncHandler(async (req, res) => {
   // "can you call this endpoint at all" into "which rows can you see."
   const scopedToStation = !req.user.roles.some(r => ["SUPER_ADMIN", "AIRLINE_ADMIN"].includes(r));
 
+  // An airline-wide caller can optionally narrow to whichever station is
+  // currently selected in the frontend's station switcher — a station-scoped
+  // caller's own stationId always wins regardless of what they pass here.
+  const stationId = scopedToStation ? req.user.stationId : (req.query.stationId || undefined);
+
   const result = await userListRepo.listPaginated({
-    page, pageSize,
-    stationId: scopedToStation ? req.user.stationId : undefined,
+    page, pageSize, stationId,
     airlineId: req.user.roles.includes("SUPER_ADMIN") ? undefined : req.user.airlineId,
   });
   res.json(result);

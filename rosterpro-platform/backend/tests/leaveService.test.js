@@ -10,8 +10,8 @@ const notificationService = require("../src/services/notificationService");
 const leaveService = require("../src/services/leaveService");
 const ApiError = require("../src/utils/ApiError");
 
-const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["AME"] };
-const managerActor = { sub: "mgr-1", name: "Station Manager", roles: ["STATION_MANAGER"] };
+const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["AME"], stationId: "station-1" };
+const managerActor = { sub: "mgr-1", name: "Station Manager", roles: ["STATION_MANAGER"], stationId: "station-1" };
 
 beforeEach(() => {
   leaveRepo.DEFAULT_ENTITLEMENT = { ANNUAL: 30, SICK: 12, CASUAL: 12, MEDICAL: 0, LWP: 0, TRAINING: 0, OTHER: 0 };
@@ -41,7 +41,7 @@ describe("leaveService.requestLeave", () => {
 
 describe("leaveService.decideLeave", () => {
   it("rejects deciding on a leave that isn't pending", async () => {
-    leaveRepo.findById.mockResolvedValue({ id: "leave-1", status: "APPROVED", user: { fullName: "X" } });
+    leaveRepo.findById.mockResolvedValue({ id: "leave-1", status: "APPROVED", user: { fullName: "X", stationId: "station-1" } });
     await expect(leaveService.decideLeave("leave-1", { decision: "APPROVED" }, managerActor, {}))
       .rejects.toMatchObject({ statusCode: 409 });
   });
@@ -50,7 +50,7 @@ describe("leaveService.decideLeave", () => {
     leaveRepo.findById.mockResolvedValue({
       id: "leave-1", status: "PENDING", userId: "staff-1", leaveType: "ANNUAL",
       fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"),
-      user: { fullName: "Staff One", email: "staff@amd.example" },
+      user: { fullName: "Staff One", email: "staff@amd.example", stationId: "station-1" },
     });
     leaveRepo.decide.mockResolvedValue({ id: "leave-1", status: "APPROVED" });
 
@@ -63,7 +63,7 @@ describe("leaveService.decideLeave", () => {
   });
 
   it("notifies the leave owner of the decision", async () => {
-    const owner = { id: "staff-1", fullName: "Staff One", email: "staff@amd.example" };
+    const owner = { id: "staff-1", fullName: "Staff One", email: "staff@amd.example", stationId: "station-1" };
     leaveRepo.findById.mockResolvedValue({
       id: "leave-1", status: "PENDING", userId: "staff-1", leaveType: "SICK",
       fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"), user: owner,
@@ -94,7 +94,7 @@ describe("leaveService.cancelLeave", () => {
   });
 
   it("allows a station manager to cancel someone else's leave", async () => {
-    leaveRepo.findById.mockResolvedValue({ id: "leave-1", userId: "someone-else", status: "PENDING" });
+    leaveRepo.findById.mockResolvedValue({ id: "leave-1", userId: "someone-else", status: "PENDING", user: { stationId: "station-1" } });
     leaveRepo.cancel.mockResolvedValue({ id: "leave-1", status: "CANCELLED" });
     const result = await leaveService.cancelLeave("leave-1", managerActor, {});
     expect(result.status).toBe("CANCELLED");

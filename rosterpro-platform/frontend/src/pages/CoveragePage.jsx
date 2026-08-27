@@ -45,7 +45,7 @@ function hoursToneClass(hours) {
 // underlying data (who's on which shift, which days), just displayed at
 // different granularity.
 export default function CoveragePage() {
-  const { stationId } = useStation();
+  const { stationId, currentStation } = useStation();
   const [startDate, setStartDate] = useState(todayISO());
   const [windowSize, setWindowSize] = useState(7); // 1 = Daily Coverage, 7 = Rolling 7-Day
   const [showHours, setShowHours] = useState(false); // Rolling 7-Day HOURS table (DGCA fatigue view), separate from the who's-on-shift views above
@@ -54,7 +54,7 @@ export default function CoveragePage() {
 
   usePageHeader({
     title: showHours ? "Rolling 7-Day Hours" : windowSize === 1 ? "Daily Coverage" : "Rolling 7-Day Coverage",
-    subtitle: "AMD Line Maintenance",
+    subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "",
   });
 
   useEffect(() => {

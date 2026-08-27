@@ -8,6 +8,7 @@ const prisma = require("../config/prisma");
 
 const userInclude = {
   roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
+  station: { select: { id: true, name: true, iataCode: true } },
 };
 
 function findByEmail(email) {
@@ -16,6 +17,13 @@ function findByEmail(email) {
 
 function findById(id) {
   return prisma.user.findUnique({ where: { id }, include: userInclude });
+}
+
+// Lean lookup for station-scoping checks (compliance records, leave
+// balance, etc.) that only need to know which station a user belongs to —
+// avoids pulling the full roles/permissions tree on every such check.
+function findStationId(id) {
+  return prisma.user.findUnique({ where: { id }, select: { stationId: true } });
 }
 
 // Who to notify for station-level operational alerts (low stock, tool
@@ -134,7 +142,7 @@ function hardDelete(id) {
 }
 
 module.exports = {
-  findByEmail, findById, updateLoginMeta, updatePasswordHash,
+  findByEmail, findById, findStationId, updateLoginMeta, updatePasswordHash,
   setPasswordResetToken, findByPasswordResetToken,
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,

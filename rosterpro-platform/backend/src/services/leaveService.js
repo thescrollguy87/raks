@@ -3,6 +3,7 @@ const userRepo = require("../repositories/userRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const notificationService = require("./notificationService");
+const { assertOwnStation } = require("../utils/stationScope");
 
 function toDateOnly(iso) { return new Date(iso + "T00:00:00.000Z"); }
 
@@ -16,6 +17,11 @@ function daysBetweenInclusive(from, to) {
 
 async function requestLeave(body, actor, req) {
   const targetUserId = body.userId || actor.sub;
+  if (targetUserId !== actor.sub) {
+    const target = await userRepo.findStationId(targetUserId);
+    if (!target) throw ApiError.notFound("Staff member not found");
+    assertOwnStation(actor, target.stationId);
+  }
   const fromDate = toDateOnly(body.fromDate);
   const toDate = toDateOnly(body.toDate);
 
@@ -34,6 +40,7 @@ async function requestLeave(body, actor, req) {
 async function decideLeave(leaveId, { decision, reason }, actor, req) {
   const leave = await leaveRepo.findById(leaveId);
   if (!leave) throw ApiError.notFound("Leave request not found");
+  assertOwnStation(actor, leave.user.stationId);
   if (leave.status !== "PENDING") throw ApiError.conflict(`Leave is already ${leave.status.toLowerCase()}`);
 
   const updated = await leaveRepo.decide(leaveId, decision, actor.sub, actor.sub);
@@ -69,8 +76,11 @@ async function notifyLeaveDecisionAsync(leave, decision, reason, actor, req) {
 async function cancelLeave(leaveId, actor, req) {
   const leave = await leaveRepo.findById(leaveId);
   if (!leave) throw ApiError.notFound("Leave request not found");
-  if (leave.userId !== actor.sub && !actor.roles?.some(r => ["SUPER_ADMIN", "AIRLINE_ADMIN", "STATION_MANAGER", "LMM"].includes(r))) {
-    throw ApiError.forbidden("You can only cancel your own leave requests");
+  if (leave.userId !== actor.sub) {
+    if (!actor.roles?.some(r => ["SUPER_ADMIN", "AIRLINE_ADMIN", "STATION_MANAGER", "LMM"].includes(r))) {
+      throw ApiError.forbidden("You can only cancel your own leave requests");
+    }
+    assertOwnStation(actor, leave.user.stationId);
   }
   if (!["PENDING", "APPROVED"].includes(leave.status)) throw ApiError.conflict(`Cannot cancel a ${leave.status.toLowerCase()} leave`);
 

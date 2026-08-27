@@ -5,13 +5,13 @@ import { listActivity } from "../api/audit.js";
 import { useStation } from "../store/StationContext.jsx";
 
 export default function DashboardPage() {
-  const { stationId, loading: stationLoading } = useStation();
+  const { stationId, loading: stationLoading, currentStation } = useStation();
   const [data, setData] = useState(null);
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  usePageHeader({ title: "Dashboard", subtitle: "AMD · Real-time overview" });
+  usePageHeader({ title: "Dashboard", subtitle: currentStation ? `${currentStation.iataCode} · Real-time overview` : "" });
 
   useEffect(() => {
     if (!stationId) return;

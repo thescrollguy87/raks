@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
+import { useStation } from "../store/StationContext.jsx";
 import * as leaveApi from "../api/leave.js";
 import RequestLeaveModal from "../components/leave/RequestLeaveModal.jsx";
 
@@ -13,6 +14,7 @@ const STATUS_STYLE = {
 
 export default function LeavePage() {
   const { user, hasPermission } = useAuth();
+  const { stationId, currentStation } = useStation();
   const [statusFilter, setStatusFilter] = useState("PENDING");
   const [leaves, setLeaves] = useState(null);
   const [balance, setBalance] = useState(null);
@@ -30,19 +32,20 @@ export default function LeavePage() {
 
   usePageHeader({
     title: "Leave & Absence",
-    subtitle: "AMD Line Maintenance",
+    subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "",
     actions: headerActions,
   });
 
   const load = useCallback(() => {
+    if (!stationId) return;
     setError("");
-    leaveApi.listLeave({ status: statusFilter === "ALL" ? undefined : statusFilter, pageSize: 100 })
+    leaveApi.listLeave({ status: statusFilter === "ALL" ? undefined : statusFilter, pageSize: 100, stationId })
       .then(d => setLeaves(d))
       .catch(err => setError(err.message));
     leaveApi.getLeaveBalance(user?.id, new Date().getFullYear())
       .then(setBalance)
       .catch(() => {}); // balance is a nice-to-have widget; don't block the page on it
-  }, [statusFilter, user]);
+  }, [statusFilter, user, stationId]);
 
   useEffect(() => { load(); }, [load]);
 

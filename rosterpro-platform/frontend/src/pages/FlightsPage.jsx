@@ -20,13 +20,13 @@ function todayRange() {
 }
 
 export default function FlightsPage() {
-  const { stationId } = useStation();
+  const { stationId, currentStation } = useStation();
   const { hasPermission } = useAuth();
   const [flights, setFlights] = useState(null);
   const [error, setError] = useState("");
   const canLogDelay = hasPermission("engineering_delay", "create");
 
-  usePageHeader({ title: "Flights", subtitle: "AMD · Today's flights & engineering delays" });
+  usePageHeader({ title: "Flights", subtitle: currentStation ? `${currentStation.iataCode} · Today's flights & engineering delays` : "" });
 
   const load = useCallback(() => {
     if (!stationId) return;

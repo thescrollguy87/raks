@@ -1,6 +1,7 @@
 const repo = require("../repositories/toolRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
+const { assertOwnStation } = require("../utils/stationScope");
 
 function toDate(iso) { return iso ? new Date(iso + "T00:00:00.000Z") : null; }
 
@@ -18,6 +19,7 @@ async function createTool(body, actor, req) {
 async function recordCalibration(toolId, body, actor, req) {
   const tool = await repo.findById(toolId);
   if (!tool) throw ApiError.notFound("Tool not found");
+  assertOwnStation(actor, tool.stationId);
 
   const calibratedOn = toDate(body.calibratedOn);
   const nextDue = toDate(body.nextDue);
@@ -41,6 +43,7 @@ async function recordCalibration(toolId, body, actor, req) {
 async function issueTool(toolId, body, actor, req) {
   const tool = await repo.findById(toolId);
   if (!tool) throw ApiError.notFound("Tool not found");
+  assertOwnStation(actor, tool.stationId);
   if (tool.status === "OVERDUE" || tool.status === "QUARANTINED") {
     throw ApiError.forbidden(`Tool is ${tool.status.toLowerCase()} and cannot be issued`);
   }
@@ -59,6 +62,7 @@ async function issueTool(toolId, body, actor, req) {
 async function returnTool(issueId, actor, req) {
   const issue = await repo.findOpenIssue(issueId);
   if (!issue) throw ApiError.notFound("Tool issue record not found");
+  assertOwnStation(actor, issue.tool.stationId);
   if (issue.returnedAt) throw ApiError.conflict("This tool issue is already marked returned");
 
   const updated = await repo.returnIssue(issueId, actor.sub);

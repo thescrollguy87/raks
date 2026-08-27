@@ -4,7 +4,10 @@ jest.mock("../src/utils/auditTrail");
 const repo = require("../src/repositories/toolRepository");
 const svc = require("../src/services/toolService");
 
-const actor = { sub: "user-1", name: "Actor" };
+// SUPER_ADMIN bypasses the station-scoping check added to this service —
+// these tests are about the tool-lifecycle business logic, not
+// authorization (that's covered separately, at the route/API level).
+const actor = { sub: "user-1", name: "Actor", roles: ["SUPER_ADMIN"] };
 
 describe("toolService.issueTool", () => {
   it("issues an available, valid tool", async () => {
@@ -39,7 +42,7 @@ describe("toolService.issueTool", () => {
 
 describe("toolService.returnTool", () => {
   it("returns a tool that's currently issued", async () => {
-    repo.findOpenIssue.mockResolvedValue({ id: "issue-1", returnedAt: null, toolId: "tool-1" });
+    repo.findOpenIssue.mockResolvedValue({ id: "issue-1", returnedAt: null, toolId: "tool-1", tool: { id: "tool-1", stationId: "station-1" } });
     repo.returnIssue.mockResolvedValue({ id: "issue-1", returnedAt: new Date() });
 
     const result = await svc.returnTool("issue-1", actor, {});
@@ -47,7 +50,7 @@ describe("toolService.returnTool", () => {
   });
 
   it("blocks returning a tool issue that's already returned", async () => {
-    repo.findOpenIssue.mockResolvedValue({ id: "issue-1", returnedAt: new Date() });
+    repo.findOpenIssue.mockResolvedValue({ id: "issue-1", returnedAt: new Date(), tool: { id: "tool-1", stationId: "station-1" } });
     await expect(svc.returnTool("issue-1", actor, {})).rejects.toMatchObject({ statusCode: 409 });
   });
 

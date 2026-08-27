@@ -3,6 +3,7 @@ const userRepo = require("../repositories/userRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const notificationService = require("./notificationService");
+const { assertOwnStation } = require("../utils/stationScope");
 
 async function getOrCreateRoster(stationId, monthKey, actor) {
   let roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
@@ -23,6 +24,7 @@ async function getRosterGrid(stationId, monthKey, actor) {
 async function publishRoster(rosterId, actor, req) {
   const roster = await rosterRepo.findRosterById(rosterId);
   if (!roster) throw ApiError.notFound("Roster not found");
+  assertOwnStation(actor, roster.stationId);
   if (roster.isPublished) throw ApiError.conflict("Roster is already published");
 
   const updated = await rosterRepo.publishRoster(rosterId, actor.sub);
@@ -54,6 +56,7 @@ async function publishRoster(rosterId, actor, req) {
 async function unpublishRoster(rosterId, reason, actor, req) {
   const roster = await rosterRepo.findRosterById(rosterId);
   if (!roster) throw ApiError.notFound("Roster not found");
+  assertOwnStation(actor, roster.stationId);
   if (!roster.isPublished) throw ApiError.conflict("Roster is not currently published");
   if (!reason || !reason.trim()) throw ApiError.badRequest("A reason is required to unpublish a live roster");
 

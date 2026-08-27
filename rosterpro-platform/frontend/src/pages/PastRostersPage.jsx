@@ -5,12 +5,12 @@ import { useStation } from "../store/StationContext.jsx";
 import * as rosterApi from "../api/roster.js";
 
 export default function PastRostersPage() {
-  const { stationId } = useStation();
+  const { stationId, currentStation } = useStation();
   const navigate = useNavigate();
   const [rosters, setRosters] = useState(null);
   const [error, setError] = useState("");
 
-  usePageHeader({ title: "Past Rosters", subtitle: "AMD Line Maintenance · Archive" });
+  usePageHeader({ title: "Past Rosters", subtitle: currentStation ? `${currentStation.name} Line Maintenance · Archive` : "" });
 
   useEffect(() => {
     if (!stationId) return;

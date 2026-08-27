@@ -40,7 +40,7 @@ function createIssue(data) {
 }
 
 function findOpenIssue(id) {
-  return prisma.toolIssue.findUnique({ where: { id } });
+  return prisma.toolIssue.findUnique({ where: { id }, include: { tool: true } });
 }
 
 function returnIssue(id, actorId) {

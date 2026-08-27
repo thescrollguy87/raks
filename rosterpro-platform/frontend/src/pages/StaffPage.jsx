@@ -1,11 +1,13 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
+import { useStation } from "../store/StationContext.jsx";
 import * as staffApi from "../api/staff.js";
 import StaffFormModal from "../components/staff/StaffFormModal.jsx";
 
 export default function StaffPage() {
   const { hasPermission } = useAuth();
+  const { stationId, currentStation } = useStation();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -18,12 +20,13 @@ export default function StaffPage() {
   const canDelete = hasPermission("staff", "delete");
 
   const load = useCallback(() => {
+    if (!stationId) return;
     setError("");
-    staffApi.listStaff({ page: 1, pageSize: 100 })
+    staffApi.listStaff({ page: 1, pageSize: 100, stationId })
       .then(d => setData(d))
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [stationId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -35,7 +38,7 @@ export default function StaffPage() {
     canCreate ? <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>＋ Add Staff</button> : null
   ), [canCreate]);
 
-  usePageHeader({ title: "Staff Registry", subtitle: "AMD Line Maintenance", actions: headerActions });
+  usePageHeader({ title: "Staff Registry", subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "", actions: headerActions });
 
   async function handleDeactivate(s) {
     if (!confirm(`Mark ${s.fullName} as inactive?\n\nThey'll be hidden from future roster generation, but their historical records are kept.`)) return;

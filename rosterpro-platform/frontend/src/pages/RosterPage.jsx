@@ -26,7 +26,7 @@ function shiftMonth(monthKey, delta) {
 
 export default function RosterPage() {
   const { hasPermission } = useAuth();
-  const { stationId, loading: stationLoading } = useStation();
+  const { stationId, loading: stationLoading, currentStation } = useStation();
   const [searchParams] = useSearchParams();
   const [monthKey, setMonthKey] = useState(() => searchParams.get("month") || new Date().toISOString().slice(0, 7));
   const [catFilter, setCatFilter] = useState("ALL");
@@ -136,7 +136,7 @@ export default function RosterPage() {
 
   usePageHeader({
     title: "Shift Roster",
-    subtitle: `AMD · ${monthKey}${roster?.isPublished ? " · Published" : " · Draft"}`,
+    subtitle: currentStation ? `${currentStation.iataCode} · ${monthKey}${roster?.isPublished ? " · Published" : " · Draft"}` : "",
     actions: headerActions,
   });
 

@@ -10,7 +10,7 @@ const notificationService = require("../src/services/notificationService");
 const rosterService = require("../src/services/rosterService");
 const ApiError = require("../src/utils/ApiError");
 
-const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["STATION_MANAGER"] };
+const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["STATION_MANAGER"], stationId: "station-1" };
 const roster = { id: "roster-1", stationId: "station-1", monthKey: "2026-09", isPublished: false };
 
 beforeEach(() => {

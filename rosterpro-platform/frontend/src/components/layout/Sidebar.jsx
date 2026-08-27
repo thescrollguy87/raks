@@ -31,14 +31,14 @@ const NAV_SECTIONS = [
 
 export default function Sidebar() {
   const { user, hasPermission, logout } = useAuth();
-  const { needsSwitcher } = useStation();
+  const { needsSwitcher, currentStation } = useStation();
 
   return (
     <aside className="sidebar">
       <div className="s-logo">
-        <span className="lm">AMD · M&amp;E</span>
+        <span className="lm">{currentStation ? `${currentStation.iataCode} · M&E` : "M&E"}</span>
         <span className="ln">RosterPro</span>
-        <span className="ls">Ahmedabad Line Maintenance</span>
+        <span className="ls">{currentStation ? `${currentStation.name} Line Maintenance` : "Select a station"}</span>
         {needsSwitcher && <div style={{ marginTop: 8 }}><StationSwitcher /></div>}
       </div>
       <nav className="nav">

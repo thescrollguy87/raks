@@ -18,6 +18,11 @@ function toPublicUser(user, roles) {
     id: user.id, email: user.email, fullName: user.fullName,
     category: user.category, designation: user.designation,
     airlineId: user.airlineId, stationId: user.stationId,
+    // Own-station display info for station-scoped roles — the frontend
+    // can't call GET /api/stations for most of them (no station:read
+    // permission), so this is the only way they learn their station's
+    // name/IATA code to show in the header instead of hardcoding one.
+    station: user.station ? { id: user.station.id, name: user.station.name, iataCode: user.station.iataCode } : null,
     roles, mfaEnabled: user.mfaEnabled, isEmailVerified: user.isEmailVerified,
   };
 }

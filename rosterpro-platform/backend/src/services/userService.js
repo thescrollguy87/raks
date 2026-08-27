@@ -3,6 +3,7 @@ const userListRepo = require("../repositories/userListRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const { hashPassword, isPasswordStrong } = require("../utils/password");
+const { assertOwnStation } = require("../utils/stationScope");
 
 // Fields a caller is allowed to see changed/created — mirrors what
 // userListRepository already selects, so create/update responses look like
@@ -51,8 +52,15 @@ async function createStaff(body, actor, req) {
 async function updateStaff(id, body, actor, req) {
   const before = await userRepo.findById(id);
   if (!before) throw ApiError.notFound("Staff member not found");
+  assertOwnStation(actor, before.stationId);
 
-  const after = await userRepo.update(id, { ...body, updatedById: actor.sub });
+  // Only an airline-wide admin can move someone to a different station —
+  // a Station Manager who holds staff:update shouldn't be able to smuggle
+  // a stationId change through this endpoint to reassign staff elsewhere.
+  const isAdmin = ["SUPER_ADMIN", "AIRLINE_ADMIN"].some(r => actor.roles.includes(r));
+  const data = isAdmin ? { ...body } : { ...body, stationId: before.stationId };
+
+  const after = await userRepo.update(id, { ...data, updatedById: actor.sub });
   await auditTrail.recordUpdate("User", id, before, body, actor, req);
   return toPublicShape(after);
 }
@@ -60,6 +68,7 @@ async function updateStaff(id, body, actor, req) {
 async function setActive(id, isActive, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
+  assertOwnStation(actor, user.stationId);
   if (user.isActive === isActive) return toPublicShape(user); // no-op, already in that state
 
   const updated = await userRepo.setActive(id, isActive);
@@ -73,6 +82,7 @@ async function setActive(id, isActive, actor, req) {
 async function assignRoles(id, roleNames, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
+  assertOwnStation(actor, user.stationId);
 
   await userRepo.setRoles(id, roleNames);
   const updated = await userRepo.findById(id);
@@ -92,6 +102,7 @@ async function assignRoles(id, roleNames, actor, req) {
 async function deleteStaff(id, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
+  assertOwnStation(actor, user.stationId);
 
   await auditTrail.recordDelete("User", id, actor, req);
   try {

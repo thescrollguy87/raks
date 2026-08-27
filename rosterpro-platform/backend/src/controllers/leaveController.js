@@ -1,6 +1,8 @@
 const leaveService = require("../services/leaveService");
+const userRepo = require("../repositories/userRepository");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
+const { isAirlineWide } = require("../utils/stationScope");
 
 const request = asyncHandler(async (req, res) => {
   // Non-managers can only request leave for themselves — the validator
@@ -25,12 +27,23 @@ const cancel = asyncHandler(async (req, res) => {
 });
 
 const list = asyncHandler(async (req, res) => {
-  const result = await leaveService.listLeaves(req.query);
+  // Non-airline-wide callers can only ever see their own station's leave
+  // requests — override whatever stationId they passed (or none) rather
+  // than trust it, same as userController.list already does for staff.
+  const query = isAirlineWide(req.user) ? req.query : { ...req.query, stationId: req.user.stationId };
+  const result = await leaveService.listLeaves(query);
   res.json(result);
 });
 
 const balance = asyncHandler(async (req, res) => {
   const userId = req.params.userId || req.user.sub;
+  if (userId !== req.user.sub && !isAirlineWide(req.user)) {
+    const target = await userRepo.findStationId(userId);
+    if (!target) throw ApiError.notFound("Staff member not found");
+    if (target.stationId !== req.user.stationId) {
+      throw ApiError.forbidden("You can only view your own station's staff");
+    }
+  }
   const year = parseInt(req.query.year, 10) || new Date().getFullYear();
   const result = await leaveService.getBalance(userId, year);
   res.json(result);

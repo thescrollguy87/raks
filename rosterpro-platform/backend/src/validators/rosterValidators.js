@@ -43,7 +43,11 @@ const generateRosterSchema = z.object({
   continueFromPrevious: z.boolean().optional(),
 });
 
+const archiveQuerySchema = z.object({
+  stationId: z.string().uuid(),
+});
+
 module.exports = {
   createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
-  publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema,
+  publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
 };

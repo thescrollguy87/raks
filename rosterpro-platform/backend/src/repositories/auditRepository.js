@@ -32,9 +32,17 @@ async function listAuditTrail({ entityType, changedById, from, to, page = 1, pag
 // The lighter-weight "who did what" feed — one line per action, not
 // field-level detail. This is what a dashboard activity widget or a
 // station manager's daily "what happened" check actually wants.
-async function listActivity({ userId, from, to, page = 1, pageSize = 50 }) {
+//
+// stationId scopes to activity performed by people at that station (via the
+// userId -> User.stationId relation) — the closest available proxy for
+// "this station's activity" since ActivityLog rows don't carry their own
+// stationId. A system-generated entry (userId null) has no station to match
+// and is excluded when scoping is requested, which is the safe direction to
+// err in here.
+async function listActivity({ userId, stationId, from, to, page = 1, pageSize = 50 }) {
   const where = {
     ...(userId ? { userId } : {}),
+    ...(stationId ? { user: { stationId } } : {}),
     ...(from || to ? { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
   const [total, items] = await Promise.all([

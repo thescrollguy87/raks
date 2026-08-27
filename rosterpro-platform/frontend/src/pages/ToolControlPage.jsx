@@ -15,13 +15,13 @@ const STATUS_STYLE = {
 
 export default function ToolControlPage() {
   const { hasPermission, user } = useAuth();
-  const { stationId } = useStation();
+  const { stationId, currentStation } = useStation();
   const [tools, setTools] = useState(null);
   const [error, setError] = useState("");
   const canIssue = hasPermission("tool", "issue");
   const canReturn = hasPermission("tool", "return");
 
-  usePageHeader({ title: "Tool Control", subtitle: "AMD · Calibration & issue tracking" });
+  usePageHeader({ title: "Tool Control", subtitle: currentStation ? `${currentStation.iataCode} · Calibration & issue tracking` : "" });
 
   const load = useCallback(() => {
     if (!stationId) return;

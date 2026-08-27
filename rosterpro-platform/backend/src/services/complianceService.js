@@ -1,6 +1,18 @@
 const repo = require("../repositories/complianceRepository");
+const userRepo = require("../repositories/userRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
+const { assertOwnStation } = require("../utils/stationScope");
+
+// Compliance records don't carry their own stationId — they belong to a
+// user, who belongs to a station. Every write below resolves the target
+// user's station and checks it against the actor, same rule as everywhere
+// else: a Station Manager can only touch their own station's people.
+async function assertActorSharesStationWith(actor, userId) {
+  const target = await userRepo.findStationId(userId);
+  if (!target) throw ApiError.notFound("Staff member not found");
+  assertOwnStation(actor, target.stationId);
+}
 
 const EXPIRING_WINDOW_DAYS = 30;
 
@@ -22,6 +34,7 @@ function toDate(iso) { return iso ? new Date(iso + "T00:00:00.000Z") : null; }
 // ── Qualifications ───────────────────────────────────────────────────────────
 
 async function createQualification(body, actor, req) {
+  await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, qualCode: body.qualCode, description: body.description || null,
     issuedDate: toDate(body.issuedDate), expiryDate: toDate(body.expiryDate),
@@ -37,6 +50,7 @@ async function createQualification(body, actor, req) {
 async function updateQualification(id, body, actor, req) {
   const existing = await repo.qualification.findById(id);
   if (!existing) throw ApiError.notFound("Qualification not found");
+  await assertActorSharesStationWith(actor, existing.userId);
 
   const newExpiry = body.expiryDate ? toDate(body.expiryDate) : existing.expiryDate;
   const data = {
@@ -60,6 +74,7 @@ async function updateQualification(id, body, actor, req) {
 async function deleteQualification(id, actor, req, reason) {
   const existing = await repo.qualification.findById(id);
   if (!existing) throw ApiError.notFound("Qualification not found");
+  await assertActorSharesStationWith(actor, existing.userId);
   await repo.qualification.softDelete(id, actor.sub);
   await auditTrail.recordDelete("Qualification", id, actor, req, reason);
 }
@@ -81,6 +96,7 @@ function listExpiringQualifications(days = EXPIRING_WINDOW_DAYS) {
 // ── Licenses ──────────────────────────────────────────────────────────────
 
 async function createLicense(body, actor, req) {
+  await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, licenseNo: body.licenseNo, category: body.category,
     issuingAuthority: body.issuingAuthority || "DGCA",
@@ -96,6 +112,7 @@ async function createLicense(body, actor, req) {
 async function updateLicense(id, body, actor, req) {
   const existing = await repo.license.findById(id);
   if (!existing) throw ApiError.notFound("License not found");
+  await assertActorSharesStationWith(actor, existing.userId);
   const data = {
     licenseNo: body.licenseNo ?? existing.licenseNo,
     category: body.category ?? existing.category,
@@ -126,6 +143,7 @@ function listExpiringLicenses(days = EXPIRING_WINDOW_DAYS) {
 // ── Training ──────────────────────────────────────────────────────────────
 
 async function createTraining(body, actor, req) {
+  await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, courseName: body.courseName, provider: body.provider || null,
     completedDate: toDate(body.completedDate), validUntil: toDate(body.validUntil),
@@ -145,6 +163,7 @@ function listTrainingForUser(userId) {
 // ── Authorizations ───────────────────────────────────────────────────────────
 
 async function createAuthorization(body, actor, req) {
+  await assertActorSharesStationWith(actor, body.userId);
   const data = {
     userId: body.userId, scope: body.scope,
     grantedDate: toDate(body.grantedDate), expiryDate: toDate(body.expiryDate),
@@ -176,7 +195,7 @@ async function getComplianceSummary(userId) {
 }
 
 module.exports = {
-  deriveStatus,
+  deriveStatus, assertActorSharesStationWith,
   createQualification, updateQualification, deleteQualification, listQualificationsForUser, listExpiringQualifications,
   createLicense, updateLicense, listLicensesForUser, listExpiringLicenses,
   createTraining, listTrainingForUser,

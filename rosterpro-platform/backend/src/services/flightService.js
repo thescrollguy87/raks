@@ -1,6 +1,7 @@
 const repo = require("../repositories/flightRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
+const { assertOwnStation } = require("../utils/stationScope");
 
 async function createFlight(body, actor, req) {
   const flight = await repo.createFlight({
@@ -17,6 +18,7 @@ async function createFlight(body, actor, req) {
 async function updateFlightStatus(id, body, actor, req) {
   const existing = await repo.findFlightById(id);
   if (!existing) throw ApiError.notFound("Flight not found");
+  assertOwnStation(actor, existing.stationId);
 
   const data = {
     status: body.status,
@@ -32,6 +34,7 @@ async function updateFlightStatus(id, body, actor, req) {
 async function recordDelay(body, actor, req) {
   const flight = await repo.findFlightById(body.flightId);
   if (!flight) throw ApiError.notFound("Flight not found");
+  assertOwnStation(actor, flight.stationId);
 
   const delay = await repo.createDelay({
     flightId: body.flightId, delayCode: body.delayCode, minutes: body.minutes,

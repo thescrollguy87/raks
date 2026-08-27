@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
+import { useStation } from "../store/StationContext.jsx";
 import { listStaff } from "../api/staff.js";
 import * as complianceApi from "../api/compliance.js";
 import AddRecordModal from "../components/compliance/AddRecordModal.jsx";
@@ -13,6 +14,7 @@ const STATUS_STYLE = {
 
 export default function QualificationsPage() {
   const { hasPermission } = useAuth();
+  const { stationId, currentStation } = useStation();
   const [staffList, setStaffList] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -31,16 +33,18 @@ export default function QualificationsPage() {
 
   usePageHeader({
     title: "Qualifications, Training & Authorisations",
-    subtitle: "AMD · Compliance records",
+    subtitle: currentStation ? `${currentStation.iataCode} · Compliance records` : "",
     actions: headerActions,
   });
 
   useEffect(() => {
-    listStaff({ pageSize: 100 }).then(d => {
+    if (!stationId) return;
+    setLoading(true);
+    listStaff({ pageSize: 100, stationId }).then(d => {
       setStaffList(d.items);
-      if (d.items.length) setSelectedId(d.items[0].id);
+      setSelectedId(d.items.length ? d.items[0].id : null);
     }).finally(() => setLoading(false));
-  }, []);
+  }, [stationId]);
 
   const loadSummary = useCallback(() => {
     if (!selectedId) return;

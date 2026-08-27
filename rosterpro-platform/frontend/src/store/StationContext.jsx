@@ -14,7 +14,7 @@ const StationContext = createContext(null);
 // requires, so this component never calls an endpoint a signed-in user
 // can't reach.
 export function StationProvider({ children }) {
-  const { claims, isAuthenticated } = useAuth();
+  const { claims, user, isAuthenticated } = useAuth();
   const [stations, setStations] = useState([]);
   const [selectedStationId, setSelectedStationId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -46,9 +46,18 @@ export function StationProvider({ children }) {
     localStorage.setItem(STORAGE_KEY, id);
   }, []);
 
+  // Display info for whichever station is "current" — the user's own
+  // station for a station-scoped role (from their login payload, since most
+  // of those roles can't call GET /api/stations to look it up themselves),
+  // or whichever one an airline-wide user has selected in the switcher.
+  const currentStation = useMemo(() => {
+    if (claims?.stationId) return user?.station || null;
+    return stations.find(s => s.id === selectedStationId) || null;
+  }, [claims?.stationId, user?.station, stations, selectedStationId]);
+
   const value = useMemo(() => ({
-    stationId: selectedStationId, stations, needsSwitcher, loading, selectStation,
-  }), [selectedStationId, stations, needsSwitcher, loading, selectStation]);
+    stationId: selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation,
+  }), [selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation]);
 
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;
 }

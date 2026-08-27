@@ -15,7 +15,7 @@ const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
 // actually saves it — there's no separate manual staffing/pattern input
 // step because the algorithm doesn't consume one.
 export default function AutoRosterPage() {
-  const { stationId } = useStation();
+  const { stationId, currentStation } = useStation();
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   const [continueFromPrevious, setContinueFromPrevious] = useState(false);
   const [preview, setPreview] = useState(null);
@@ -23,7 +23,7 @@ export default function AutoRosterPage() {
   const [applied, setApplied] = useState(null);
   const [error, setError] = useState("");
 
-  usePageHeader({ title: "Auto-Roster Generator", subtitle: "AMD Line Maintenance" });
+  usePageHeader({ title: "Auto-Roster Generator", subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "" });
 
   async function handlePreview() {
     setBusy(true);
