@@ -1,9 +1,29 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import * as staffApi from "../api/staff.js";
 import StaffFormModal from "../components/staff/StaffFormModal.jsx";
+
+// Same hidden-input-plus-button trigger ImportExportPage.jsx uses — kept
+// page-local rather than shared since it's a few lines and this is the
+// only other place that needs it.
+function FileImportButton({ label, busy, onFile }) {
+  const ref = useRef(null);
+  function handleChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) onFile(file);
+  }
+  return (
+    <>
+      <input ref={ref} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleChange} />
+      <button className="btn btn-ghost" disabled={busy} onClick={() => ref.current?.click()}>
+        {busy ? "Importing…" : label}
+      </button>
+    </>
+  );
+}
 
 export default function StaffPage() {
   const { hasPermission } = useAuth();
@@ -13,6 +33,8 @@ export default function StaffPage() {
   const [error, setError] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingStaff, setEditingStaff] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState(null);
 
   const canCreate = hasPermission("staff", "create");
   const canUpdate = hasPermission("staff", "update");
@@ -35,8 +57,17 @@ export default function StaffPage() {
   // header-context update, so a fresh JSX element here every render would
   // loop the two forever.
   const headerActions = useMemo(() => (
-    canCreate ? <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>＋ Add Staff</button> : null
-  ), [canCreate]);
+    <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+      {canUpdate && (
+        <>
+          <button className="btn btn-ghost" onClick={() => staffApi.downloadEmployeeMasterTemplate()}>⬇ Download Template</button>
+          <button className="btn btn-ghost" onClick={() => staffApi.exportEmployeeMaster(stationId)}>⬇ Export</button>
+          <FileImportButton label="⬆ Import" busy={importBusy} onFile={handleImport} />
+        </>
+      )}
+      {canCreate && <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>＋ Add Staff</button>}
+    </div>
+  ), [canCreate, canUpdate, stationId, importBusy]);
 
   usePageHeader({ title: "Staff Registry", subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "", actions: headerActions });
 
@@ -59,6 +90,30 @@ export default function StaffPage() {
     }
   }
 
+  // Reuses the Employee Master import/export logic (staffApi.*) rather than
+  // duplicating it — same Category column, same Location matching, same
+  // "never creates a new login" behavior, just triggered from the station's
+  // own registry screen instead of the Import/Export tab.
+  async function handleImport(file) {
+    if (!stationId) return;
+    setImportBusy(true); setImportResult(null);
+    try {
+      const r = await staffApi.importEmployeeMaster(stationId, file);
+      const lists = [
+        { label: "Not matched to any staff at this station", items: r.notFound },
+        { label: "Skipped — Location didn't match this station", items: r.stationMismatch },
+        { label: "Row errors", items: r.rowErrors },
+        { label: "Duplicate rows in file", items: r.duplicates },
+      ];
+      setImportResult({ tone: "green", headline: `${r.updated} staff record(s) updated.`, lists });
+      load();
+    } catch (err) {
+      setImportResult({ tone: "red", headline: err.message, lists: [{ label: "Details", items: err.details || [] }] });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   async function handleDelete(s) {
     if (!confirm(`PERMANENTLY delete ${s.fullName}?\n\nThis cannot be undone — their qualification, license, training, leave, and shift history will be removed. If you just want to stop scheduling them but keep their history, use "Deactivate" instead.`)) return;
     try {
@@ -77,6 +132,24 @@ export default function StaffPage() {
       <div className="card-title">
         Staff Registry <span className="tag">{data.total} total</span>
       </div>
+      {importResult && (
+        <div style={{ marginBottom: 10 }}>
+          <div
+            style={{
+              padding: "8px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+              background: importResult.tone === "red" ? "rgba(229,57,53,.12)" : "rgba(0,200,83,.1)",
+              color: importResult.tone === "red" ? "var(--rp-red)" : "var(--rp-green)",
+            }}
+          >
+            {importResult.headline}
+          </div>
+          {(importResult.lists || []).filter(l => l.items?.length).map(l => (
+            <div key={l.label} style={{ marginTop: 6, fontSize: 11, color: "var(--text-dim)" }}>
+              <strong>{l.label}:</strong> {l.items.slice(0, 8).join("; ")}{l.items.length > 8 ? ` … +${l.items.length - 8} more` : ""}
+            </div>
+          ))}
+        </div>
+      )}
       <table className="rt" style={{ width: "100%" }}>
         <thead>
           <tr>
