@@ -151,8 +151,7 @@ export default function ImportExportPage() {
     setFlightBusy(true); setFlightResult(null);
     try {
       const r = await flightsApi.importFlightSchedule(stationId, flightMonthKey, file);
-      const lists = [{ label: "Aircraft registration not found (flight saved without it)", items: r.aircraftNotFound }];
-      setFlightResult({ tone: "green", headline: `${r.created} created, ${r.updated} updated (${r.occurrenceCount} flight occurrences this month).`, lists });
+      setFlightResult({ tone: "green", headline: `${r.created} created, ${r.updated} updated (${r.occurrenceCount} flight occurrences this month).` });
     } catch (err) {
       setFlightResult({ tone: "red", headline: err.message, lists: [{ label: "Details", items: err.details || [] }] });
     } finally {

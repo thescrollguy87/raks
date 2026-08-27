@@ -2,7 +2,7 @@ const ExcelJS = require("exceljs");
 const rosterRepo = require("../repositories/rosterRepository");
 const auditTrail = require("../utils/auditTrail");
 const { buildStyledSheet } = require("../utils/xlsxBuilder");
-const { findHeaderRowIndex } = require("../utils/xlsxParser");
+const { findHeaderRowIndex, parseExcelTimeCell } = require("../utils/xlsxParser");
 const ApiError = require("../utils/ApiError");
 
 const HEADER = ["Code", "Name", "Start Time (HH:MM)", "End Time (HH:MM)", "Break (min)", "Type (duty/night/off/leave/other)"];
@@ -54,8 +54,8 @@ async function importShiftDefinitions(buffer, actor, req) {
 
     const code = raw[0] ? String(raw[0]).trim().toUpperCase() : "";
     const name = raw[1] ? String(raw[1]).trim() : "";
-    const startTime = raw[2] ? String(raw[2]).trim() : "";
-    const endTime = raw[3] ? String(raw[3]).trim() : "";
+    const startTime = parseExcelTimeCell(raw[2]);
+    const endTime = parseExcelTimeCell(raw[3]);
     const breakMinRaw = raw[4];
     const type = raw[5] ? String(raw[5]).trim().toLowerCase() : "";
 

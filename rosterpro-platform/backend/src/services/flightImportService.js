@@ -2,18 +2,18 @@ const ExcelJS = require("exceljs");
 const flightRepo = require("../repositories/flightRepository");
 const auditTrail = require("../utils/auditTrail");
 const { buildStyledSheet } = require("../utils/xlsxBuilder");
-const { findHeaderRowIndex } = require("../utils/xlsxParser");
+const { findHeaderRowIndex, parseExcelTimeCell } = require("../utils/xlsxParser");
 const ApiError = require("../utils/ApiError");
 
-const HEADER = ["Flight Number", "Aircraft Registration", "Scheduled Arrival (HH:MM)", "Scheduled Departure (HH:MM)", "Days of Operation"];
+const HEADER = ["Flight Number", "Scheduled Arrival (HH:MM)", "Scheduled Departure (HH:MM)", "Days of Operation"];
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DAY_TOKENS = { SUN: 0, MON: 1, TUE: 2, WED: 3, THU: 4, FRI: 5, SAT: 6 };
 
 function generateTemplate() {
   const legend = "Days of Operation: comma-separated (Mon,Tue,Wed,Thu,Fri,Sat,Sun) or \"Daily\". At least one of Arrival/Departure time is required per row. The target month and station are chosen on the Import/Export screen, not in this file.";
   const exampleRows = [
-    ["6E202", "VT-ABC", "14:20", "15:10", "Mon,Wed,Fri"],
-    ["6E205", "", "", "09:00", "Daily"],
+    ["6E202", "14:20", "15:10", "Mon,Wed,Fri"],
+    ["6E205", "", "09:00", "Daily"],
   ];
   return buildStyledSheet("Flight Schedule Template", HEADER, exampleRows, { legend });
 }
@@ -65,7 +65,7 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
 
   const headerRowIndex = findHeaderRowIndex(ws, "Flight Number");
   if (!headerRowIndex) {
-    throw ApiError.badRequest("That file doesn't look like a flight schedule import — expected columns: Flight Number, Aircraft Registration, Scheduled Arrival, Scheduled Departure, Days of Operation");
+    throw ApiError.badRequest("That file doesn't look like a flight schedule import — expected columns: Flight Number, Scheduled Arrival, Scheduled Departure, Days of Operation");
   }
 
   const nDays = daysInMonth(monthKey);
@@ -79,10 +79,9 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
     if (!raw.length || !raw.some(v => v !== undefined && v !== null && String(v).trim() !== "")) continue; // blank row
 
     const flightNumber = raw[0] ? String(raw[0]).trim().toUpperCase() : "";
-    const aircraftReg = raw[1] ? String(raw[1]).trim() : "";
-    const arrival = raw[2] ? String(raw[2]).trim() : "";
-    const departure = raw[3] ? String(raw[3]).trim() : "";
-    const daysText = raw[4] ? String(raw[4]).trim() : "";
+    const arrival = parseExcelTimeCell(raw[1]);
+    const departure = parseExcelTimeCell(raw[2]);
+    const daysText = raw[3] ? String(raw[3]).trim() : "";
 
     if (!flightNumber) { errors.push(`Row ${r}: Flight Number is required`); continue; }
     if (!arrival && !departure) { errors.push(`Row ${r} (${flightNumber}): at least one of Scheduled Arrival / Scheduled Departure is required`); continue; }
@@ -93,7 +92,7 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
     if (unknown.length) errors.push(`Row ${r} (${flightNumber}): unrecognized Days of Operation value(s): ${unknown.join(", ")}`);
     if (!days.size && !unknown.length) errors.push(`Row ${r} (${flightNumber}): Days of Operation is required (e.g. "Mon,Wed,Fri" or "Daily")`);
 
-    parsedRows.push({ r, flightNumber, aircraftReg, arrival, departure, days });
+    parsedRows.push({ r, flightNumber, arrival, departure, days });
   }
 
   if (!parsedRows.length && !errors.length) throw ApiError.badRequest("No flight rows found in that file");
@@ -101,15 +100,6 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
   // to depends on it being read correctly), so a bad row anywhere blocks
   // the whole file rather than partially applying it.
   if (errors.length) throw ApiError.badRequest("Fix the following and re-upload — nothing was imported.", errors);
-
-  // Resolve each unique aircraft registration once.
-  const aircraftByReg = new Map();
-  const aircraftNotFound = new Set();
-  for (const reg of new Set(parsedRows.map(row => row.aircraftReg).filter(Boolean))) {
-    const aircraft = await flightRepo.findAircraftByRegistration(airlineId, reg);
-    if (aircraft) aircraftByReg.set(reg, aircraft);
-    else aircraftNotFound.add(reg);
-  }
 
   const rangeStart = new Date(Date.UTC(y, m - 1, 1));
   const rangeEnd = new Date(Date.UTC(y, m - 1, nDays + 1));
@@ -123,8 +113,6 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
       const anchor = f.scheduledOut || f.scheduledIn;
       if (anchor) existingByDay.set(anchor.getUTCDate(), f);
     }
-    const aircraftId = row.aircraftReg ? aircraftByReg.get(row.aircraftReg)?.id || null : null;
-
     for (let day = 1; day <= nDays; day++) {
       const weekday = new Date(Date.UTC(y, m - 1, day)).getUTCDay();
       if (!row.days.has(weekday)) continue;
@@ -132,7 +120,7 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
 
       const scheduledIn = row.arrival ? combine(y, m, day, row.arrival) : null;
       const scheduledOut = row.departure ? combine(y, m, day, row.departure) : null;
-      const data = { airlineId, stationId, aircraftId, flightNumber: row.flightNumber, scheduledIn, scheduledOut, updatedById: actor.sub };
+      const data = { airlineId, stationId, flightNumber: row.flightNumber, scheduledIn, scheduledOut, updatedById: actor.sub };
 
       const match = existingByDay.get(day);
       if (match) {
@@ -151,7 +139,7 @@ async function importFlightSchedule(stationId, monthKey, airlineId, buffer, acto
     stationId, actor, req
   );
 
-  return { created, updated, occurrenceCount, aircraftNotFound: [...aircraftNotFound] };
+  return { created, updated, occurrenceCount };
 }
 
 module.exports = { generateTemplate, importFlightSchedule };

@@ -23,12 +23,6 @@ function listFlightsForStation(stationId, from, to) {
   });
 }
 
-function findAircraftByRegistration(airlineId, registration) {
-  return prisma.aircraft.findFirst({
-    where: { airlineId, registration: { equals: registration, mode: "insensitive" }, deletedAt: null },
-  });
-}
-
 // Existing flights for one flight number at one station within a date
 // range — used by the schedule importer to decide create-vs-update per
 // date instead of blindly inserting a duplicate on every re-run.
@@ -65,5 +59,5 @@ function listDelaysForStation(stationId, from, to) {
 
 module.exports = {
   createFlight, findFlightById, updateFlightStatus, listFlightsForStation, createDelay, listDelaysForStation,
-  findAircraftByRegistration, findFlightsByNumberInRange, updateFlightSchedule,
+  findFlightsByNumberInRange, updateFlightSchedule,
 };
