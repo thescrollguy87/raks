@@ -61,6 +61,78 @@ describe("buildRosterAssignments — safety rules take priority over coverage co
   });
 });
 
+describe("buildRosterAssignments — full rest-gap rule set (ported from reference-ui)", () => {
+  function allPairs(codes) {
+    const pairs = [];
+    for (let i = 1; i < codes.length; i++) pairs.push([codes[i - 1], codes[i]]);
+    return pairs;
+  }
+
+  it("never schedules Morning immediately after Afternoon, or Afternoon immediately after Night, under coverage pressure", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const result = buildRosterAssignments({ staff, nDays: 12, leaveByUserDay: {}, blockedUserIds: [] });
+    const codes = result.assignments.map(a => a.code);
+    for (const [prev, cur] of allPairs(codes)) {
+      expect(prev === "A" && cur === "M").toBe(false);
+      expect(prev === "N" && cur === "A").toBe(false);
+      expect(prev === "N" && cur === "M").toBe(false);
+    }
+  });
+
+  it("gives two OFF days after two consecutive Night shifts before assigning anything else", () => {
+    // Enough B1 staff that the rotation itself, undisturbed by coverage
+    // filling, is the thing under test here.
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const result = buildRosterAssignments({ staff, nDays: 16, leaveByUserDay: {}, blockedUserIds: [] });
+    const codes = result.assignments.map(a => a.code);
+    for (let i = 2; i < codes.length; i++) {
+      if (codes[i - 2] === "N" && codes[i - 1] === "N") {
+        expect(codes[i]).toBe("O");
+      }
+    }
+  });
+
+  it("never lets coverage-filling place a Night shift immediately before an already-fixed Morning, even with a single tightly-staffed candidate", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const result = buildRosterAssignments({ staff, nDays: 9, leaveByUserDay: {}, blockedUserIds: [] });
+    const codes = result.assignments.map(a => a.code);
+    for (const [prev, cur] of allPairs(codes)) {
+      expect(prev === "N" && cur === "M").toBe(false);
+    }
+    // The gap this creates must be honestly reported, not silently dropped.
+    expect(result.violations.length).toBeGreaterThan(0);
+  });
+
+  it("never lets coverage-filling overwrite either mandatory OFF day after two consecutive nights, with any shift", () => {
+    // Reproduces a real bug found via live testing: with only 2 B1 staff
+    // covering B1 duty on every M/A/N shift, the coverage-fill pass was
+    // overwriting the SECOND mandatory rest day (not just the first) with
+    // an Afternoon shift, because the guard only protected against a Night
+    // fill, not an Afternoon or Morning one.
+    const staff = [{ id: "b1_0", category: "B1" }, { id: "b1_1", category: "B1" }];
+    const result = buildRosterAssignments({ staff, nDays: 16, leaveByUserDay: {}, blockedUserIds: [] });
+    for (const s of staff) {
+      const codes = result.assignments.filter(a => a.userId === s.id).sort((a, b) => a.day - b.day).map(a => a.code);
+      for (let i = 2; i < codes.length; i++) {
+        if (codes[i - 2] === "N" && codes[i - 1] === "N") {
+          expect(codes[i]).toBe("O");
+        }
+      }
+    }
+  });
+
+  it("continues the rest-gap look-back across the month boundary using tailByUser instead of assuming everyone was OFF", () => {
+    const staff = [{ id: "b1_0", category: "B1" }, { id: "b2_0", category: "B2" }];
+    const tailByUser = { b1_0: ["N", "N", "O"] }; // finished last month on two Nights
+    const result = buildRosterAssignments({ staff, nDays: 5, leaveByUserDay: {}, blockedUserIds: [], tailByUser });
+    const day1 = result.assignments.find(a => a.userId === "b1_0" && a.day === 1).code;
+    // Day 1's rotation slot for this staff member is Morning (offset 0) —
+    // immediately after a Night tail, that would be illegal, so it must be
+    // suppressed to OFF rather than defaulting to a fresh-start Morning.
+    expect(day1).not.toBe("M");
+  });
+});
+
 describe("buildRosterAssignments — blocking and leave", () => {
   it("never schedules a blocked staff member — every day is OFF", () => {
     const staff = [{ id: "s1", category: "B1" }, { id: "s2", category: "B1" }];

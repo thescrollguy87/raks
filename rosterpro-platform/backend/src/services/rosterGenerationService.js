@@ -39,25 +39,28 @@ function previousMonthKey(monthKey) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-// Continues each staff member's 8-day rotation from where the theoretical
-// (unperturbed) cycle would be after the previous month's day count, rather
-// than restarting everyone at phase 0 — e.g. if last month ended mid-cycle,
-// this month picks up from there instead of every staff member coincidentally
-// starting on a Morning shift again. This is deliberately the *unperturbed*
-// continuation (based on the previous month's length, not that month's
-// actual leave/coverage-adjusted assignments) — reconstructing each
-// person's true phase from a roster that leave and coverage passes already
-// nudged around isn't reliably possible without re-deriving intent, so this
-// keeps the guarantee simple and honest: the rotation keeps advancing
-// station-wide, it doesn't silently reset.
-async function buildContinuationOffsets(stationId, monthKey, staff) {
+// Continues the rest-gap look-back across the month boundary using each
+// staff member's REAL last 3 shift codes from the previous month's roster,
+// rather than assuming everyone was OFF on day zero — e.g. someone who
+// finished last month on Night gets a rest day next, not thrown straight
+// back onto Morning. This reads the previous month's actual (possibly
+// hand-edited or coverage-adjusted) assignments, not a theoretical replay,
+// so it reflects what really happened. The base rotation phase itself
+// (idx*2 in the pure algorithm) does NOT shift with this — only the
+// rest-gap prev/prev2/prev3 look-back for days 1-3 of the new month does.
+async function buildContinuationTails(stationId, monthKey, staff) {
   const prevKey = previousMonthKey(monthKey);
   const prevRoster = await rosterRepo.findRosterByStationAndMonth(stationId, prevKey);
   if (!prevRoster) {
     throw ApiError.badRequest(`No roster exists for ${prevKey} to continue from — generate that month first, or turn off "continue from previous."`);
   }
-  const prevNDays = daysInMonth(prevKey);
-  return Object.fromEntries(staff.map((s, idx) => [s.id, idx + prevNDays]));
+  const grid = await rosterRepo.getRosterGrid(stationId, prevRoster.id);
+  const byUserId = new Map(grid.map(u => [u.id, u.shiftAssignments]));
+  return Object.fromEntries(staff.map(s => {
+    const assignments = [...(byUserId.get(s.id) || [])].sort((a, b) => b.shiftDate - a.shiftDate);
+    const tail = [0, 1, 2].map(i => assignments[i]?.shiftDef?.code || "O");
+    return [s.id, tail];
+  }));
 }
 
 // `preview: true` computes the exact same plan (staffing, blocking, leave,
@@ -76,17 +79,17 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const monthStart = dateAt(monthKey, 1);
   const monthEnd = dateAt(monthKey, nDays);
 
-  const [leaves, complianceSummaries, shiftDefs, rotationOffsetByUser] = await Promise.all([
+  const [leaves, complianceSummaries, shiftDefs, tailByUser] = await Promise.all([
     leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
     Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
     rosterRepo.findAllShiftDefs(),
-    continueFromPrevious ? buildContinuationOffsets(stationId, monthKey, staff) : Promise.resolve(undefined),
+    continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);
   const leaveByUserDay = buildLeaveByUserDay(leaves, monthKey, nDays);
 
-  const { assignments, violations } = buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, rotationOffsetByUser });
+  const { assignments, violations } = buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser });
 
   // Resolve shift codes (M/A/N/O/L) to real ShiftDefinition ids — if any of
   // these seed codes are missing at this station's shift-definition set,

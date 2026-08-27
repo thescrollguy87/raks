@@ -73,8 +73,8 @@ export default function AutoRosterPage() {
         </div>
         <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 12 }}>
           {continueFromPrevious
-            ? "Continues each staff member's rotation from where the previous month's cycle would be, instead of restarting everyone at day 1."
-            : "Starts every staff member's rotation fresh, staggered by their position in the staff list."}
+            ? "Looks at how each staff member's previous month actually ended (their real last few shifts) and continues the rest-gap rules from there — someone who finished last month on Night gets a rest day next, not thrown straight back onto Morning."
+            : "Every staff member's rest-gap look-back starts fresh on day 1, as if everyone was OFF at the end of last month."}
         </div>
         <button className="btn btn-primary" disabled={busy} onClick={handlePreview}>
           {busy ? "Working…" : "🤖 Preview Roster"}

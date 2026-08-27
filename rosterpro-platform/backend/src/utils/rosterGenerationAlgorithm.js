@@ -4,69 +4,81 @@
 // actually worth getting right and testing thoroughly — can be unit tested
 // with plain objects, no mocking required.
 //
-// Algorithm, in order:
+// Ported from reference-ui/index.html's applyAutoRoster()/fillMinCat(), which
+// is the source of truth for this algorithm. Steps, in order:
 //   1. Each staff member gets an 8-day rotation (M,M,A,A,N,N,O,O), offset by
-//      their position in the roster so the whole station isn't on the same
-//      phase of the cycle at once.
+//      twice their position in the roster (idx*2) so the whole station isn't
+//      on the same phase of the cycle at once — same offset formula as the
+//      reference's "auto-distribute" default.
 //   2. Blocked staff (expired quals/license) get all-OFF — never scheduled.
 //   3. Approved leave overrides the rotation for those specific days.
-//   4. A rest-gap pass prevents a Night shift immediately followed by a
-//      Morning shift the next day (N→M) — not enough turnaround time.
+//   4. A rest-gap pass, applied inline day-by-day (not as a separate sweep,
+//      to match the reference's sequential computation), enforces every
+//      illegal-sequence rule the reference encodes: Morning can't follow
+//      Night or Afternoon, Afternoon can't follow Night, and two consecutive
+//      Night shifts force the following day OFF with a second OFF day after
+//      that. `tailByUser` carries each staff member's real last 3 shift
+//      codes from the previous month (when "continue from previous" is on)
+//      so this look-back is continuous across the month boundary instead of
+//      assuming everyone was OFF on day zero.
 //   5. A coverage pass enforces the same rule the roster generator's
 //      publish step and the dashboard's coverage widget both check: every
 //      shift needs ≥1 B1, and Night specifically needs ≥1 B2. Where the
 //      rotation alone doesn't satisfy this, an available (not blocked, not
-//      on leave, currently OFF that day) staff member of the right
-//      category is pulled onto that shift. Where NO such candidate exists,
-//      it's reported as a violation rather than silently left uncovered.
+//      on leave, currently OFF that day) staff member of the right category
+//      and not coming off a shift that would itself create a rest-gap
+//      violation is pulled onto that shift — same eligibility guard as the
+//      reference's fillMinCat, plus guards the reference's fillMinCat omits
+//      and this port deliberately adds: the candidate must currently be OFF
+//      that day (otherwise a tightly-staffed roster can silently overwrite
+//      their own already-assigned shift); no fill of any kind — Morning,
+//      Afternoon, or Night — is allowed to land on a day the rest-gap pass
+//      already committed to as a mandatory rest day (the day right after 2
+//      consecutive nights, or the second OFF day after that); and a Night
+//      fill specifically is also rejected if it would land immediately
+//      before a day already fixed to Morning. Without these, coverage-
+//      filling can retroactively undo a mandatory rest day the earlier pass
+//      just committed to, recreating the exact violation step 4 exists to
+//      prevent. Where NO eligible candidate exists, it's reported as a
+//      violation rather than silently left uncovered.
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 
-// rotationOffsetByUser lets a caller continue each staff member's rotation
-// from a previous month instead of restarting everyone at phase 0 (see
-// rosterGenerationService's "continue from previous roster" option) —
-// defaults to each staff's index in the list, same as before this existed.
-function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, rotationOffsetByUser }) {
+function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser }) {
   const blocked = new Set(blockedUserIds || []);
   const grid = {}; // userId -> array of nDays codes (1-indexed access via day-1)
 
-  // Step 1 + 2 + 3: base rotation, blocked staff, leave overrides.
+  // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
   staff.forEach((s, idx) => {
-    const offset = rotationOffsetByUser?.[s.id] ?? idx;
+    const offset = idx * 2;
+    const tail = tailByUser?.[s.id] || ["O", "O", "O"]; // [lastDay, 2ndLast, 3rdLast] of previous month
     const codes = new Array(nDays);
+
     for (let day = 1; day <= nDays; day++) {
       if (blocked.has(s.id)) { codes[day - 1] = "O"; continue; }
       const onLeave = leaveByUserDay?.[s.id]?.has(day);
       if (onLeave) { codes[day - 1] = "L"; continue; }
-      codes[day - 1] = ROTATION[(day - 1 + offset) % ROTATION.length];
+
+      let proposed = ROTATION[(day - 1 + offset) % ROTATION.length];
+
+      const prev = day > 1 ? codes[day - 2] : tail[0];
+      const prev2 = day > 2 ? codes[day - 3] : (day === 2 ? tail[0] : tail[1]);
+      const prev3 = day > 3 ? codes[day - 4] : (day === 3 ? tail[0] : day === 2 ? tail[1] : tail[2]);
+
+      if (proposed === "M" && prev === "N") proposed = "O";
+      if (proposed === "M" && prev === "A") proposed = "O";
+      if (proposed === "A" && prev === "N") proposed = "O";
+      if (prev2 === "N" && prev === "N") proposed = "O"; // after 2N -> OFF
+      if (prev3 === "N" && prev2 === "N" && prev === "O") proposed = "O"; // 2nd mandatory OFF day
+
+      codes[day - 1] = proposed;
     }
     grid[s.id] = codes;
   });
 
-  // Step 4: rest-gap pass — no Night immediately followed by Morning.
-  for (const s of staff) {
-    const codes = grid[s.id];
-    for (let day = 2; day <= nDays; day++) {
-      if (codes[day - 2] === "N" && codes[day - 1] === "M") {
-        codes[day - 1] = "O";
-      }
-    }
-  }
-
-  // Step 5: minimum coverage pass. Candidates for an M-shift gap must NOT
-  // have worked Night the day before — the coverage pass is not allowed to
-  // reintroduce the exact fatigue violation step 4 just removed. This is a
-  // deliberate priority: an uncovered shift becomes a reported violation
-  // for a human to resolve; a fatigued engineer never gets rescheduled
-  // just to make the numbers look right.
+  // Step 5: minimum coverage pass, per day in shift order M, A, N (B1), then
+  // N again (B2) — matching the reference's fillMinCat call order.
   const violations = [];
-
-  for (let day = 1; day <= nDays; day++) {
-    for (const shift of ["M", "A", "N"]) {
-      ensureCategoryCovered(shift, "B1", day);
-      if (shift === "N") ensureCategoryCovered(shift, "B2", day);
-    }
-  }
 
   function ensureCategoryCovered(shift, category, day) {
     const covered = staff.some(s => s.category === category && grid[s.id][day - 1] === shift);
@@ -76,8 +88,27 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
       if (s.category !== category) return false;
       if (blocked.has(s.id)) return false;
       if (leaveByUserDay?.[s.id]?.has(day)) return false;
-      if (grid[s.id][day - 1] !== "O") return false;
-      if (shift === "M" && day > 1 && grid[s.id][day - 2] === "N") return false; // rest-gap guard
+      if (grid[s.id][day - 1] !== "O") return false; // must currently be idle that day
+      const tail = tailByUser?.[s.id] || ["O", "O", "O"];
+      const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
+      const prev2 = day > 2 ? grid[s.id][day - 3] : (day === 2 ? tail[0] : tail[1]);
+      const prev3 = day > 3 ? grid[s.id][day - 4] : (day === 3 ? tail[0] : day === 2 ? tail[1] : tail[2]);
+      // The reference's own fillMinCat has no guard here at all, which lets
+      // any fill — not just a Night fill — land on a day the earlier
+      // rest-gap pass already committed to as a mandatory rest day (the day
+      // right after 2 consecutive nights, or the second OFF day after that),
+      // undoing that rest. This is the one place this port deliberately
+      // diverges from a literal reference copy: a tightly-staffed scenario
+      // must never have coverage-filling reintroduce a rest-gap violation
+      // the earlier pass just removed.
+      if (prev2 === "N" && prev === "N") return false;
+      if (prev3 === "N" && prev2 === "N" && prev === "O") return false;
+      if (shift === "M" && (prev === "N" || prev === "A")) return false; // rest-gap guard
+      if (shift === "A" && prev === "N") return false;
+      if (shift === "N") {
+        const next = day < nDays ? grid[s.id][day] : undefined;
+        if (next === "M") return false; // would put an N immediately before an already-fixed Morning
+      }
       return true;
     });
     if (candidate) {
@@ -85,6 +116,13 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
     } else {
       violations.push({ day, shift, category, issue: `No available ${category} to cover ${shift} on day ${day}` });
     }
+  }
+
+  for (let day = 1; day <= nDays; day++) {
+    ensureCategoryCovered("M", "B1", day);
+    ensureCategoryCovered("A", "B1", day);
+    ensureCategoryCovered("N", "B1", day);
+    ensureCategoryCovered("N", "B2", day);
   }
 
   const assignments = [];
