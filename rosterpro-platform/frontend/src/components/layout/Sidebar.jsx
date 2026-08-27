@@ -16,7 +16,6 @@ const NAV_SECTIONS = [
     { to: "/leave", icon: "🏖", label: "Leave & Absence", permission: ["leave", "read"] },
   ]},
   { label: "Operations", items: [
-    { to: "/tools", icon: "🔧", label: "Tool Control", permission: ["tool", "read"] },
     { to: "/flights", icon: "✈️", label: "Flights", permission: ["flight", "read"] },
   ]},
   { label: "Records", items: [

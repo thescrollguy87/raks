@@ -78,14 +78,6 @@ function notifyQualificationExpiring(user, { label, expiryDate, daysLeft }) {
   return dispatch(user, "EMAIL", "qualification_expiry", subject, body);
 }
 
-// ── Tools ─────────────────────────────────────────────────────────────────
-
-function notifyToolCalibrationDue(users, { toolNo, description, calibrationDue }) {
-  const subject = `Tool calibration due: ${toolNo}`;
-  const body = `${toolNo} (${description}) is due for calibration on ${calibrationDue}. Please arrange calibration before this date to avoid it being blocked from issue.`;
-  return Promise.all(users.map(u => dispatch(u, "EMAIL", "audit_due", subject, body)));
-}
-
 // ── Daily reminder (requirement #2 from the original ask) ───────────────────
 
 async function notifyDailyShiftReminder(user, { shiftDate, shiftLabel }) {
@@ -100,6 +92,6 @@ async function notifyDailyShiftReminder(user, { shiftDate, shiftLabel }) {
 module.exports = {
   dispatch, dispatchAll,
   notifyRosterPublished, notifyRosterUnpublished, notifyShiftChanged,
-  notifyLeaveDecision, notifyQualificationExpiring, notifyToolCalibrationDue,
+  notifyLeaveDecision, notifyQualificationExpiring,
   notifyDailyShiftReminder,
 };

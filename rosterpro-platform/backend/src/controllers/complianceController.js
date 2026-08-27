@@ -20,8 +20,8 @@ const listQualifications = asyncHandler(async (req, res) => {
 const expiringQualifications = asyncHandler(async (req, res) => {
   const results = await svc.listExpiringQualifications(parseInt(req.query.days, 10) || undefined);
   // Airline-wide by design (it's also the daily reminder job's data
-  // source) — scoped down here for a Station Manager the same way
-  // toolController.dueForCalibration scopes its own airline-wide list.
+  // source) — scoped down here for a Station Manager, same pattern used
+  // everywhere an internally-reused, unscoped list needs a per-caller filter.
   const filtered = isAirlineWide(req.user) ? results : results.filter(r => r.user?.stationId === req.user.stationId);
   res.json(filtered);
 });

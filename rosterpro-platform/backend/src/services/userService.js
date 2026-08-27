@@ -23,6 +23,19 @@ async function createStaff(body, actor, req) {
   if (!isPasswordStrong(body.password)) {
     throw ApiError.badRequest("Password must be at least 10 characters and include a letter and a number");
   }
+  // Non-admin roles are station-scoped by the actor's own token, same rule
+  // userController.list already applies — an admin can place a new hire at
+  // any station, everyone else can only add to their own. An admin who
+  // omits stationId entirely used to silently create a stationless staff
+  // record — invisible from every station-scoped screen (Staff Registry,
+  // Roster, …) with no error at all. Reject that explicitly instead: a
+  // brand-new staff member with nowhere to work is never a valid state.
+  const isAirlineWideActor = ["SUPER_ADMIN", "AIRLINE_ADMIN"].some(r => actor.roles.includes(r));
+  const stationId = isAirlineWideActor ? (body.stationId || null) : actor.stationId;
+  if (!stationId) {
+    throw ApiError.badRequest("A station is required to add a new staff member");
+  }
+
   const passwordHash = await hashPassword(body.password);
   const user = await userRepo.create({
     email: body.email.toLowerCase(),
@@ -32,11 +45,7 @@ async function createStaff(body, actor, req) {
     phone: body.phone || null,
     category: body.category || null,
     designation: body.designation || null,
-    // Non-admin roles are station-scoped by the actor's own token, same
-    // rule userController.list already applies — an admin can place a new
-    // hire at any station, everyone else can only add to their own.
-    stationId: ["SUPER_ADMIN", "AIRLINE_ADMIN"].some(r => actor.roles.includes(r))
-      ? (body.stationId || null) : actor.stationId,
+    stationId,
     airlineId: actor.airlineId || null,
     isEmailVerified: true, // an admin-created account doesn't need self-verification
     createdById: actor.sub,

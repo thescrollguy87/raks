@@ -3,10 +3,8 @@ const env = require("../config/env");
 const logger = require("../config/logger");
 
 const rosterRepo = require("../repositories/rosterRepository");
-const userRepo = require("../repositories/userRepository");
 const notificationService = require("../services/notificationService");
 const complianceService = require("../services/complianceService");
-const toolService = require("../services/toolService");
 
 function shiftLabel(shiftDef) {
   if (!shiftDef.startTime) return shiftDef.name;
@@ -61,21 +59,6 @@ async function runComplianceExpiryReminders() {
   }
 }
 
-// ── Job 3: tool calibration due ─────────────────────────────────────────────
-async function runToolCalibrationReminders() {
-  const tools = await toolService.listDueForCalibration(30);
-  logger.info(`[job:tool-calibration] ${tools.length} tools due for calibration within 30 days`);
-
-  for (const tool of tools) {
-    const recipients = await userRepo.findContactsByRoleAtStation(tool.stationId, ["STATION_MANAGER", "LMM", "STORE_KEEPER"]);
-    if (!recipients.length) continue;
-    await notificationService.notifyToolCalibrationDue(recipients, {
-      toolNo: tool.toolNo, description: tool.description,
-      calibrationDue: tool.calibrationDue?.toISOString().slice(0, 10),
-    });
-  }
-}
-
 function startScheduler() {
   // Daily reminder: defaults to 18:00 station-local time, so staff get
   // tomorrow's shift the evening before.
@@ -83,18 +66,17 @@ function startScheduler() {
     runDailyShiftReminders().catch(err => logger.error(`[job:daily-reminder] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  // Compliance/tool checks run once a day in the early morning — there's
-  // no reason these need to be more frequent than daily, and running them
+  // Compliance checks run once a day in the early morning — there's no
+  // reason these need to be more frequent than daily, and running them
   // off-peak avoids competing with normal daytime traffic.
   cron.schedule("0 6 * * *", () => {
     runComplianceExpiryReminders().catch(err => logger.error(`[job:compliance-expiry] failed: ${err.message}`));
-    runToolCalibrationReminders().catch(err => logger.error(`[job:tool-calibration] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance/tool checks @06:00");
+  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance expiry @06:00");
 }
 
 module.exports = {
   startScheduler,
-  runDailyShiftReminders, runComplianceExpiryReminders, runToolCalibrationReminders,
+  runDailyShiftReminders, runComplianceExpiryReminders,
 };

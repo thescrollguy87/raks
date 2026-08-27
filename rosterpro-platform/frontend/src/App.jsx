@@ -9,7 +9,6 @@ import StaffPage from "./pages/StaffPage.jsx";
 import LeavePage from "./pages/LeavePage.jsx";
 import QualificationsPage from "./pages/QualificationsPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
-import ToolControlPage from "./pages/ToolControlPage.jsx";
 import ChangeHistoryPage from "./pages/ChangeHistoryPage.jsx";
 import FlightsPage from "./pages/FlightsPage.jsx";
 import CoveragePage from "./pages/CoveragePage.jsx";
@@ -42,10 +41,6 @@ export default function App() {
         <Route
           path="/reports"
           element={<ProtectedRoute permission={["reports", "export"]}><ReportsPage /></ProtectedRoute>}
-        />
-        <Route
-          path="/tools"
-          element={<ProtectedRoute permission={["tool", "read"]}><ToolControlPage /></ProtectedRoute>}
         />
         <Route
           path="/history"

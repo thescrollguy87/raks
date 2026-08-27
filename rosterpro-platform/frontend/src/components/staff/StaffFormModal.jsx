@@ -1,5 +1,6 @@
 import { useState } from "react";
 import * as staffApi from "../../api/staff.js";
+import { useStation } from "../../store/StationContext.jsx";
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const ROLES = [
@@ -14,6 +15,7 @@ const ROLES = [
 // reaching parity with the prototype's add/edit/remove/delete, not a full
 // role-management screen).
 export default function StaffFormModal({ editingStaff, onSaved, onClose }) {
+  const { stationId } = useStation();
   const isEdit = !!editingStaff;
   const [email, setEmail] = useState(editingStaff?.email || "");
   const [password, setPassword] = useState("");
@@ -45,6 +47,12 @@ export default function StaffFormModal({ editingStaff, onSaved, onClose }) {
         await staffApi.createStaff({
           email, password, fullName, employeeId: employeeId || undefined,
           designation: designation || undefined, category, roles,
+          // Only meaningful for an airline-wide caller (SUPER_ADMIN/
+          // AIRLINE_ADMIN) — a station-scoped caller's own station always
+          // wins server-side regardless of what's sent here. Without this,
+          // an admin's new hire used to land with no station at all,
+          // invisible from every station-scoped screen.
+          stationId: stationId || undefined,
         });
       }
       onSaved();
