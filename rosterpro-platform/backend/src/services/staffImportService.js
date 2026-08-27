@@ -6,14 +6,34 @@ const { buildStyledSheet } = require("../utils/xlsxBuilder");
 const { findHeaderRowIndex } = require("../utils/xlsxParser");
 const ApiError = require("../utils/ApiError");
 
-const HEADER = ["Staff No", "First Name", "Last Name", "Email", "Designation", "Department", "Location"];
+const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"]; // same values Staff Registry's own Category field uses
+const TEMPLATE_HEADER = ["Staff No", "First Name", "Last Name", "Email", "Designation", "Category (B1/B2/CM/NCS/STO)", "Department", "Location (station IATA code, ICAO code, or name)"];
+const EXPORT_HEADER = ["Staff No", "First Name", "Last Name", "Email", "Designation", "Category", "Department", "Location"];
 
 function generateTemplate() {
-  const legend = "Location must match the station currently selected in RosterPro (by name or IATA code) — rows for any other station are skipped. Staff are matched by Staff No first, then by full name if no ID matches; unmatched rows are reported back rather than created (add new staff via Staff Registry first).";
+  const legend = "Location accepts the station's IATA code (e.g. AMD), ICAO code (e.g. VAAH), or its full name (e.g. Ahmedabad) — must match the station currently selected in RosterPro; rows for any other station are skipped. Category must be one of B1, B2, CM, NCS, STO — the same values used in Staff Registry. Staff are matched by Staff No first, then by full name if no ID matches; unmatched rows are reported back rather than created (add new staff via Staff Registry first).";
   const exampleRows = [
-    ["EMP1042", "Aisha", "Khan", "aisha.khan@airline.example", "B1 AME", "Line Maintenance", "Ahmedabad"],
+    ["EMP1042", "Aisha", "Khan", "aisha.khan@airline.example", "B1 AME", "B1", "Line Maintenance", "Ahmedabad"],
   ];
-  return buildStyledSheet("Employee Master Template", HEADER, exampleRows, { legend });
+  return buildStyledSheet("Employee Master Template", TEMPLATE_HEADER, exampleRows, { legend });
+}
+
+// A real, filled-in export of one station's active staff, in the exact
+// layout importEmployeeMaster expects back — so export → edit → re-import
+// round-trips (see StaffPage/ImportExportPage, which both call this).
+async function exportEmployeeMaster(stationId) {
+  const [staff, station] = await Promise.all([
+    userRepo.findActiveByStation(stationId),
+    rosterRepo.findStationById(stationId),
+  ]);
+  const rows = staff.map(s => {
+    const parts = s.fullName.trim().split(/\s+/);
+    return [
+      s.employeeId || "", parts[0] || "", parts.slice(1).join(" "), s.email || "",
+      s.designation || "", s.category || "", s.department || "", station?.name || "",
+    ];
+  });
+  return buildStyledSheet("Employee Master", EXPORT_HEADER, rows);
 }
 
 // Reconciles an external HR/master-data export against RosterPro's existing
@@ -36,7 +56,7 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
 
   const headerRowIndex = findHeaderRowIndex(ws, "Staff No");
   if (!headerRowIndex) {
-    throw ApiError.badRequest("That file doesn't look like an Employee Master import — expected columns: Staff No, First Name, Last Name, Email, Designation, Department, Location");
+    throw ApiError.badRequest("That file doesn't look like an Employee Master import — expected columns: Staff No, First Name, Last Name, Email, Designation, Category, Department, Location");
   }
 
   const [staff, station] = await Promise.all([
@@ -45,7 +65,11 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
   ]);
   const byEmployeeId = new Map(staff.filter(s => s.employeeId).map(s => [s.employeeId, s]));
   const byName = new Map(staff.map(s => [s.fullName.trim().toUpperCase(), s]));
-  const stationTokens = [station?.name?.toUpperCase(), station?.iataCode?.toUpperCase()].filter(Boolean);
+  // Accepts IATA code, ICAO code, or the station's own name — whichever a
+  // real source file happens to use — case-insensitive and trimmed.
+  const stationTokens = [station?.name, station?.iataCode, station?.icaoCode]
+    .filter(Boolean).map(t => t.toUpperCase());
+  const expectedLocationFormats = [station?.iataCode, station?.icaoCode, station?.name].filter(Boolean).join(", ");
 
   let updated = 0;
   const notFound = [];
@@ -64,8 +88,9 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
     const lastName = row[2] ? String(row[2]).trim() : "";
     const email = row[3] ? String(row[3]).trim().toLowerCase() : "";
     const designation = row[4] ? String(row[4]).trim() : "";
-    const department = row[5] ? String(row[5]).trim() : "";
-    const location = row[6] ? String(row[6]).trim() : "";
+    const categoryRaw = row[5] ? String(row[5]).trim() : "";
+    const department = row[6] ? String(row[6]).trim() : "";
+    const location = row[7] ? String(row[7]).trim() : "";
     const fullName = [firstName, lastName].filter(Boolean).join(" ");
 
     if (!fullName) continue; // nothing to match on
@@ -78,7 +103,15 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
     seenInFile.set(dupKey, r);
 
     if (location && stationTokens.length && !stationTokens.includes(location.toUpperCase())) {
-      stationMismatch.push(`${fullName} (row ${r}): Location "${location}" doesn't match the currently selected station`);
+      stationMismatch.push(
+        `${fullName} (row ${r}): Location "${location}" doesn't match ${station?.name || "the currently selected station"} — expected one of: ${expectedLocationFormats}`
+      );
+      continue;
+    }
+
+    const category = categoryRaw ? categoryRaw.toUpperCase() : "";
+    if (category && !CATEGORIES.includes(category)) {
+      rowErrors.push(`${fullName} (row ${r}): Category "${categoryRaw}" is invalid — expected one of: ${CATEGORIES.join(", ")}`);
       continue;
     }
 
@@ -88,6 +121,7 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
     const data = { fullName, updatedById: actor.sub };
     if (email) data.email = email;
     if (designation) data.designation = designation;
+    if (category) data.category = category;
     if (department) data.department = department;
     // Never overwrite an existing Staff No with a different one from the
     // file — the real-world problem this import solves is the same person
@@ -99,7 +133,7 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
     else if (staffNo && match.employeeId && match.employeeId !== staffNo) idKept.push(`${fullName} (row ${r}): kept existing Staff No "${match.employeeId}", file had "${staffNo}"`);
 
     try {
-      const before = { fullName: match.fullName, email: match.email, designation: match.designation, department: match.department };
+      const before = { fullName: match.fullName, email: match.email, designation: match.designation, category: match.category, department: match.department };
       await userRepo.update(match.id, data);
       updated++;
       await auditTrail.recordUpdate("User", match.id, stationId, before, data, actor, req);
@@ -115,4 +149,4 @@ async function importEmployeeMaster(stationId, buffer, actor, req) {
   return { updated, notFound: [...new Set(notFound)], stationMismatch, idKept, rowErrors, duplicates };
 }
 
-module.exports = { generateTemplate, importEmployeeMaster };
+module.exports = { generateTemplate, exportEmployeeMaster, importEmployeeMaster };

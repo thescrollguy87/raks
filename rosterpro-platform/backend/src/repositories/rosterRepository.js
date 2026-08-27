@@ -85,7 +85,7 @@ function getActiveStaffForGeneration(stationId) {
 }
 
 function findStationById(stationId) {
-  return prisma.station.findUnique({ where: { id: stationId }, select: { name: true, iataCode: true } });
+  return prisma.station.findUnique({ where: { id: stationId }, select: { name: true, iataCode: true, icaoCode: true } });
 }
 
 function findShiftDefByCode(code) {

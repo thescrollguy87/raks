@@ -147,7 +147,7 @@ function hardDelete(id) {
 function findActiveByStation(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    select: { id: true, employeeId: true, fullName: true, email: true, designation: true, department: true },
+    select: { id: true, employeeId: true, fullName: true, email: true, designation: true, category: true, department: true },
   });
 }
 

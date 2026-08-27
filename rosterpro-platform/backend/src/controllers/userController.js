@@ -73,4 +73,14 @@ const importEmployeeMaster = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { list, create, update, deactivate, reactivate, assignRoles, remove, importTemplate, importEmployeeMaster };
+const exportEmployeeMaster = asyncHandler(async (req, res) => {
+  const buffer = await staffImportService.exportEmployeeMaster(req.query.stationId);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="Employee_Master.xlsx"`);
+  res.send(buffer);
+});
+
+module.exports = {
+  list, create, update, deactivate, reactivate, assignRoles, remove,
+  importTemplate, importEmployeeMaster, exportEmployeeMaster,
+};

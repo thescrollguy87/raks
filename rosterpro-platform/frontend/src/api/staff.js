@@ -43,3 +43,15 @@ export async function downloadEmployeeMasterTemplate() {
 export function importEmployeeMaster(stationId, file) {
   return api.upload("/api/users/import", { stationId }, file);
 }
+
+export async function exportEmployeeMaster(stationId) {
+  const { blob, filename } = await api.download("/api/users/export", { stationId });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

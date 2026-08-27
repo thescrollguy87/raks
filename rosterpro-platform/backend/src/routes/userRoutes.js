@@ -14,6 +14,10 @@ router.use(requireAuth);
 
 router.get("/", requirePermission("users", "read"), ctrl.list);
 router.get("/import/template", requirePermission("staff", "read"), ctrl.importTemplate);
+router.get(
+  "/export", requirePermission("staff", "read"), validateQuery(importStaffQuerySchema), requireOwnStation("query"),
+  ctrl.exportEmployeeMaster
+);
 router.post(
   "/import", requirePermission("staff", "update"), validateQuery(importStaffQuerySchema), requireOwnStation("query"),
   upload.single("file"), ctrl.importEmployeeMaster

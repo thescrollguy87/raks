@@ -116,6 +116,7 @@ model Station {
   airlineId   String
   airline     Airline  @relation(fields: [airlineId], references: [id])
   iataCode    String   // e.g. AMD
+  icaoCode    String?  // e.g. VAAH — optional since not every station has one on file yet
   name        String
   timezone    String   @default("Asia/Kolkata")
   isActive    Boolean  @default(true)
