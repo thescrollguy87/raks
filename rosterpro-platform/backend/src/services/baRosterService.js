@@ -60,7 +60,7 @@ async function buildBARosterRows(stationId, dateStr) {
       nameParts.slice(1).join(" ") || "",
       s.email || "",
       s.designation || "",
-      "M&E",
+      s.department || "M&E",
       station?.iataCode || "",
       d, m, y,
       toBATime(def.startTime), toBATime(def.endTime), def.name.toUpperCase(),

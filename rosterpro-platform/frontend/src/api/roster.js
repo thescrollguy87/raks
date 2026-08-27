@@ -35,3 +35,27 @@ export function publishRoster(rosterId) {
 export function unpublishRoster(rosterId, reason) {
   return api.post("/api/roster/unpublish", { rosterId, reason });
 }
+
+export async function downloadShiftDefinitionsTemplate() {
+  return downloadFile("/api/roster/shift-definitions/template");
+}
+
+export async function downloadShiftDefinitionsExport() {
+  return downloadFile("/api/roster/shift-definitions/export");
+}
+
+export function importShiftDefinitions(file) {
+  return api.upload("/api/roster/shift-definitions/import", {}, file);
+}
+
+async function downloadFile(path, query) {
+  const { blob, filename } = await api.download(path, query);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

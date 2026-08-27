@@ -27,3 +27,19 @@ export function assignRoles(id, roles) {
 export function deleteStaff(id) {
   return api.delete(`/api/users/${id}`);
 }
+
+export async function downloadEmployeeMasterTemplate() {
+  const { blob, filename } = await api.download("/api/users/import/template");
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function importEmployeeMaster(stationId, file) {
+  return api.upload("/api/users/import", { stationId }, file);
+}

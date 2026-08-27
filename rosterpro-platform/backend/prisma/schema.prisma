@@ -154,6 +154,7 @@ model User {
   passwordHash      String
   category          StaffCategory?
   designation       String?
+  department        String? // e.g. "Line Maintenance" — free text, matches the Employee Master import's Department column
 
   isEmailVerified   Boolean  @default(false)
   emailVerifyToken  String?

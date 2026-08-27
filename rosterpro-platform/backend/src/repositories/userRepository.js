@@ -141,8 +141,18 @@ function hardDelete(id) {
   return prisma.user.delete({ where: { id } });
 }
 
+// Lean, exhaustive (non-paginated) roster of one station's active staff —
+// for the Employee Master import's ID/name matching, which needs to check
+// every row against every staff member at the station, not one page of them.
+function findActiveByStation(stationId) {
+  return prisma.user.findMany({
+    where: { stationId, isActive: true, deletedAt: null },
+    select: { id: true, employeeId: true, fullName: true, email: true, designation: true, department: true },
+  });
+}
+
 module.exports = {
-  findByEmail, findById, findStationId, updateLoginMeta, updatePasswordHash,
+  findByEmail, findById, findStationId, findActiveByStation, updateLoginMeta, updatePasswordHash,
   setPasswordResetToken, findByPasswordResetToken,
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,

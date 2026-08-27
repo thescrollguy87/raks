@@ -26,4 +26,9 @@ const createDelaySchema = z.object({
   rectification: z.string().max(1000).optional(),
 });
 
-module.exports = { createFlightSchema, updateFlightStatusSchema, createDelaySchema };
+const importFlightQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey: z.string().regex(/^\d{4}-\d{2}$/, "Expected month as YYYY-MM"),
+});
+
+module.exports = { createFlightSchema, updateFlightStatusSchema, createDelaySchema, importFlightQuerySchema };

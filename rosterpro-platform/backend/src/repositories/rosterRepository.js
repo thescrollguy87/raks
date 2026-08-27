@@ -53,7 +53,7 @@ function getRosterGrid(stationId, rosterId) {
     where: { stationId, isActive: true, deletedAt: null },
     orderBy: { fullName: "asc" },
     select: {
-      id: true, fullName: true, category: true, designation: true, employeeId: true, email: true,
+      id: true, fullName: true, category: true, designation: true, department: true, employeeId: true, email: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
         select: { shiftDate: true, shiftDefId: true, shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } }, note: true },
@@ -119,6 +119,25 @@ function findAllShiftDefs() {
   return prisma.shiftDefinition.findMany({ where: { isActive: true }, orderBy: { code: "asc" } });
 }
 
+// Includes inactive codes too — used by the import service to tell
+// "created" from "updated" and to build a before/after audit diff, which
+// needs the row even if it was previously deactivated.
+function findAllShiftDefsIncludingInactive() {
+  return prisma.shiftDefinition.findMany({ orderBy: { code: "asc" } });
+}
+
+// Shift definitions are airline-wide reference data (no stationId on the
+// model) — upserted by their unique code, same as prisma/seed.js's own
+// bootstrap of the default M/A/N/G/O/L/SL set.
+function upsertShiftDef({ code, name, startTime, endTime, breakMin, type }) {
+  const data = { name, startTime, endTime, breakMin, type, isActive: true };
+  return prisma.shiftDefinition.upsert({
+    where: { code },
+    update: data,
+    create: { code, ...data },
+  });
+}
+
 function findAssignment(rosterId, userId, shiftDate) {
   return prisma.shiftAssignment.findUnique({
     where: { rosterId_userId_shiftDate: { rosterId, userId, shiftDate } },
@@ -150,5 +169,6 @@ module.exports = {
   findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid,
   listRostersForStation,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
-  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAssignment, upsertAssignment, bulkUpsertAssignments,
+  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef,
+  findAssignment, upsertAssignment, bulkUpsertAssignments,
 };

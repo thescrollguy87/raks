@@ -1,6 +1,8 @@
 const asyncHandler = require("../utils/asyncHandler");
 const userListRepo = require("../repositories/userListRepository");
 const userService = require("../services/userService");
+const staffImportService = require("../services/staffImportService");
+const ApiError = require("../utils/ApiError");
 
 // This endpoint is the reference implementation for how every Module 4
 // domain list endpoint should look: requireAuth + requirePermission in the
@@ -58,4 +60,17 @@ const remove = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { list, create, update, deactivate, reactivate, assignRoles, remove };
+const importTemplate = asyncHandler(async (req, res) => {
+  const buffer = await staffImportService.generateTemplate();
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="Employee_Master_Template.xlsx"`);
+  res.send(buffer);
+});
+
+const importEmployeeMaster = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest("No file uploaded");
+  const result = await staffImportService.importEmployeeMaster(req.query.stationId, req.file.buffer, req.user, req);
+  res.json(result);
+});
+
+module.exports = { list, create, update, deactivate, reactivate, assignRoles, remove, importTemplate, importEmployeeMaster };

@@ -1,8 +1,15 @@
 const rosterService = require("../services/rosterService");
 const rosterGenerationService = require("../services/rosterGenerationService");
 const rosterImportService = require("../services/rosterImportService");
+const shiftDefinitionService = require("../services/shiftDefinitionService");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
+
+function sendXlsx(res, buffer, filename) {
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(buffer);
+}
 
 const getGrid = asyncHandler(async (req, res) => {
   const { stationId, monthKey } = req.query;
@@ -55,4 +62,23 @@ const importRoster = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster };
+const shiftDefinitionsTemplate = asyncHandler(async (req, res) => {
+  const buffer = await shiftDefinitionService.generateTemplate();
+  sendXlsx(res, buffer, "Shift_Definitions_Template.xlsx");
+});
+
+const shiftDefinitionsExport = asyncHandler(async (req, res) => {
+  const buffer = await shiftDefinitionService.exportShiftDefinitions();
+  sendXlsx(res, buffer, "Shift_Definitions.xlsx");
+});
+
+const importShiftDefinitions = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest("No file uploaded");
+  const result = await shiftDefinitionService.importShiftDefinitions(req.file.buffer, req.user, req);
+  res.json(result);
+});
+
+module.exports = {
+  getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
+  shiftDefinitionsTemplate, shiftDefinitionsExport, importShiftDefinitions,
+};

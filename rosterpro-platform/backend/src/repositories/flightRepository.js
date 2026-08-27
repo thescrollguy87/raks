@@ -23,6 +23,31 @@ function listFlightsForStation(stationId, from, to) {
   });
 }
 
+function findAircraftByRegistration(airlineId, registration) {
+  return prisma.aircraft.findFirst({
+    where: { airlineId, registration: { equals: registration, mode: "insensitive" }, deletedAt: null },
+  });
+}
+
+// Existing flights for one flight number at one station within a date
+// range — used by the schedule importer to decide create-vs-update per
+// date instead of blindly inserting a duplicate on every re-run.
+function findFlightsByNumberInRange(stationId, flightNumber, rangeStart, rangeEnd) {
+  return prisma.flight.findMany({
+    where: {
+      stationId, flightNumber, deletedAt: null,
+      OR: [
+        { scheduledIn: { gte: rangeStart, lt: rangeEnd } },
+        { scheduledOut: { gte: rangeStart, lt: rangeEnd } },
+      ],
+    },
+  });
+}
+
+function updateFlightSchedule(id, data) {
+  return prisma.flight.update({ where: { id }, data: { ...data, version: { increment: 1 } } });
+}
+
 function createDelay(data) {
   return prisma.engineeringDelay.create({ data });
 }
@@ -38,4 +63,7 @@ function listDelaysForStation(stationId, from, to) {
   });
 }
 
-module.exports = { createFlight, findFlightById, updateFlightStatus, listFlightsForStation, createDelay, listDelaysForStation };
+module.exports = {
+  createFlight, findFlightById, updateFlightStatus, listFlightsForStation, createDelay, listDelaysForStation,
+  findAircraftByRegistration, findFlightsByNumberInRange, updateFlightSchedule,
+};

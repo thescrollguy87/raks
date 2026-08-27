@@ -26,6 +26,7 @@ const NAV_SECTIONS = [
     { to: "/history", icon: "🕘", label: "Change History", permission: ["audit_trail", "read"] },
     { to: "/past-rosters", icon: "🗂️", label: "Past Rosters", permission: ["roster", "read"] },
     { to: "/compliance-rules", icon: "⚖️", label: "Compliance Rules" },
+    { to: "/import-export", icon: "🔄", label: "Import / Export", permission: ["reports", "export"] },
   ]},
 ];
 

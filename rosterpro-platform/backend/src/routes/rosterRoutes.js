@@ -18,6 +18,13 @@ router.use(requireAuth);
 
 router.get("/shift-definitions", requirePermission("shift", "read"), ctrl.shiftDefinitions);
 
+// Shift definitions are airline-wide (no stationId on the model) — these
+// three deliberately have no requireOwnStation check, unlike everything
+// else in this file.
+router.get("/shift-definitions/template", requirePermission("shift", "read"), ctrl.shiftDefinitionsTemplate);
+router.get("/shift-definitions/export", requirePermission("shift", "read"), ctrl.shiftDefinitionsExport);
+router.post("/shift-definitions/import", requirePermission("roster", "update"), upload.single("file"), ctrl.importShiftDefinitions);
+
 router.get("/", requirePermission("roster", "read"), validateQuery(rosterQuerySchema), requireOwnStation("query"), ctrl.getGrid);
 
 router.patch("/shift", requirePermission("shift", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), validate(upsertShiftSchema), ctrl.upsertShift);

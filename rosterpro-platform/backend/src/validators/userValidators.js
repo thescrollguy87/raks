@@ -34,4 +34,8 @@ const assignRolesSchema = z.object({
   roles: z.array(z.enum(ROLE_NAMES)).min(1, "At least one role is required"),
 });
 
-module.exports = { createUserSchema, updateUserSchema, assignRolesSchema, STAFF_CATEGORIES, ROLE_NAMES };
+const importStaffQuerySchema = z.object({
+  stationId: z.string().uuid(),
+});
+
+module.exports = { createUserSchema, updateUserSchema, assignRolesSchema, importStaffQuerySchema, STAFF_CATEGORIES, ROLE_NAMES };

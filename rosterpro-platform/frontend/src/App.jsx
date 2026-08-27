@@ -15,6 +15,7 @@ import FlightsPage from "./pages/FlightsPage.jsx";
 import CoveragePage from "./pages/CoveragePage.jsx";
 import PastRostersPage from "./pages/PastRostersPage.jsx";
 import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
+import ImportExportPage from "./pages/ImportExportPage.jsx";
 
 export default function App() {
   return (
@@ -61,6 +62,10 @@ export default function App() {
         <Route
           path="/past-rosters"
           element={<ProtectedRoute permission={["roster", "read"]}><PastRostersPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/import-export"
+          element={<ProtectedRoute permission={["reports", "export"]}><ImportExportPage /></ProtectedRoute>}
         />
       </Route>
     </Routes>
