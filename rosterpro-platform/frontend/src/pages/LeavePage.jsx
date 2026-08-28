@@ -21,7 +21,12 @@ export default function LeavePage() {
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [error, setError] = useState("");
 
-  const canApprove = hasPermission("leave", "approve");
+  // A Shift Incharge only has leave:approve_reports (scoped to their own
+  // direct reports server-side — see leaveService.decideLeave) rather than
+  // the station-wide leave:approve every other approver role has; either
+  // one should show the Approve/Reject buttons here, same as the backend
+  // accepts either for POST /leave/:id/decide.
+  const canApprove = hasPermission("leave", "approve") || hasPermission("leave", "approve_reports");
 
   // Memoized: usePageHeader re-syncs whenever `actions` changes reference,
   // and this component re-renders on every header-context update — a fresh
