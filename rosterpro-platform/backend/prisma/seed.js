@@ -15,7 +15,7 @@ const PERMISSIONS = [
   ["roster", "read"], ["roster", "create"], ["roster", "update"], ["roster", "publish"], ["roster", "unpublish"], ["roster", "delete"],
   ["shift", "read"], ["shift", "update"],
   ["staff", "read"], ["staff", "create"], ["staff", "update"], ["staff", "deactivate"], ["staff", "delete"],
-  ["leave", "read"], ["leave", "request"], ["leave", "approve"],
+  ["leave", "read"], ["leave", "request"], ["leave", "approve"], ["leave", "approve_reports"],
   ["qualification", "read"], ["qualification", "create"], ["qualification", "update"],
   ["license", "read"], ["license", "create"], ["license", "update"],
   ["training", "read"], ["training", "create"],
@@ -28,6 +28,15 @@ const PERMISSIONS = [
   ["station", "read"], ["station", "update"],
   ["airline", "read"], ["airline", "update"],
   ["audit_trail", "read"],
+];
+
+// Shared by every operational designation role (Duty Engineer, Sr. AME, AME,
+// CM, Sr. Tech, Tech, Jr. Tech, NCS, Stores) — view everything relevant to
+// their own work, request their own leave, no edit/approve rights anywhere.
+const VIEW_ONLY_STAFF_PERMISSIONS = [
+  "roster:read", "shift:read", "leave:read", "leave:request",
+  "qualification:read", "license:read", "training:read", "store:read",
+  "flight:read", "reports:read",
 ];
 
 // Which permissions each role gets by default. READ_ONLY_AUDITOR intentionally
@@ -51,25 +60,29 @@ const ROLE_MATRIX = {
     "store:read", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "audit_trail:read",
   ],
-  SHIFT_ENGINEER: [
-    "roster:read", "shift:read", "shift:update", "staff:read", "leave:read",
-    "qualification:read", "license:read",
-    "store:read", "audit_finding:read", "audit_finding:create", "flight:read",
-    "engineering_delay:create", "engineering_delay:read", "reports:read",
+  // Can approve leave for their own direct reports (see the "reportsToId"
+  // field on User / "L1 Manager" in the UI) and is otherwise view-only
+  // across the whole app — never roster:update, staff:update, etc.
+  SHIFT_INCHARGE: [
+    "roster:read", "shift:read", "staff:read", "leave:read", "leave:approve_reports",
+    "qualification:read", "license:read", "training:read", "store:read",
+    "audit_finding:read", "capa:read", "flight:read", "engineering_delay:read",
+    "reports:read", "users:read", "station:read", "audit_trail:read",
   ],
-  AME: [
-    "roster:read", "shift:read", "leave:request", "leave:read",
-    "qualification:read", "license:read", "training:read",
-    "store:read", "flight:read",
-  ],
-  TECHNICIAN: [
-    "roster:read", "shift:read", "leave:request", "leave:read",
-    "qualification:read", "training:read", "store:read",
-  ],
-  STORE_KEEPER: [
-    "roster:read", "leave:request", "leave:read",
-    "store:*",
-  ],
+  // Every operational designation below gets the exact same view-only
+  // permission set — read everything relevant to their own work, request
+  // their own leave, edit/approve nothing. Kept as separate roles (rather
+  // than collapsed into one) because "Role" is a real per-person field in
+  // the Staff Registry UI, not just an internal permission tier.
+  DUTY_ENGINEER: VIEW_ONLY_STAFF_PERMISSIONS,
+  SR_AME: VIEW_ONLY_STAFF_PERMISSIONS,
+  AME: VIEW_ONLY_STAFF_PERMISSIONS,
+  CM: VIEW_ONLY_STAFF_PERMISSIONS,
+  SR_TECH: VIEW_ONLY_STAFF_PERMISSIONS,
+  TECH: VIEW_ONLY_STAFF_PERMISSIONS,
+  JR_TECH: VIEW_ONLY_STAFF_PERMISSIONS,
+  NCS: VIEW_ONLY_STAFF_PERMISSIONS,
+  STORES: VIEW_ONLY_STAFF_PERMISSIONS,
   READ_ONLY_AUDITOR: [
     "roster:read", "shift:read", "staff:read", "leave:read", "qualification:read",
     "license:read", "training:read", "store:read", "audit_finding:read",

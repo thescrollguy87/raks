@@ -2,8 +2,9 @@ const { z } = require("zod");
 
 const STAFF_CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const ROLE_NAMES = [
-  "SUPER_ADMIN", "AIRLINE_ADMIN", "STATION_MANAGER", "LMM",
-  "SHIFT_ENGINEER", "AME", "TECHNICIAN", "STORE_KEEPER", "READ_ONLY_AUDITOR",
+  "SUPER_ADMIN", "AIRLINE_ADMIN", "STATION_MANAGER", "LMM", "SHIFT_INCHARGE",
+  "DUTY_ENGINEER", "SR_AME", "AME", "CM", "SR_TECH", "TECH", "JR_TECH", "NCS", "STORES",
+  "READ_ONLY_AUDITOR",
 ];
 
 // Password strength itself is checked in the service (isPasswordStrong),
@@ -18,6 +19,7 @@ const createUserSchema = z.object({
   category: z.enum(STAFF_CATEGORIES).optional(),
   designation: z.string().min(1).optional(),
   stationId: z.string().uuid().optional(),
+  reportsToId: z.string().uuid().optional(),
   roles: z.array(z.enum(ROLE_NAMES)).min(1, "At least one role is required"),
 });
 
@@ -28,6 +30,7 @@ const updateUserSchema = z.object({
   category: z.enum(STAFF_CATEGORIES).nullable().optional(),
   designation: z.string().min(1).nullable().optional(),
   stationId: z.string().uuid().nullable().optional(),
+  reportsToId: z.string().uuid().nullable().optional(),
 });
 
 const assignRolesSchema = z.object({

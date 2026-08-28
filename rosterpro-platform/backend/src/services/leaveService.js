@@ -43,6 +43,18 @@ async function decideLeave(leaveId, { decision, reason }, actor, req) {
   const leave = await leaveRepo.findById(leaveId);
   if (!leave) throw ApiError.notFound("Leave request not found");
   assertOwnStation(actor, leave.user.stationId);
+
+  // Station-wide approvers (leave:approve) can decide anyone at their
+  // station. A Shift Incharge only has leave:approve_reports — narrower,
+  // scoped to people who actually report to them (their "L1 Manager"
+  // relationship), not the whole station.
+  if (!actor.permissions?.includes("leave:approve")) {
+    const target = await userRepo.findStationAndManager(leave.userId);
+    if (target?.reportsToId !== actor.sub) {
+      throw ApiError.forbidden("You can only approve leave for your own direct reports");
+    }
+  }
+
   if (leave.status !== "PENDING") throw ApiError.conflict(`Leave is already ${leave.status.toLowerCase()}`);
 
   const updated = await leaveRepo.decide(leaveId, decision, actor.sub, actor.sub);

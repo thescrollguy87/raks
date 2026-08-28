@@ -50,6 +50,24 @@ function requirePermissionLive(resource, action) {
   };
 }
 
+// Passes if the actor holds ANY one of the given resource:action pairs —
+// e.g. requireAnyPermission(["leave","approve"], ["leave","approve_reports"])
+// for a route both a station-wide approver and a reports-scoped Shift
+// Incharge can reach; the handler itself still has to check which one
+// applies and scope accordingly (see leaveService.decideLeave).
+function requireAnyPermission(...pairs) {
+  return function (req, res, next) {
+    if (!req.user) return next(ApiError.unauthorized());
+    if (req.user.roles?.includes("SUPER_ADMIN")) return next();
+
+    const keys = pairs.map(([resource, action]) => `${resource}:${action}`);
+    if (!keys.some(key => req.user.permissions?.includes(key))) {
+      return next(ApiError.forbidden(`Missing permission: one of ${keys.join(", ")}`));
+    }
+    next();
+  };
+}
+
 // Convenience for routes that just need "any of these roles", when the
 // action doesn't map cleanly to a single resource:action permission.
 function requireRole(...allowedRoles) {
@@ -61,4 +79,4 @@ function requireRole(...allowedRoles) {
   };
 }
 
-module.exports = { requirePermission, requirePermissionLive, requireRole };
+module.exports = { requirePermission, requirePermissionLive, requireAnyPermission, requireRole };

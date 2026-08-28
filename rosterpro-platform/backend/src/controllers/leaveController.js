@@ -30,7 +30,17 @@ const list = asyncHandler(async (req, res) => {
   // Non-airline-wide callers can only ever see their own station's leave
   // requests — override whatever stationId they passed (or none) rather
   // than trust it, same as userController.list already does for staff.
-  const query = isAirlineWide(req.user) ? req.query : { ...req.query, stationId: req.user.stationId };
+  const query = isAirlineWide(req.user) ? { ...req.query } : { ...req.query, stationId: req.user.stationId };
+
+  // A Shift Incharge (leave:approve_reports only, not the station-wide
+  // leave:approve) reviewing requests for approval must only ever see
+  // their own direct reports — never the whole station's list — unless
+  // they're explicitly asking for their own leave history (userId=self).
+  const isReportsScopedApprover = req.user.permissions?.includes("leave:approve_reports") && !req.user.permissions?.includes("leave:approve");
+  if (isReportsScopedApprover && query.userId !== req.user.sub) {
+    query.reportsToId = req.user.sub;
+  }
+
   const result = await leaveService.listLeaves(query);
   res.json(result);
 });

@@ -15,6 +15,7 @@ function toPublicShape(user) {
     id: user.id, fullName: user.fullName, email: user.email, employeeId: user.employeeId,
     phone: user.phone, category: user.category, designation: user.designation,
     isActive: user.isActive, stationId: user.stationId, airlineId: user.airlineId,
+    reportsToId: user.reportsToId, reportsToName: user.reportsTo?.fullName || null,
     createdAt: user.createdAt, roles,
   };
 }
@@ -45,6 +46,7 @@ async function createStaff(body, actor, req) {
     phone: body.phone || null,
     category: body.category || null,
     designation: body.designation || null,
+    reportsToId: body.reportsToId || null,
     stationId,
     airlineId: actor.airlineId || null,
     isEmailVerified: true, // an admin-created account doesn't need self-verification

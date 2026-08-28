@@ -41,7 +41,10 @@ const APPLY = process.argv.includes("--apply");
 
 const TEMP_PASSWORD = "AkasaAmd2026!"; // shared temporary password — rotate immediately after import
 
-const CODE_TO_ROLES = { B1: ["AME"], B2: ["AME"], CM: ["TECHNICIAN"], NCS: ["TECHNICIAN"], STO: ["STORE_KEEPER"] };
+// RosterPro's Role field is granular (matches real-world designations, not
+// a handful of coarse tiers) — see rolesFor() below, which picks the exact
+// role from category + designation text the same way scripts/remap-legacy-
+// roles.js does for existing accounts.
 
 // Shift codes reference-ui's August roster actually uses that the platform
 // doesn't already seed (M/A/N/O/L exist; these three don't) — added via
@@ -104,8 +107,16 @@ function qualificationPlanFor(employeeId, category) {
 }
 
 function rolesFor(row) {
-  const roles = new Set(CODE_TO_ROLES[row.category] || ["TECHNICIAN"]);
-  if ((row.designation || "").toUpperCase().includes("STN I/C")) roles.add("LMM");
+  const d = (row.designation || "").toUpperCase();
+  const roles = new Set();
+  if (d.includes("STN I/C")) roles.add("LMM");
+  if (row.category === "B1" || row.category === "B2") roles.add(d.includes("SR") ? "SR_AME" : "AME");
+  else if (row.category === "CM") roles.add("CM");
+  else if (row.category === "STO") roles.add("STORES");
+  else if (d.includes("JR") && d.includes("TECH")) roles.add("JR_TECH");
+  else if (d.includes("SR") && d.includes("TECH")) roles.add("SR_TECH");
+  else if (d.includes("TECH")) roles.add("TECH");
+  else roles.add("NCS");
   return [...roles];
 }
 
@@ -203,6 +214,25 @@ async function apply() {
     }
   }
   console.log(`Staff: ${usersCreated} created, ${usersUpdated} updated.`);
+
+  // 2b. Default L1 Manager: Rakesh Patel (employee ID 700577) is the real
+  // Station In-Charge for this list, so he's the sensible real-world
+  // default reports-to for everyone else who doesn't already have one set
+  // (never overwrites an existing value — this only fills the gap on
+  // first import, an admin can reassign anyone individually afterward).
+  const stationInChargeId = userIdByEmployeeId["700577"];
+  if (stationInChargeId) {
+    let reportsToSet = 0;
+    for (const row of data.staff) {
+      const userId = userIdByEmployeeId[row.employeeId];
+      if (userId === stationInChargeId) continue;
+      const current = await prisma.user.findUnique({ where: { id: userId }, select: { reportsToId: true } });
+      if (current.reportsToId) continue;
+      await prisma.user.update({ where: { id: userId }, data: { reportsToId: stationInChargeId } });
+      reportsToSet++;
+    }
+    console.log(`L1 Manager: defaulted ${reportsToSet} staff to report to the Station In-Charge.`);
+  }
 
   // 3. Qualifications / licenses / training — skip if an equivalent record
   // already exists for that user, so --apply is safe to re-run.

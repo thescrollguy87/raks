@@ -9,6 +9,7 @@ const prisma = require("../config/prisma");
 const userInclude = {
   roles: { include: { role: { include: { permissions: { include: { permission: true } } } } } },
   station: { select: { id: true, name: true, iataCode: true } },
+  reportsTo: { select: { id: true, fullName: true } },
 };
 
 function findByEmail(email) {
@@ -24,6 +25,13 @@ function findById(id) {
 // avoids pulling the full roles/permissions tree on every such check.
 function findStationId(id) {
   return prisma.user.findUnique({ where: { id }, select: { stationId: true } });
+}
+
+// Lean lookup for leave-approval scoping — a Shift Incharge (leave:approve_reports
+// only, not the station-wide leave:approve) can decide a leave request only
+// for someone whose reportsToId is literally them.
+function findStationAndManager(id) {
+  return prisma.user.findUnique({ where: { id }, select: { stationId: true, reportsToId: true } });
 }
 
 // Who to notify for station-level operational alerts (low stock, tool
@@ -152,7 +160,7 @@ function findActiveByStation(stationId) {
 }
 
 module.exports = {
-  findByEmail, findById, findStationId, findActiveByStation, updateLoginMeta, updatePasswordHash,
+  findByEmail, findById, findStationId, findStationAndManager, findActiveByStation, updateLoginMeta, updatePasswordHash,
   setPasswordResetToken, findByPasswordResetToken,
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,

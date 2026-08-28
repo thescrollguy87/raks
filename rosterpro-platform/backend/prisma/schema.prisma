@@ -30,10 +30,16 @@ enum RoleName {
   AIRLINE_ADMIN
   STATION_MANAGER
   LMM
-  SHIFT_ENGINEER
+  SHIFT_INCHARGE
+  DUTY_ENGINEER // renamed from SHIFT_ENGINEER
+  SR_AME
   AME
-  TECHNICIAN
-  STORE_KEEPER
+  CM
+  SR_TECH
+  TECH
+  JR_TECH
+  NCS
+  STORES
   READ_ONLY_AUDITOR
 }
 
@@ -156,6 +162,10 @@ model User {
   category          StaffCategory?
   designation       String?
   department        String? // e.g. "Line Maintenance" — free text, matches the Employee Master import's Department column
+
+  reportsToId       String? // "L1 Manager" — who this person reports to, for scoped leave-approval visibility
+  reportsTo         User?    @relation("ReportsTo", fields: [reportsToId], references: [id], onDelete: SetNull)
+  directReports     User[]   @relation("ReportsTo")
 
   isEmailVerified   Boolean  @default(false)
   emailVerifyToken  String?

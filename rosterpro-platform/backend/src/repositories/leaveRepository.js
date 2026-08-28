@@ -39,12 +39,13 @@ function findOverlapping(userId, fromDate, toDate, excludeId) {
   });
 }
 
-function list({ userId, stationId, status, from, to, page, pageSize }) {
+function list({ userId, stationId, reportsToId, status, from, to, page, pageSize }) {
   const where = {
     deletedAt: null,
     ...(userId ? { userId } : {}),
     ...(status ? { status } : {}),
     ...(stationId ? { user: { stationId } } : {}),
+    ...(reportsToId ? { user: { reportsToId } } : {}),
     ...(from ? { toDate: { gte: from } } : {}),
     ...(to ? { fromDate: { lte: to } } : {}),
   };

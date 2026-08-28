@@ -10,8 +10,8 @@ const notificationService = require("../src/services/notificationService");
 const leaveService = require("../src/services/leaveService");
 const ApiError = require("../src/utils/ApiError");
 
-const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["AME"], stationId: "station-1" };
-const managerActor = { sub: "mgr-1", name: "Station Manager", roles: ["STATION_MANAGER"], stationId: "station-1" };
+const actor = { sub: "user-1", name: "Rakesh Patel", roles: ["AME"], permissions: ["leave:request", "leave:read"], stationId: "station-1" };
+const managerActor = { sub: "mgr-1", name: "Station Manager", roles: ["STATION_MANAGER"], permissions: ["leave:approve", "leave:read"], stationId: "station-1" };
 
 beforeEach(() => {
   leaveRepo.DEFAULT_ENTITLEMENT = { ANNUAL: 30, SICK: 12, CASUAL: 12, MEDICAL: 0, LWP: 0, TRAINING: 0, OTHER: 0 };
@@ -75,6 +75,35 @@ describe("leaveService.decideLeave", () => {
     expect(notificationService.notifyLeaveDecision).toHaveBeenCalledWith(owner, {
       leaveType: "SICK", fromDate: "2026-09-05", toDate: "2026-09-07",
       decision: "REJECTED", reason: "Coverage gap",
+    });
+  });
+
+  describe("Shift Incharge — reports-scoped approval (leave:approve_reports, not the station-wide leave:approve)", () => {
+    const shiftIncharge = { sub: "si-1", name: "Shift Incharge", roles: ["SHIFT_INCHARGE"], permissions: ["leave:approve_reports", "leave:read"], stationId: "station-1" };
+
+    it("approves a direct report's leave", async () => {
+      leaveRepo.findById.mockResolvedValue({
+        id: "leave-1", status: "PENDING", userId: "staff-1", leaveType: "ANNUAL",
+        fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"),
+        user: { fullName: "Staff One", email: "staff@amd.example", stationId: "station-1" },
+      });
+      userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: "si-1" });
+      leaveRepo.decide.mockResolvedValue({ id: "leave-1", status: "APPROVED" });
+
+      await leaveService.decideLeave("leave-1", { decision: "APPROVED" }, shiftIncharge, {});
+      expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", shiftIncharge.sub, shiftIncharge.sub);
+    });
+
+    it("rejects deciding on someone who isn't a direct report", async () => {
+      leaveRepo.findById.mockResolvedValue({
+        id: "leave-2", status: "PENDING", userId: "staff-2", leaveType: "ANNUAL",
+        fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"),
+        user: { fullName: "Staff Two", stationId: "station-1" },
+      });
+      userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: "someone-else" });
+
+      await expect(leaveService.decideLeave("leave-2", { decision: "APPROVED" }, shiftIncharge, {}))
+        .rejects.toMatchObject({ statusCode: 403 });
     });
   });
 });
