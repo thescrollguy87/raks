@@ -41,12 +41,21 @@ export default function DashboardPage() {
   const alerts = rosterCoverage?.violations || [];
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
-      <Widget title="👥 Staff">
-        <StatRow label="Total Active Staff" value={dgcaCompliance.totalActiveStaff} />
-        <StatRow label="On Duty Today" value={today.onDutyToday} />
-      </Widget>
+    <div>
+      {/* Headline numbers get the same bold stat-card treatment reference-ui
+          uses on its dashboard — a colored top accent and one big number,
+          for the metrics someone actually glances at first — while the
+          denser multi-metric widgets below stay as compact label/value
+          rows, since those hold several related figures each. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <StatCard tone="sky" label="Total Active Staff" value={dgcaCompliance.totalActiveStaff} icon="👥" />
+        <StatCard tone="green" label="On Duty Today" value={today.onDutyToday} icon="✅" />
+        <StatCard tone={alerts.length > 0 ? "red" : "green"} label="Compliance Alerts" value={alerts.length} icon="🚨" />
+        <StatCard tone={qualificationExpiry.qualifications.expired + qualificationExpiry.licenses.expired > 0 ? "red" : "green"} label="Qualifications Expired" value={qualificationExpiry.qualifications.expired + qualificationExpiry.licenses.expired} icon="🔒" />
+        <StatCard tone="amber" label="Expiring (30 days)" value={qualificationExpiry.qualifications.expiring + qualificationExpiry.licenses.expiring} icon="⚠️" />
+      </div>
 
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
       <Widget title="📊 Today's Coverage by Category">
         {Object.entries(today.byCategory).some(([, n]) => n > 0) ? (
           Object.entries(today.byCategory).map(([cat, n]) => (
@@ -139,6 +148,16 @@ export default function DashboardPage() {
           </div>
         )}
       </Widget>
+    </div>
+    </div>
+  );
+}
+
+function StatCard({ tone, label, value, icon }) {
+  return (
+    <div className={`stat-card ${tone}`}>
+      <div className="stat-label">{icon} {label}</div>
+      <div className="stat-value">{value}</div>
     </div>
   );
 }
