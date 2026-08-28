@@ -5,6 +5,9 @@ import { useStation } from "../store/StationContext.jsx";
 import * as staffApi from "../api/staff.js";
 import StaffFormModal from "../components/staff/StaffFormModal.jsx";
 
+const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
+const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
+
 // Same hidden-input-plus-button trigger ImportExportPage.jsx uses — kept
 // page-local rather than shared since it's a few lines and this is the
 // only other place that needs it.
@@ -150,48 +153,61 @@ export default function StaffPage() {
           ))}
         </div>
       )}
-      <table className="rt" style={{ width: "100%" }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Name</th>
-            <th>Category</th>
-            <th style={{ textAlign: "left" }}>Designation</th>
-            <th>Status</th>
-            <th>Roles</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.items.map(s => (
-            <tr key={s.id} style={!s.isActive ? { opacity: 0.6 } : undefined}>
-              <td style={{ textAlign: "left", padding: "6px 4px" }}>{s.fullName}</td>
-              <td><span className={`cat-tag cat-${s.category || "NCS"}`}>{s.category || "NCS"}</span></td>
-              <td style={{ textAlign: "left" }}>{s.designation}</td>
-              <td>
-                <span className="tag" style={{ background: s.isActive ? "rgba(0,200,83,.12)" : "rgba(148,163,184,.15)", color: s.isActive ? "var(--rp-green)" : "var(--text-dim)" }}>
-                  {s.isActive ? "Active" : "Inactive"}
-                </span>
-              </td>
-              <td style={{ fontSize: 10, color: "var(--text-dim)" }}>{s.roles.join(", ")}</td>
-              <td style={{ whiteSpace: "nowrap" }}>
-                {canUpdate && (
-                  <button className="btn btn-ghost btn-sm" onClick={() => setEditingStaff(s)}>✏️ Edit</button>
-                )}
-                {canDeactivate && (
-                  s.isActive ? (
-                    <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-red)" }} onClick={() => handleDeactivate(s)}>🗑 Deactivate</button>
-                  ) : (
-                    <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-green)" }} onClick={() => handleReactivate(s)}>↩ Reactivate</button>
-                  )
-                )}
-                {canDelete && (
-                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-red)" }} onClick={() => handleDelete(s)}>❌ Delete</button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {CATEGORIES.map(cat => {
+        const rows = data.items.filter(s => (s.category || "NCS") === cat);
+        if (!rows.length) return null;
+        return (
+          <div key={cat} style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "var(--text-dim)", textTransform: "uppercase", letterSpacing: 1, margin: "10px 0 6px", display: "flex", alignItems: "center", gap: 6 }}>
+              <span className={`cat-tag cat-${cat}`}>{cat}</span> {CAT_LABELS[cat]} · {rows.length} staff
+            </div>
+            <table className="rt" style={{ width: "100%" }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "left" }}>Name</th>
+                  <th style={{ textAlign: "left" }}>Employee ID</th>
+                  <th style={{ textAlign: "left" }}>Email</th>
+                  <th style={{ textAlign: "left" }}>Designation</th>
+                  <th>Status</th>
+                  <th>Role</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(s => (
+                  <tr key={s.id} style={!s.isActive ? { opacity: 0.6 } : undefined}>
+                    <td style={{ textAlign: "left", padding: "6px 4px" }}>{s.fullName}</td>
+                    <td style={{ textAlign: "left", fontFamily: "var(--mono)", fontSize: 10, color: "var(--text-dim)" }}>{s.employeeId || "—"}</td>
+                    <td style={{ textAlign: "left", fontSize: 10, color: "var(--text-dim)" }}>{s.email}</td>
+                    <td style={{ textAlign: "left" }}>{s.designation}</td>
+                    <td>
+                      <span className="tag" style={{ background: s.isActive ? "rgba(0,200,83,.12)" : "rgba(148,163,184,.15)", color: s.isActive ? "var(--rp-green)" : "var(--text-dim)" }}>
+                        {s.isActive ? "Active" : "Inactive"}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 10, color: "var(--text-dim)" }}>{s.roles.join(", ")}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      {canUpdate && (
+                        <button className="btn btn-ghost btn-sm" onClick={() => setEditingStaff(s)}>✏️ Edit</button>
+                      )}
+                      {canDeactivate && (
+                        s.isActive ? (
+                          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-red)" }} onClick={() => handleDeactivate(s)}>🗑 Deactivate</button>
+                        ) : (
+                          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-green)" }} onClick={() => handleReactivate(s)}>↩ Reactivate</button>
+                        )
+                      )}
+                      {canDelete && (
+                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 3, color: "var(--rp-red)" }} onClick={() => handleDelete(s)}>❌ Delete</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })}
 
       {showAddModal && (
         <StaffFormModal onSaved={load} onClose={() => setShowAddModal(false)} />
