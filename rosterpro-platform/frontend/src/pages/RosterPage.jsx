@@ -24,6 +24,31 @@ function shiftMonth(monthKey, delta) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+// Net duty hours for one shift code — end minus start (wrapping past
+// midnight for an overnight shift like Night) minus its break, same
+// formula reference-ui's shiftNetHrs uses. Off/leave/unrecognized codes
+// have no start/end and net 0.
+function shiftNetHours(def) {
+  if (!def?.startTime || !def?.endTime) return 0;
+  const [sh, sm] = def.startTime.split(":").map(Number);
+  const [eh, em] = def.endTime.split(":").map(Number);
+  let mins = (eh * 60 + em) - (sh * 60 + sm);
+  if (mins <= 0) mins += 24 * 60;
+  return Math.max(0, (mins - (def.breakMin || 0)) / 60);
+}
+
+// 7-day blocks across the real length of the month (4 for a 28-day
+// February, 5 for a 29-31 day month) — same idea as reference-ui's WKB
+// weekly hour columns, adapted to the actual day count instead of a
+// hardcoded 31.
+function weekBlocks(nDays) {
+  const blocks = [];
+  for (let start = 1; start <= nDays; start += 7) {
+    blocks.push([start, Math.min(start + 6, nDays)]);
+  }
+  return blocks;
+}
+
 export default function RosterPage() {
   const { hasPermission } = useAuth();
   const { stationId, loading: stationLoading, currentStation } = useStation();
@@ -227,6 +252,8 @@ export default function RosterPage() {
               {Array.from({ length: nDays }, (_, i) => (
                 <th key={i}><div style={{ fontSize: 8 }}>{i + 1}</div></th>
               ))}
+              {weekBlocks(nDays).map((wk, i) => <th key={i}>W{i + 1}</th>)}
+              <th>Tot</th>
             </tr>
           </thead>
           <tbody>
@@ -254,37 +281,58 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
   return (
     <>
       <tr>
-        <td colSpan={nDays + 2} style={{ padding: "2px 7px", fontSize: 8, fontWeight: 700, color: "var(--text-dim)" }}>
+        <td colSpan={nDays + 2 + weekBlocks(nDays).length + 1} style={{ padding: "2px 7px", fontSize: 8, fontWeight: 700, color: "var(--text-dim)" }}>
           <span className={`cat-tag cat-${group.cat}`}>{group.cat}</span> {CAT_LABELS[group.cat]} · {group.staff.length} staff
         </td>
       </tr>
-      {group.staff.map(s => (
-        <tr key={s.id}>
-          <td className="sc">
-            <div className="sn">{s.fullName.split("(")[0].trim().substring(0, 20)}</div>
-            <div className="sr">{s.designation}</div>
-          </td>
-          <td className="sc2"><span className={`cat-tag cat-${group.cat}`}>{group.cat}</span></td>
-          {Array.from({ length: nDays }, (_, i) => {
-            const day = i + 1;
-            const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
-            const assignment = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
-            const code = assignment?.shiftDef.code || "O";
-            const def = shiftDefByCode[code];
-            return (
+      {group.staff.map(s => {
+        // Resolve each day's code once so the weekly-total pass below
+        // doesn't re-derive it from shiftAssignments a second time.
+        const codesByDay = Array.from({ length: nDays }, (_, i) => {
+          const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
+          const assignment = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+          return assignment?.shiftDef.code || "O";
+        });
+        const blocks = weekBlocks(nDays);
+        const weekHours = blocks.map(([from, to]) => {
+          let hrs = 0;
+          for (let day = from; day <= to; day++) hrs += shiftNetHours(shiftDefByCode[codesByDay[day - 1]]);
+          return hrs;
+        });
+        const totalHours = weekHours.reduce((a, b) => a + b, 0);
+
+        return (
+          <tr key={s.id}>
+            <td className="sc">
+              <div className="sn">{s.fullName.split("(")[0].trim().substring(0, 20)}</div>
+              <div className="sr">{s.designation}</div>
+            </td>
+            <td className="sc2"><span className={`cat-tag cat-${group.cat}`}>{group.cat}</span></td>
+            {codesByDay.map((code, i) => {
+              const day = i + 1;
+              const def = shiftDefByCode[code];
+              return (
+                <td key={i}>
+                  <div
+                    className="sp" onClick={() => onCellClick(s, day)}
+                    title={def ? `${def.name}${def.startTime ? `: ${def.startTime}–${def.endTime}` : ""}` : code}
+                    style={{ background: def?.bg || "rgba(180,180,180,.1)", color: def?.color || "#AABBCC" }}
+                  >
+                    <span className="sc-code">{code}</span>
+                    {def?.startTime && <span className="sc-time">{def.startTime}–{def.endTime}</span>}
+                  </div>
+                </td>
+              );
+            })}
+            {weekHours.map((hrs, i) => (
               <td key={i}>
-                <div
-                  className="sp" onClick={() => onCellClick(s, day)}
-                  title={def ? `${def.name}${def.startTime ? `: ${def.startTime}–${def.endTime}` : ""}` : code}
-                  style={{ background: def?.bg || "rgba(180,180,180,.1)", color: def?.color || "#AABBCC" }}
-                >
-                  <span className="sc-code">{code}</span>
-                </div>
+                <span className={hrs > 48 ? "hrs-over" : hrs > 42 ? "hrs-warn" : "hrs-ok"}>{hrs.toFixed(1)}</span>
               </td>
-            );
-          })}
-        </tr>
-      ))}
+            ))}
+            <td><span className={totalHours > 200 ? "hrs-warn" : "hrs-ok"}>{totalHours.toFixed(1)}</span></td>
+          </tr>
+        );
+      })}
     </>
   );
 }
@@ -316,6 +364,7 @@ function CoverageRows({ staff, nDays, monthKey }) {
               </td>
             );
           })}
+          <td colSpan={weekBlocks(nDays).length + 1}></td>
         </tr>
       ))}
     </>
