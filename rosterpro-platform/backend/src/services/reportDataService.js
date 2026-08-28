@@ -13,6 +13,19 @@ function dateLabel(monthKey, day) {
   return new Date(Date.UTC(y, m - 1, day)).toISOString().slice(0, 10);
 }
 
+// Same grouping order the Staff Registry and Roster grid UI both use —
+// B1, B2, CM, NCS, STO — so an exported file reads the same way the app
+// already does, not alphabetically by name.
+const CATEGORY_ORDER = ["B1", "B2", "CM", "NCS", "STO"];
+function byCategoryThenName(staff) {
+  return [...staff].sort((a, b) => {
+    const ca = CATEGORY_ORDER.indexOf(a.category || "NCS");
+    const cb = CATEGORY_ORDER.indexOf(b.category || "NCS");
+    if (ca !== cb) return ca - cb;
+    return a.fullName.localeCompare(b.fullName);
+  });
+}
+
 // ── Roster grid ───────────────────────────────────────────────────────────
 
 // Shapes the roster grid into { header: string[], rows: string[][] } —
@@ -23,7 +36,7 @@ async function getRosterReportData(stationId, monthKey) {
   const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
   if (!roster) throw ApiError.notFound(`No roster exists yet for ${monthKey}`);
 
-  const staff = await rosterRepo.getRosterGrid(stationId, roster.id);
+  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
   const nDays = daysInMonth(monthKey);
   const dayLabels = Array.from({ length: nDays }, (_, i) => dateLabel(monthKey, i + 1));
 

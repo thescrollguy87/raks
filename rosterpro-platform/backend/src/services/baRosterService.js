@@ -26,6 +26,18 @@ function toBATime(hhmm) {
 
 function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
 
+// Same B1/B2/CM/NCS/STO grouping order the Staff Registry and Roster grid
+// UI use, so the exported file reads the same way the app already does.
+const CATEGORY_ORDER = ["B1", "B2", "CM", "NCS", "STO"];
+function byCategoryThenName(staff) {
+  return [...staff].sort((a, b) => {
+    const ca = CATEGORY_ORDER.indexOf(a.category || "NCS");
+    const cb = CATEGORY_ORDER.indexOf(b.category || "NCS");
+    if (ca !== cb) return ca - cb;
+    return a.fullName.localeCompare(b.fullName);
+  });
+}
+
 async function buildBARosterRows(stationId, dateStr) {
   const monthKey = monthKeyOf(dateStr);
   const [y, m, d] = dateStr.split("-").map(Number);
@@ -38,7 +50,7 @@ async function buildBARosterRows(stationId, dateStr) {
     throw ApiError.notFound(`No roster exists for ${monthKey} yet — generate or create it first.`);
   }
 
-  const staff = await rosterRepo.getRosterGrid(stationId, roster.id);
+  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
   const rows = [];
 
   for (const s of staff) {
