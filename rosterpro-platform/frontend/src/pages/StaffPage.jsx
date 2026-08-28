@@ -106,6 +106,8 @@ export default function StaffPage() {
         { label: "Not matched to any staff at this station", items: r.notFound },
         { label: "Skipped — Location didn't match this station", items: r.stationMismatch },
         { label: "Row errors", items: r.rowErrors },
+        { label: "Role not recognized (left unchanged)", items: r.roleWarnings },
+        { label: "L1 Manager not found (left unchanged)", items: r.l1ManagerWarnings },
         { label: "Duplicate rows in file", items: r.duplicates },
       ];
       setImportResult({ tone: "green", headline: `${r.updated} staff record(s) updated.`, lists });

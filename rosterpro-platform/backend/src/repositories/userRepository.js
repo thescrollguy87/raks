@@ -137,6 +137,19 @@ function setRoles(userId, roleNames) {
   });
 }
 
+// Grants one additional role without touching any others a person already
+// holds — used by the Employee Master import's Role column, which is meant
+// to correct/set someone's primary operational role, not silently wipe out
+// an extra grant like LMM on top of their base AME role (setRoles would).
+async function addRole(userId, roleName) {
+  const role = await prisma.role.findUnique({ where: { name: roleName } });
+  if (!role) return;
+  await prisma.userRole.upsert({
+    where: { userId_roleId: { userId, roleId: role.id } },
+    update: {}, create: { userId, roleId: role.id },
+  });
+}
+
 // Real, irreversible delete — distinct from setActive(false), which is the
 // reversible "remove from future scheduling but keep history" action. Only
 // safe because every dependent table that's meaningless without the user
@@ -155,7 +168,11 @@ function hardDelete(id) {
 function findActiveByStation(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    select: { id: true, employeeId: true, fullName: true, email: true, designation: true, category: true, department: true },
+    select: {
+      id: true, employeeId: true, fullName: true, email: true, designation: true, category: true, department: true,
+      reportsToId: true, reportsTo: { select: { id: true, employeeId: true, fullName: true } },
+      roles: { select: { role: { select: { name: true } } } },
+    },
   });
 }
 
@@ -165,5 +182,5 @@ module.exports = {
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,
   flattenRolesAndPermissions, findContactsByRoleAtStation,
-  create, update, setActive, setRoles, hardDelete,
+  create, update, setActive, setRoles, addRole, hardDelete,
 };

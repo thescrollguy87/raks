@@ -133,6 +133,8 @@ export default function ImportExportPage() {
         { label: "Kept existing Staff No (file had a different one)", items: r.idKept },
         { label: "Row errors", items: r.rowErrors },
         { label: "Duplicate rows in file", items: r.duplicates },
+        { label: "Role not recognized (left unchanged)", items: r.roleWarnings },
+        { label: "L1 Manager not found (left unchanged)", items: r.l1ManagerWarnings },
       ];
       setEmpResult({ tone: "green", headline: `${r.updated} staff record(s) updated.`, lists });
     } catch (err) {
@@ -232,7 +234,7 @@ export default function ImportExportPage() {
         <div className="card">
           <div className="card-title">🧑‍🔧 Employee Master</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            Sync names, email, designation, category and department for {currentStation?.name}'s existing staff from an HR/master-data export. Matches by Staff No first, falling back to full name — never creates a new login, never moves anyone to another station.
+            Sync names, email, designation, category, role, department and L1 Manager for {currentStation?.name}'s existing staff from an HR/master-data export. Matches by Staff No first, falling back to full name — never creates a new login, never moves anyone to another station.
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             <button className="btn btn-ghost" onClick={() => staffApi.downloadEmployeeMasterTemplate()}>⬇ Download Template</button>
