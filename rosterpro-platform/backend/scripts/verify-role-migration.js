@@ -3,7 +3,7 @@ const prisma = new PrismaClient();
 
 (async () => {
   const roles = await prisma.role.findMany({
-    select: { name: true, _count: { select: { userRoles: true } } },
+    select: { name: true, _count: { select: { users: true } } },
     orderBy: { name: "asc" },
   });
 
@@ -17,7 +17,7 @@ const prisma = new PrismaClient();
 
   console.log("=== ROLE VERIFICATION ===");
   console.log("Roles + assigned-user counts:");
-  for (const r of roles) console.log(`  ${r.name}: ${r._count.userRoles} users`);
+  for (const r of roles) console.log(`  ${r.name}: ${r._count.users} users`);
   console.log("RoleName enum values in DB:", enumRows.map((r) => r.enumlabel).join(", "));
   console.log("Leftover legacy-role user_roles rows:", legacyLeftover[0].c);
   console.log("=== END ===");
