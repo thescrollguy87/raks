@@ -133,6 +133,47 @@ describe("buildRosterAssignments — full rest-gap rule set (ported from referen
   });
 });
 
+describe("buildRosterAssignments — pattern-based mode (Staff Allocation tab)", () => {
+  it("uses the assigned pattern's cycle + offset instead of the default 8-day rotation", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } }; // 3-day General cycle
+    const result = buildRosterAssignments({ staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser });
+    const codes = result.assignments.map(a => a.code);
+    // The pattern sets the baseline (G,G,O,G,G,O); the coverage pass still
+    // runs on top exactly as it does for the no-pattern path, and with only
+    // one B1 staff member it correctly reclaims the pattern's OFF days
+    // (day 3 and 6, the only days this lone candidate is idle) to satisfy
+    // the "every shift needs >=1 B1" minimum.
+    expect(codes).toEqual(["G", "G", "M", "G", "G", "M"]);
+  });
+
+  it("still enforces the N-then-M rest-gap rule on a pattern using custom shift codes, via shiftDefsByCode type lookup", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    // A pattern of two custom Night-type shifts back to back into a custom Morning code.
+    const patternByUser = { b1_0: { codes: ["N2", "N2", "M1"], offset: 0 } };
+    const shiftDefsByCode = { N2: "night", M1: "duty" };
+    const result = buildRosterAssignments({ staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], patternByUser, shiftDefsByCode });
+    const codes = result.assignments.map(a => a.code);
+    expect(codes[0]).toBe("N2");
+    expect(codes[1]).toBe("N2");
+    expect(codes[2]).toBe("O"); // M1 immediately after N2 must be suppressed, same rule as the default M-after-N
+  });
+
+  it("leaves an unpatterned staff member (no entry in patternByUser) on the default rotation even when other staff have patterns", () => {
+    const staff = [{ id: "patterned", category: "B1" }, { id: "unpatterned", category: "B1" }];
+    const patternByUser = { patterned: { codes: ["G"], offset: 0 } };
+    const result = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], patternByUser });
+    const patternedCodes = result.assignments.filter(a => a.userId === "patterned").map(a => a.code);
+    const unpatternedCodes = result.assignments.filter(a => a.userId === "unpatterned").map(a => a.code);
+    expect(patternedCodes.every(c => c === "G")).toBe(true);
+    // idx=1 -> offset 2 -> ROTATION[(day-1+2)%8] for days 1-4 = A,A,N,N; the
+    // pattern-holder is never idle ('G' every day) so there's no candidate
+    // for the coverage pass to pull onto an uncovered shift, and this
+    // sequence has no OFF day of its own to reclaim either.
+    expect(unpatternedCodes).toEqual(["A", "A", "N", "N"]);
+  });
+});
+
 describe("buildRosterAssignments — blocking and leave", () => {
   it("never schedules a blocked staff member — every day is OFF", () => {
     const staff = [{ id: "s1", category: "B1" }, { id: "s2", category: "B1" }];

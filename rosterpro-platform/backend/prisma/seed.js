@@ -149,6 +149,32 @@ async function main() {
     { code: "O", name: "Off / Rest", type: "off", color: "#7A8CA3" },
     { code: "L", name: "Annual Leave", type: "leave", color: "#4FC3F7" },
     { code: "SL", name: "Sick Leave", type: "leave", color: "#EF5350" },
+    // The rest of the RosterPro PWA's full SHIFT_DEFS_CUSTOM set (Shift
+    // Definitions tab) — added, not replacing the 7 above, so existing
+    // rosters/tests that only ever reference M/A/N/G/O/L/SL are unaffected;
+    // `update: {}` below means a re-run never overwrites an already-seeded
+    // row's color either, so this is purely additive on every environment.
+    { code: "M1", name: "Morning-1", startTime: "06:00", endTime: "13:00", breakMin: 30, type: "duty", color: "#0284C7" },
+    { code: "MS", name: "Morning Stores", startTime: "06:00", endTime: "14:00", breakMin: 30, type: "duty", color: "#0EA5E9" },
+    { code: "A1", name: "Afternoon-1", startTime: "14:30", endTime: "22:30", breakMin: 30, type: "duty", color: "#16A34A" },
+    { code: "A2", name: "Afternoon-2", startTime: "15:30", endTime: "23:30", breakMin: 30, type: "duty", color: "#22C55E" },
+    { code: "AS", name: "Aft Stores", startTime: "14:00", endTime: "22:00", breakMin: 30, type: "duty", color: "#4ADE80" },
+    { code: "N1", name: "Night-1", startTime: "20:00", endTime: "06:00", breakMin: 60, type: "night", color: "#9333EA" },
+    { code: "N2", name: "Night-2", startTime: "19:30", endTime: "05:30", breakMin: 60, type: "night", color: "#A855F7" },
+    { code: "N3", name: "Night-3", startTime: "19:00", endTime: "05:00", breakMin: 60, type: "night", color: "#C084FC" },
+    { code: "G1", name: "General-1", startTime: "10:00", endTime: "18:00", breakMin: 60, type: "duty", color: "#C2680C" },
+    { code: "G2", name: "General-2", startTime: "08:00", endTime: "16:00", breakMin: 60, type: "duty", color: "#D97706" },
+    { code: "BS", name: "Break Shift", type: "duty", color: "#BE185D" },
+    { code: "FS", name: "Flexi Shift", type: "duty", color: "#C2410C" },
+    { code: "OFF", name: "Off / Rest", type: "off", color: "#64748B" },
+    { code: "CL", name: "Casual Leave", type: "leave", color: "#16A34A" },
+    { code: "ML", name: "Medical Leave", type: "leave", color: "#EA580C" },
+    { code: "LWP", name: "Leave W/O Pay", type: "leave", color: "#92400E" },
+    { code: "TRG", name: "Training", type: "other", color: "#16A34A" },
+    { code: "SOD", name: "Staff on Duty", type: "other", color: "#475569" },
+    { code: "DEP", name: "Deputation", type: "other", color: "#C2410C" },
+    { code: "PNQ", name: "Deputation PNQ", type: "other", color: "#C2410C" },
+    { code: "BOM", name: "Deputation BOM", type: "other", color: "#C2410C" },
   ];
   for (const def of shiftDefs) {
     await prisma.shiftDefinition.upsert({ where: { code: def.code }, update: {}, create: def });

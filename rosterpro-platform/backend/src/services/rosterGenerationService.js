@@ -1,9 +1,11 @@
 const rosterRepo = require("../repositories/rosterRepository");
 const leaveRepo = require("../repositories/leaveRepository");
+const planningRepo = require("../repositories/rosterPlanningRepository");
 const complianceService = require("./complianceService");
 const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
 const { buildRosterAssignments } = require("../utils/rosterGenerationAlgorithm");
+const { parseCycle } = require("../utils/shiftPatternCycle");
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -63,6 +65,32 @@ async function buildContinuationTails(stationId, monthKey, staff) {
   }));
 }
 
+// Builds the { userId: { codes, offset } } shape buildRosterAssignments'
+// pattern mode expects, from each staff member's Staff Allocation row (a
+// staff member with no row, or patternId left null/MANUAL, is simply absent
+// here and falls back to the default rotation) — mirrors reference-ui's
+// `usePatterns` branch reading PATTERNS/ALLOCATIONS.
+async function buildPatternByUser(stationId, staff) {
+  const [allocations, patterns] = await Promise.all([
+    planningRepo.findAllocationsForStation(stationId),
+    planningRepo.findPatternsForStation(stationId),
+  ]);
+  const patternById = new Map(patterns.map(p => [p.id, p]));
+  const allocByUserId = new Map(allocations.map(a => [a.userId, a]));
+  const staffIds = new Set(staff.map(s => s.id));
+  const knownCodes = (await rosterRepo.findAllShiftDefs()).map(d => d.code);
+
+  const result = {};
+  for (const userId of staffIds) {
+    const alloc = allocByUserId.get(userId);
+    if (!alloc || !alloc.patternId) continue;
+    const pattern = patternById.get(alloc.patternId);
+    if (!pattern) continue;
+    result[userId] = { codes: parseCycle(pattern.cycle, knownCodes), offset: alloc.cycleStartDay || 0 };
+  }
+  return result;
+}
+
 // `preview: true` computes the exact same plan (staffing, blocking, leave,
 // violations) without writing anything — the "review before you commit"
 // step. Calling generateRoster again with preview left off (or false)
@@ -71,7 +99,7 @@ async function buildContinuationTails(stationId, monthKey, staff) {
 // "apply this exact previewed plan" path to keep in sync — a second call is
 // the apply.
 async function generateRoster(stationId, monthKey, actor, req, options = {}) {
-  const { preview = false, continueFromPrevious = false } = options;
+  const { preview = false, continueFromPrevious = false, usePatterns = false, applyLeave = true } = options;
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
@@ -86,17 +114,19 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const monthStart = dateAt(monthKey, 1);
   const monthEnd = dateAt(monthKey, nDays);
 
-  const [leaves, complianceSummaries, shiftDefs, tailByUser] = await Promise.all([
+  const [leaves, complianceSummaries, shiftDefs, tailByUser, patternByUser] = await Promise.all([
     leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
     Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
     rosterRepo.findAllShiftDefs(),
     continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
+    usePatterns ? buildPatternByUser(stationId, staff) : Promise.resolve(undefined),
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);
-  const leaveByUserDay = buildLeaveByUserDay(leaves, monthKey, nDays);
+  const leaveByUserDay = applyLeave ? buildLeaveByUserDay(leaves, monthKey, nDays) : {};
+  const shiftDefsByCode = Object.fromEntries(shiftDefs.map(d => [d.code, d.type]));
 
-  const { assignments, violations } = buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser });
+  const { assignments, violations } = buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode });
 
   // Resolve shift codes (M/A/N/O/L) to real ShiftDefinition ids — if any of
   // these seed codes are missing at this station's shift-definition set,

@@ -129,13 +129,20 @@ function findAllShiftDefsIncludingInactive() {
 // Shift definitions are airline-wide reference data (no stationId on the
 // model) — upserted by their unique code, same as prisma/seed.js's own
 // bootstrap of the default M/A/N/G/O/L/SL set.
-function upsertShiftDef({ code, name, startTime, endTime, breakMin, type }) {
-  const data = { name, startTime, endTime, breakMin, type, isActive: true };
+function upsertShiftDef({ code, name, startTime, endTime, breakMin, type, color }) {
+  const data = { name, startTime, endTime, breakMin, type, isActive: true, ...(color ? { color } : {}) };
   return prisma.shiftDefinition.upsert({
     where: { code },
     update: data,
-    create: { code, ...data },
+    create: { code, color: color || "#AABBCC", ...data },
   });
+}
+
+// Soft-delete only — a code that's already used on real shift assignments
+// must stay resolvable for historical rosters, so this deactivates rather
+// than removing the row (mirrors every other "delete" in this codebase).
+function deactivateShiftDef(id) {
+  return prisma.shiftDefinition.update({ where: { id }, data: { isActive: false } });
 }
 
 function findAssignment(rosterId, userId, shiftDate) {
@@ -169,6 +176,6 @@ module.exports = {
   findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid,
   listRostersForStation,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
-  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef,
+  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,
   findAssignment, upsertAssignment, bulkUpsertAssignments,
 };

@@ -140,6 +140,8 @@ model Station {
   stores          StoreItem[]
   tools           Tool[]
   auditFindings   AuditFinding[]
+  shiftPatterns   ShiftPattern[]
+  workloadItems   WorkloadItem[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -202,6 +204,7 @@ model User {
   auditFindingsRaised AuditFinding[]  @relation("FindingRaisedBy")
   capaOwned         Capa[]            @relation("CapaOwner")
   activityLogs      ActivityLog[]
+  shiftAllocation   StaffShiftAllocation?
 
   @@index([airlineId])
   @@index([stationId])
@@ -365,6 +368,76 @@ model ShiftDefinition {
   assignments ShiftAssignment[]
 
   @@map("shift_definitions")
+}
+
+// ─── Auto-Roster Generator: patterns, per-staff allocation, workload input ───
+// Ported from reference-ui/index.html's PATTERNS / ALLOCATIONS / WL globals —
+// station-scoped here (unlike the airline-wide ShiftDefinition) since a
+// pattern like "P1: Standard 8-day" and workload figures like transit-flight
+// counts are specific to one station's operation, not shared airline-wide.
+
+model ShiftPattern {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  code      String   // "P1", "P2", ... — short label used in Staff Allocation
+  name      String
+  cycle     String   // e.g. "MMAANNOO" — shift-def codes concatenated, repeats every cycle.length days
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  allocations StaffShiftAllocation[]
+
+  @@unique([stationId, code])
+  @@map("shift_patterns")
+}
+
+// One row per staff member who has an explicit pattern assignment — absence
+// of a row (or patternId left null) means MANUAL/no-pattern, i.e. the
+// generator's default 8-day auto-distribute rotation applies to them.
+model StaffShiftAllocation {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  patternId      String?
+  pattern        ShiftPattern? @relation(fields: [patternId], references: [id])
+  cycleStartDay  Int      @default(0) // offset into the pattern's cycle staff member starts on
+
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("staff_shift_allocations")
+}
+
+// A single row in one of the Workload Input tab's four tables (Transit
+// Flights, Night Halt Workscope, Clashing Departures, Planned Tasks &
+// Checks) — the manpower-per-occurrence figures computeWorkloadPeak() scales
+// by frequency to estimate shift-wise staffing NEED, distinct from the
+// generator's actual per-day coverage-fill pass.
+model WorkloadItem {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  section   String   // transit | nighthalt | clash | task
+  label     String
+  count     Int      @default(0) // meaning depends on section: count/day (transit, clash) or freq/month (nighthalt, task)
+  b1        Int      @default(0)
+  b2        Int      @default(0)
+  cm        Int      @default(0)
+  ncs       Int      @default(0)
+  sortOrder Int      @default(0)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@map("workload_items")
 }
 
 model Roster {

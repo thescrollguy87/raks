@@ -44,7 +44,25 @@
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 
-function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser }) {
+// Classification helpers matching reference-ui's isMorn/isAft/isNight/isLeave
+// closures exactly: Morning/Afternoon are fixed code lists (a pattern using
+// a custom code like "M1" or "AS" still counts as Morning/Afternoon for the
+// rest-gap rules), while Night/Leave are looked up by the shift definition's
+// `type` — falling back to this DEFAULT map (which reproduces the base M/A/
+// N/O/L codes' real seeded types) when no shiftDefsByCode is supplied, so
+// the no-pattern path's behavior is unchanged whether or not one is passed.
+const MORN_CODES = new Set(["M", "M1", "MS"]);
+const AFT_CODES = new Set(["A", "A1", "A2", "AS"]);
+const DEFAULT_SHIFT_TYPES = { M: "duty", A: "duty", N: "night", O: "off", L: "leave" };
+function shiftType(code, shiftDefsByCode) {
+  return shiftDefsByCode?.[code] ?? DEFAULT_SHIFT_TYPES[code] ?? "duty";
+}
+function isMorn(code) { return MORN_CODES.has(code); }
+function isAft(code) { return AFT_CODES.has(code); }
+function isNight(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "night"; }
+function isLeaveType(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "leave"; }
+
+function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode }) {
   const blocked = new Set(blockedUserIds || []);
   const grid = {}; // userId -> array of nDays codes (1-indexed access via day-1)
 
@@ -52,6 +70,13 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
   staff.forEach((s, idx) => {
     const offset = idx * 2;
     const tail = tailByUser?.[s.id] || ["O", "O", "O"]; // [lastDay, 2ndLast, 3rdLast] of previous month
+    // Staff Allocation tab: a staff member assigned a Shift Pattern gets that
+    // pattern's own cycle + start-day offset instead of the flat 8-day
+    // ROTATION every unpatterned staff member gets by list position — same
+    // usePatterns branch reference-ui's applyAutoRoster() has, and everything
+    // below (rest-gap pass, coverage pass) is unchanged either way, exactly
+    // as in the reference: only how `proposed` is first computed differs.
+    const pattern = patternByUser?.[s.id];
     const codes = new Array(nDays);
 
     for (let day = 1; day <= nDays; day++) {
@@ -59,17 +84,21 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
       const onLeave = leaveByUserDay?.[s.id]?.has(day);
       if (onLeave) { codes[day - 1] = "L"; continue; }
 
-      let proposed = ROTATION[(day - 1 + offset) % ROTATION.length];
+      let proposed = pattern?.codes?.length
+        ? (pattern.codes[(day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
+        : ROTATION[(day - 1 + offset) % ROTATION.length];
 
       const prev = day > 1 ? codes[day - 2] : tail[0];
       const prev2 = day > 2 ? codes[day - 3] : (day === 2 ? tail[0] : tail[1]);
       const prev3 = day > 3 ? codes[day - 4] : (day === 3 ? tail[0] : day === 2 ? tail[1] : tail[2]);
 
-      if (proposed === "M" && prev === "N") proposed = "O";
-      if (proposed === "M" && prev === "A") proposed = "O";
-      if (proposed === "A" && prev === "N") proposed = "O";
-      if (prev2 === "N" && prev === "N") proposed = "O"; // after 2N -> OFF
-      if (prev3 === "N" && prev2 === "N" && prev === "O") proposed = "O"; // 2nd mandatory OFF day
+      if (!isLeaveType(proposed, shiftDefsByCode)) {
+        if (isMorn(proposed) && isNight(prev, shiftDefsByCode)) proposed = "O";
+        if (isMorn(proposed) && isAft(prev)) proposed = "O";
+        if (isAft(proposed) && isNight(prev, shiftDefsByCode)) proposed = "O";
+        if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) proposed = "O"; // after 2N -> OFF
+        if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") proposed = "O"; // 2nd mandatory OFF day
+      }
 
       codes[day - 1] = proposed;
     }
@@ -101,13 +130,13 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
       // diverges from a literal reference copy: a tightly-staffed scenario
       // must never have coverage-filling reintroduce a rest-gap violation
       // the earlier pass just removed.
-      if (prev2 === "N" && prev === "N") return false;
-      if (prev3 === "N" && prev2 === "N" && prev === "O") return false;
-      if (shift === "M" && (prev === "N" || prev === "A")) return false; // rest-gap guard
-      if (shift === "A" && prev === "N") return false;
+      if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) return false;
+      if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") return false;
+      if (shift === "M" && (isNight(prev, shiftDefsByCode) || isAft(prev))) return false; // rest-gap guard
+      if (shift === "A" && isNight(prev, shiftDefsByCode)) return false;
       if (shift === "N") {
         const next = day < nDays ? grid[s.id][day] : undefined;
-        if (next === "M") return false; // would put an N immediately before an already-fixed Morning
+        if (isMorn(next)) return false; // would put an N immediately before an already-fixed Morning
       }
       return true;
     });

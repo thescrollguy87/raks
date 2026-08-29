@@ -112,6 +112,7 @@ function cleanQuery(query) {
 export const api = {
   get: (path, query) => request(path, { method: "GET", query }),
   post: (path, body) => request(path, { method: "POST", body }),
+  put: (path, body, query) => request(path, { method: "PUT", body, query }),
   patch: (path, body, query) => request(path, { method: "PATCH", body, query }),
   delete: (path, query) => request(path, { method: "DELETE", query }),
   // Multipart file upload (roster import) — separate from the JSON-only

@@ -41,13 +41,72 @@ const generateRosterSchema = z.object({
   monthKey: monthKey,
   preview: z.boolean().optional(),
   continueFromPrevious: z.boolean().optional(),
+  usePatterns: z.boolean().optional(),
+  applyLeave: z.boolean().optional(),
 });
 
 const archiveQuerySchema = z.object({
   stationId: z.string().uuid(),
 });
 
+// ─── Shift definition single-row CRUD (Shift Definitions tab) ───────────────
+const shiftDefTypes = z.enum(["duty", "night", "off", "leave", "other"]);
+const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM (24-hour)");
+
+const upsertShiftDefSchema = z.object({
+  code: z.string().min(1).max(10),
+  name: z.string().min(1).max(60),
+  startTime: timeStr.optional().nullable(),
+  endTime: timeStr.optional().nullable(),
+  breakMin: z.number().int().min(0).default(0),
+  type: shiftDefTypes,
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+});
+
+// ─── Shift patterns (Shift Patterns tab) ─────────────────────────────────────
+const cyclePattern = z.string().regex(/^[A-Z0-9]+$/, "Cycle must be shift codes only (A-Z, 0-9), no spaces").min(1).max(60);
+
+const upsertShiftPatternSchema = z.object({
+  stationId: z.string().uuid(),
+  code: z.string().min(1).max(10),
+  name: z.string().min(1).max(80),
+  cycle: cyclePattern,
+});
+
+const patternQuerySchema = z.object({ stationId: z.string().uuid() });
+
+// ─── Staff allocation (Staff Allocation tab) ─────────────────────────────────
+const upsertAllocationSchema = z.object({
+  userId: z.string().uuid(),
+  patternId: z.string().uuid().nullable(),
+  cycleStartDay: z.number().int().min(0).max(60).default(0),
+});
+
+// ─── Workload input (Workload Input tab) ─────────────────────────────────────
+const workloadSections = z.enum(["transit", "nighthalt", "clash", "task"]);
+
+const upsertWorkloadItemSchema = z.object({
+  stationId: z.string().uuid(),
+  section: workloadSections,
+  label: z.string().min(1).max(120),
+  count: z.number().int().min(0).default(0),
+  b1: z.number().int().min(0).default(0),
+  b2: z.number().int().min(0).default(0),
+  cm: z.number().int().min(0).default(0),
+  ncs: z.number().int().min(0).default(0),
+});
+
+const manpowerPlanQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey: monthKey,
+  aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
+});
+
 module.exports = {
   createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
   publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
+  upsertShiftDefSchema,
+  upsertShiftPatternSchema, patternQuerySchema,
+  upsertAllocationSchema,
+  upsertWorkloadItemSchema, manpowerPlanQuerySchema,
 };
