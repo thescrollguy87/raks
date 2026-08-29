@@ -180,9 +180,31 @@ function hexToRgba(hex, alpha) {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
+// Mirrors backend/src/utils/shiftPatternCycle.js's parseCycle() exactly — a
+// naive character split would break any pattern using a multi-char code
+// (e.g. "G2G2G2OO" is 5 codes — G2, G2, G2, O, O — not 8 single letters;
+// "DEP" is 1 code, not 3). Tried longest-known-code-first, same as the
+// backend, so the preview here always matches what the server will
+// actually schedule.
+function parseCycle(cycle, knownCodes) {
+  const codes = [];
+  const str = (cycle || "").toUpperCase().replace(/\s/g, "");
+  const multiCodes = (knownCodes || []).filter(c => c.length > 1).sort((a, b) => b.length - a.length);
+  let i = 0;
+  while (i < str.length) {
+    let matched = false;
+    for (const mc of multiCodes) {
+      if (str.startsWith(mc, i)) { codes.push(mc); i += mc.length; matched = true; break; }
+    }
+    if (!matched) { codes.push(str[i]); i++; }
+  }
+  return codes.length ? codes : ["O"];
+}
+
 // ═══ TAB 2: SHIFT PATTERNS ════════════════════════════════════════════════════
 function ShiftPatternsTab({ stationId }) {
   const [patterns, setPatterns] = useState(null);
+  const [knownCodes, setKnownCodes] = useState([]);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -191,6 +213,7 @@ function ShiftPatternsTab({ stationId }) {
     planningApi.listPatterns(stationId).then(setPatterns).catch(err => setError(err.message));
   }, [stationId]);
   useEffect(load, [load]);
+  useEffect(() => { rosterApi.getShiftDefinitions().then(defs => setKnownCodes(defs.map(d => d.code))).catch(() => {}); }, []);
 
   function updateField(id, field, value) {
     setPatterns(list => list.map(p => (p.id === id ? { ...p, [field]: value } : p)));
@@ -240,8 +263,14 @@ function ShiftPatternsTab({ stationId }) {
                 <button className="wl-del" onClick={() => remove(p.id)} disabled={busy}>✕</button>
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                {p.cycle.split("").slice(0, 14).map((c, i) => <span key={i} style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(0,198,255,.1)", color: "var(--cyan)", fontSize: 9, fontWeight: 700 }}>{c}</span>)}
-                <span style={{ fontSize: 9, color: "var(--text-dim)", marginLeft: 4 }}>({p.cycle.length}-day cycle)</span>
+                {(() => {
+                  const codes = parseCycle(p.cycle, knownCodes);
+                  return <>
+                    {codes.slice(0, 14).map((c, i) => <span key={i} style={{ padding: "1px 5px", borderRadius: 3, background: "rgba(0,198,255,.1)", color: "var(--cyan)", fontSize: 9, fontWeight: 700 }}>{c}</span>)}
+                    {codes.length > 14 && <span style={{ fontSize: 9, color: "var(--text-dim)" }}>+{codes.length - 14} more</span>}
+                    <span style={{ fontSize: 9, color: "var(--text-dim)", marginLeft: 4 }}>({codes.length}-day cycle)</span>
+                  </>;
+                })()}
               </div>
             </div>
           ))}

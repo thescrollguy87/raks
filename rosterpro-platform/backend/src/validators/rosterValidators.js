@@ -61,6 +61,7 @@ const upsertShiftDefSchema = z.object({
   breakMin: z.number().int().min(0).default(0),
   type: shiftDefTypes,
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
+  sortOrder: z.number().int().optional(),
 });
 
 // ─── Shift patterns (Shift Patterns tab) ─────────────────────────────────────

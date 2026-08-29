@@ -357,6 +357,7 @@ model ShiftDefinition {
   type      String   // duty | night | off | leave | other
   color     String   @default("#AABBCC")
   isActive  Boolean  @default(true)
+  sortOrder Int      @default(0) // display order in the Shift Definitions tab: Morning codes, then Afternoon, then Night, then General, then the rest — not alphabetical
 
   createdById String?
   updatedById String?

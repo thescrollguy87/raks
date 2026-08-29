@@ -115,26 +115,29 @@ function findShiftsForDate(dateObj) {
   });
 }
 
+// sortOrder groups codes the way the Shift Definitions tab expects — all
+// Morning codes, then Afternoon, then Night, then General, then everything
+// else — not alphabetical (which would scatter M1/MS away from M).
 function findAllShiftDefs() {
-  return prisma.shiftDefinition.findMany({ where: { isActive: true }, orderBy: { code: "asc" } });
+  return prisma.shiftDefinition.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
 }
 
 // Includes inactive codes too — used by the import service to tell
 // "created" from "updated" and to build a before/after audit diff, which
 // needs the row even if it was previously deactivated.
 function findAllShiftDefsIncludingInactive() {
-  return prisma.shiftDefinition.findMany({ orderBy: { code: "asc" } });
+  return prisma.shiftDefinition.findMany({ orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
 }
 
 // Shift definitions are airline-wide reference data (no stationId on the
 // model) — upserted by their unique code, same as prisma/seed.js's own
 // bootstrap of the default M/A/N/G/O/L/SL set.
-function upsertShiftDef({ code, name, startTime, endTime, breakMin, type, color }) {
-  const data = { name, startTime, endTime, breakMin, type, isActive: true, ...(color ? { color } : {}) };
+function upsertShiftDef({ code, name, startTime, endTime, breakMin, type, color, sortOrder }) {
+  const data = { name, startTime, endTime, breakMin, type, isActive: true, ...(color ? { color } : {}), ...(sortOrder !== undefined ? { sortOrder } : {}) };
   return prisma.shiftDefinition.upsert({
     where: { code },
     update: data,
-    create: { code, color: color || "#AABBCC", ...data },
+    create: { code, color: color || "#AABBCC", sortOrder: sortOrder ?? 0, ...data },
   });
 }
 

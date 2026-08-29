@@ -68,9 +68,14 @@ function computeManpowerPlan({ workloadItems, daysInMon, aogBuffer, staffByCateg
     return { category: cat, needs, available, status: available >= maxNeed ? "OK" : "SHORT" };
   });
 
+  // Transit, then Night Halt, then Clash, then Task — the reference's own
+  // display order (built by concatenating its WL.transit/nighthalt/clash/
+  // task arrays in that order), not alphabetical by section name.
+  const SECTION_DISPLAY_ORDER = { transit: 0, nighthalt: 1, clash: 2, task: 3 };
   const workloadSummary = workloadItems
     .filter(r => r.count > 0)
-    .map(r => ({ section: r.section, label: r.label, count: r.count, b1: r.b1, b2: r.b2, cm: r.cm, ncs: r.ncs }));
+    .map(r => ({ section: r.section, label: r.label, count: r.count, b1: r.b1, b2: r.b2, cm: r.cm, ncs: r.ncs }))
+    .sort((a, b) => (SECTION_DISPLAY_ORDER[a.section] ?? 99) - (SECTION_DISPLAY_ORDER[b.section] ?? 99));
 
   return {
     peak, target: tgt, grandNeeded, effectiveStaff, aogPerShift,
