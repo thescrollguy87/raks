@@ -1,15 +1,19 @@
 :root{
-  /* Light/professional theme. Variable NAMES kept as-is (--navy, --white,
-     etc) even though their meaning has flipped — hundreds of `var(--navy)`
-     / `var(--white)` usages throughout this file would need to change
-     otherwise, which is far riskier than just repurposing what each name
-     points to. Read --navy as "app background", --white as "primary text",
-     not literally. */
-  --navy:#F1F5F9;--navy-mid:#FFFFFF;--navy-lite:#F1F5F9;
-  --sky:#0369A1;--cyan:#0EA5E9;--amber:#B45309;--red:#DC2626;
-  --orange:#C2410C;--green:#16A34A;--purple:#7E22CE;--teal:#0F766E;
-  --white:#0F172A;--text-dim:#64748B;--border:#E2E8F0;
-  --glass:rgba(15,23,42,.035);--r:10px;--r-lg:16px;
+  /* Dark navy theme, matching the real RosterPro reference app (variable
+     names read literally here — --navy IS a navy background, --white IS
+     white text). Values aren't guessed: they're the exact colors already
+     hardcoded as rgba() tints throughout this file's own components
+     (badge/alert backgrounds like rgba(0,200,83,.12) for green,
+     rgba(229,57,53,.12) for red, rgba(245,166,35,.12) for amber,
+     rgba(0,198,255,.12) for cyan) — this just gives those same colors a
+     home as the real theme variables instead of leaving --green/--red/etc
+     mismatched with the tints already used everywhere against them. */
+  --navy:#0B1622;--navy-mid:#13212F;--navy-lite:#1B2C3D;
+  --sky:#0096FF;--cyan:#00C6FF;--amber:#F5A623;--red:#E53935;
+  --orange:#C2703D;--green:#00C853;--purple:#7E22CE;--teal:#14B8A6;
+  --white:#F1F5F9;--text-dim:#7A8CA3;--border:rgba(255,255,255,.08);
+  --glass:rgba(255,255,255,.05);--r:10px;--r-lg:16px;
+  --rp-red:#E53935;--rp-green:#00C853;
   --ui:'Inter','Segoe UI',system-ui,sans-serif;
   --mono:'Fira Code','Consolas',monospace;
 }
