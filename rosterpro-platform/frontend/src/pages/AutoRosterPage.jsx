@@ -17,7 +17,7 @@ const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
 export default function AutoRosterPage() {
   const { stationId, currentStation } = useStation();
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
-  const [continueFromPrevious, setContinueFromPrevious] = useState(false);
+  const [continueFromPrevious, setContinueFromPrevious] = useState(true);
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const [applied, setApplied] = useState(null);
@@ -41,7 +41,13 @@ export default function AutoRosterPage() {
   }
 
   async function handleApply() {
-    if (!confirm(`Apply this ${monthKey} roster? This assigns shifts for every active staff member — existing manual edits for this month will be overwritten.`)) return;
+    // Only prompt when this would actually replace something — reference-ui's
+    // applyAutoRoster() only confirms when a roster for the month already
+    // exists, not on a first-time generation with nothing to lose.
+    if (preview?.existingRosterExists) {
+      const msg = `A roster already exists for ${monthKey} (may include manual edits).\n\nApplying now will REPLACE it with this newly generated roster. This cannot be undone.\n\nContinue?`;
+      if (!confirm(msg)) return;
+    }
     setBusy(true);
     setError("");
     try {

@@ -75,6 +75,13 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
+  // Looked up once and reused by both branches below — the preview needs it
+  // to tell the caller whether Apply is about to replace something (matching
+  // reference-ui's applyAutoRoster(), which only prompts "this will REPLACE
+  // it" when a roster for the month already exists, not on every apply), and
+  // the apply branch needs the same row to write into.
+  let existingRoster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+
   const nDays = daysInMonth(monthKey);
   const monthStart = dateAt(monthKey, 1);
   const monthEnd = dateAt(monthKey, nDays);
@@ -114,6 +121,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     return {
       preview: true, staffCount: staff.length, blockedCount: blockedUserIds.length,
       assignmentCount: assignments.length, violations, manpowerByShift,
+      existingRosterExists: !!existingRoster,
     };
   }
 
@@ -121,7 +129,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   // (rosterService.upsertShift), so a generated roster and a hand-edited
   // one are indistinguishable in structure — same rosterId, same
   // shiftAssignment rows, same audit trail conventions.
-  let roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+  let roster = existingRoster;
   if (!roster) roster = await rosterRepo.createRoster(stationId, monthKey, actor.sub);
   if (roster.isPublished) throw ApiError.forbidden("Roster is published — unpublish before regenerating");
 
