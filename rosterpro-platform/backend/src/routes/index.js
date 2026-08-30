@@ -10,6 +10,10 @@ const reportRoutes = require("./reportRoutes");
 const dashboardRoutes = require("./dashboardRoutes");
 const auditRoutes = require("./auditRoutes");
 const stationRoutes = require("./stationRoutes");
+const flightScheduleRoutes = require("./flightScheduleRoutes");
+const workloadConfigRoutes = require("./workloadConfigRoutes");
+const ruleBuilderRoutes = require("./ruleBuilderRoutes");
+const dailyOpsRoutes = require("./dailyOpsRoutes");
 
 const router = express.Router();
 
@@ -25,5 +29,9 @@ router.use("/reports", reportRoutes); // Excel/PDF/CSV generation + email delive
 router.use("/dashboard", dashboardRoutes); // qualification expiry, leave balance, roster/flight coverage, DGCA compliance, workload
 router.use("/audit", auditRoutes); // change history + activity feed
 router.use("/stations", stationRoutes); // station list, for the frontend switcher
+router.use("/flight-schedule", flightScheduleRoutes); // Auto-Roster Generator: Turn Report / Charter import
+router.use("/workload-config", workloadConfigRoutes); // Auto-Roster Generator: Workload Config tab
+router.use("/rule-builder", ruleBuilderRoutes); // Auto-Roster Generator: Rule Builder tab (staff groups + rules)
+router.use("/daily-ops", dailyOpsRoutes); // Auto-Roster Generator: Daily Operational Adjustment tab
 
 module.exports = router;
