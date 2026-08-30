@@ -5,6 +5,10 @@ import * as rosterApi from "../api/roster.js";
 import * as planningApi from "../api/rosterPlanning.js";
 import * as staffApi from "../api/staff.js";
 import * as leaveApi from "../api/leave.js";
+import * as flightScheduleApi from "../api/flightSchedule.js";
+import * as workloadConfigApi from "../api/workloadConfig.js";
+import * as ruleBuilderApi from "../api/ruleBuilder.js";
+import * as dailyOpsApi from "../api/dailyOps.js";
 
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
@@ -42,7 +46,11 @@ export default function AutoRosterPage() {
     { key: "patterns", label: "🔁 Shift Patterns" },
     { key: "allocation", label: "👤 Staff Allocation" },
     { key: "leave", label: "🌴 Leave & Absence" },
-    { key: "workload", label: "✈ Workload Input" },
+    { key: "flightschedule", label: "✈ Flight Schedule" },
+    { key: "workload", label: "📦 Workload Input" },
+    { key: "workloadconfig", label: "⚙ Workload Config" },
+    { key: "rulebuilder", label: "📐 Rule Builder" },
+    { key: "dailyops", label: "📅 Daily Ops" },
     { key: "generate", label: "🤖 Generate" },
   ];
 
@@ -58,7 +66,11 @@ export default function AutoRosterPage() {
       {tab === "patterns" && <ShiftPatternsTab stationId={stationId} />}
       {tab === "allocation" && <StaffAllocationTab stationId={stationId} />}
       {tab === "leave" && <LeaveAbsenceTab stationId={stationId} />}
+      {tab === "flightschedule" && <FlightScheduleTab stationId={stationId} />}
       {tab === "workload" && <WorkloadInputTab stationId={stationId} />}
+      {tab === "workloadconfig" && <WorkloadConfigTab stationId={stationId} />}
+      {tab === "rulebuilder" && <RuleBuilderTab stationId={stationId} />}
+      {tab === "dailyops" && <DailyOpsTab stationId={stationId} />}
       {tab === "generate" && <GenerateTab stationId={stationId} />}
     </div>
   );
@@ -494,6 +506,93 @@ function LeaveAbsenceTab({ stationId }) {
   );
 }
 
+// ═══ TAB: FLIGHT SCHEDULE ═════════════════════════════════════════════════════
+function FlightScheduleTab({ stationId }) {
+  const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
+  const [schedule, setSchedule] = useState(null);
+  const [file, setFile] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [importResult, setImportResult] = useState(null);
+
+  const [year, month] = monthKey.split("-").map(Number);
+
+  const load = useCallback(() => {
+    if (!stationId) return;
+    flightScheduleApi.getFlightSchedule(stationId, year, month).then(setSchedule).catch(err => setError(err.message));
+  }, [stationId, year, month]);
+  useEffect(load, [load]);
+
+  async function doImport() {
+    if (!file) { setError("Choose a Turn Report / Charter Excel file (.xlsx) first"); return; }
+    setBusy(true);
+    setError("");
+    setImportResult(null);
+    try {
+      const result = await flightScheduleApi.importFlightSchedule(stationId, year, month, file);
+      setImportResult(result);
+      setFile(null);
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="two-col">
+      <div>
+        <div className="card">
+          <div className="card-title">✈ Import Turn Report / Charter Schedule</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+            Upload the monthly Turn Report Excel export (Inbound/Outbound sheet, plus an optional Charter Flights sheet). Re-importing the same month replaces its previous data.
+          </div>
+          {error && <div className="ab red">{error}</div>}
+          {importResult && <div className="ab green">✅ Imported: {importResult.turnRowCount} turn row(s), {importResult.charterRowCount} charter row(s)</div>}
+          <div className="fg2" style={{ marginBottom: 10 }}>
+            <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setImportResult(null); }} /></div>
+            <div className="fg"><label className="fl">Excel File (.xlsx)</label><input className="fi" type="file" accept=".xlsx" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={doImport} disabled={busy}>{busy ? "Importing…" : "⬆ Import Schedule"}</button>
+        </div>
+
+        {schedule?.imported && (
+          <div className="card">
+            <div className="card-title">📊 Workload Summary — {monthKey}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11 }}>
+              <div>Operating days: <strong>{schedule.summary.operatingDays}</strong> / {schedule.summary.daysInMonth}</div>
+              <div>Total movements: <strong>{schedule.summary.totalMovements}</strong></div>
+              <div>Avg daily movements: <strong>{schedule.summary.avgDailyMovements}</strong></div>
+              <div>Peak daily movements: <strong>{schedule.summary.peakDailyMovements}</strong> {schedule.summary.peakDate ? `(${schedule.summary.peakDate})` : ""}</div>
+              <div>Turn rows: <strong>{schedule.summary.turnRowCount}</strong></div>
+              <div>Charter rows: <strong>{schedule.summary.charterRowCount}</strong></div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div>
+        <div className="card">
+          <div className="card-title">📅 Day-by-Day Schedule — {monthKey}</div>
+          {!schedule ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Loading…</div> : !schedule.imported ? (
+            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No flight schedule imported for this month yet.</div>
+          ) : (
+            <div className="wl-scroll" style={{ maxHeight: 520 }}>
+              {Array.from({ length: schedule.daysInMonth }, (_, i) => i + 1).map(d => (
+                <div key={d} style={{ borderBottom: "1px solid var(--border)", padding: "5px 0" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--cyan)" }}>Day {d}{!schedule.byDay[d]?.length ? " — no flights" : ""}</div>
+                  {(schedule.byDay[d] || []).map((f, i) => (
+                    <div key={i} style={{ fontSize: 9, color: "var(--text-dim)", display: "flex", justifyContent: "space-between", paddingLeft: 8 }}>
+                      <span>{f.type === "Turn" ? "🔄" : "🛩"} {f.flightRef} <span style={{ color: "var(--text-dim)" }}>{f.route}</span></span>
+                      <span>{f.arr !== "-" ? `Arr ${f.arr}` : ""} {f.dep !== "-" ? `Dep ${f.dep}` : ""} {f.ground !== "-" ? `GT ${f.ground}` : ""}</span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══ TAB 5: WORKLOAD INPUT ════════════════════════════════════════════════════
 function WorkloadInputTab({ stationId }) {
   const [items, setItems] = useState(null);
@@ -592,6 +691,494 @@ function WorkloadInputTab({ stationId }) {
           <div style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.5 }}>
             Enter the manpower needed for <strong>one occurrence</strong> of the task (per layover, per weekly check, per A-check, etc). Given the frequency/month, the engine works out how many can realistically fall on the same day (occurrences ÷ days in month, rounded up) and multiplies that by your per-task manpower to get the concurrent requirement used for shift coverage.
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ TAB: WORKLOAD CONFIG ═════════════════════════════════════════════════════
+const CATEGORIES = ["B1", "B2", "CM"];
+const PREFERRED_SHIFT_OPTIONS = [{ value: "Any", label: "Any (split evenly)" }, { value: "M", label: "Morning" }, { value: "A", label: "Afternoon" }, { value: "N", label: "Night" }];
+
+function WorkloadConfigTab({ stationId }) {
+  const [config, setConfig] = useState(null);
+  const [mandatory, setMandatory] = useState(null);
+  const [plannedTasks, setPlannedTasks] = useState(null);
+  const [unplannedTasks, setUnplannedTasks] = useState(null);
+  const [manualDemand, setManualDemand] = useState(null);
+  const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(() => {
+    if (!stationId) return;
+    workloadConfigApi.getConfig(stationId).then(setConfig).catch(err => setError(err.message));
+    workloadConfigApi.listMandatoryCoverageRules(stationId).then(setMandatory).catch(err => setError(err.message));
+    workloadConfigApi.listPlannedTasks(stationId).then(setPlannedTasks).catch(err => setError(err.message));
+    workloadConfigApi.listUnplannedTasks(stationId).then(setUnplannedTasks).catch(err => setError(err.message));
+  }, [stationId]);
+  useEffect(load, [load]);
+
+  useEffect(() => {
+    if (!stationId) return;
+    workloadConfigApi.listManualDemand(stationId, monthKey).then(setManualDemand).catch(err => setError(err.message));
+  }, [stationId, monthKey]);
+
+  const NUMERIC_CONFIG_FIELDS = [
+    "transitMinutesDefault", "pdcMinutesBeforeDeparture", "clashProximityMinutes", "transitVsPdcThresholdMinutes",
+    "movementsPerB1Staff", "movementsPerCMStaff", "movementsPerNCSStaff",
+    "unplannedManpowerHoursPerMonth", "unplannedBufferPct", "bufferB1", "bufferB2", "bufferCM", "bufferNCS",
+  ];
+  async function saveConfig() {
+    setBusy(true);
+    setError("");
+    try {
+      // Number inputs report their value as a string via onChange — every
+      // numeric field must be coerced back before it hits the API's
+      // z.number() schema, the same convention every other tab in this
+      // wizard follows in its own save().
+      const payload = { stationId, unplannedMethod: config.unplannedMethod };
+      NUMERIC_CONFIG_FIELDS.forEach(f => { payload[f] = Number(config[f]) || 0; });
+      await workloadConfigApi.upsertConfig(payload);
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function saveMandatory(row) {
+    setBusy(true);
+    setError("");
+    try {
+      await workloadConfigApi.upsertMandatoryCoverageRule({ stationId, category: row.category, shift: row.shift, enabled: row.enabled, minCount: Number(row.minCount) || 1 });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function savePlannedTask(t) {
+    setBusy(true);
+    setError("");
+    try {
+      await workloadConfigApi.upsertPlannedTask({
+        id: t.id, stationId, name: t.name, frequency: Number(t.frequency) || 0, frequencyUnit: t.frequencyUnit,
+        avgDurationMin: Number(t.avgDurationMin) || 0, reqB1: Number(t.reqB1) || 0, reqB2: Number(t.reqB2) || 0,
+        reqCM: Number(t.reqCM) || 0, reqNCS: Number(t.reqNCS) || 0, preferredShift: t.preferredShift || "Any",
+      });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function addPlannedTask() {
+    setBusy(true); setError("");
+    try { await workloadConfigApi.upsertPlannedTask({ stationId, name: "New Task", frequency: 0, frequencyUnit: "per_month", avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any" }); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function removePlannedTask(id) {
+    setBusy(true); setError("");
+    try { await workloadConfigApi.deletePlannedTask(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function saveUnplannedTask(t) {
+    setBusy(true);
+    setError("");
+    try {
+      await workloadConfigApi.upsertUnplannedTask({
+        id: t.id, stationId, name: t.name, avgFreqPerMonth: Number(t.avgFreqPerMonth) || 0,
+        avgDurationMin: Number(t.avgDurationMin) || 0, reqB1: Number(t.reqB1) || 0, reqB2: Number(t.reqB2) || 0,
+        reqCM: Number(t.reqCM) || 0, reqNCS: Number(t.reqNCS) || 0, preferredShift: t.preferredShift || "Any",
+      });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function addUnplannedTask() {
+    setBusy(true); setError("");
+    try { await workloadConfigApi.upsertUnplannedTask({ stationId, name: "New Task", avgFreqPerMonth: 0, avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any" }); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function removeUnplannedTask(id) {
+    setBusy(true); setError("");
+    try { await workloadConfigApi.deleteUnplannedTask(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  const [demandForm, setDemandForm] = useState({ date: "", timeStart: "", timeEnd: "", reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, remarks: "" });
+  async function addManualDemand() {
+    if (!demandForm.date) { setError("Date is required"); return; }
+    setBusy(true); setError("");
+    try {
+      await workloadConfigApi.createManualDemand({ stationId, ...demandForm, reqB1: Number(demandForm.reqB1) || 0, reqB2: Number(demandForm.reqB2) || 0, reqCM: Number(demandForm.reqCM) || 0, reqNCS: Number(demandForm.reqNCS) || 0 });
+      setDemandForm({ date: "", timeStart: "", timeEnd: "", reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, remarks: "" });
+      workloadConfigApi.listManualDemand(stationId, monthKey).then(setManualDemand);
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function removeManualDemand(id) {
+    setBusy(true); setError("");
+    try { await workloadConfigApi.deleteManualDemand(id); workloadConfigApi.listManualDemand(stationId, monthKey).then(setManualDemand); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  if (!config || !mandatory || !plannedTasks || !unplannedTasks) return <div className="card">Loading…</div>;
+
+  return (
+    <div className="two-col">
+      <div>
+        <div className="card">
+          <div className="card-title">⚙ Standard Durations & Ratios</div>
+          {error && <div className="ab red">{error}</div>}
+          <div className="fg2">
+            <div className="fg"><label className="fl">Transit fallback (min)</label><input className="fi" type="number" value={config.transitMinutesDefault} onChange={e => setConfig(c => ({ ...c, transitMinutesDefault: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">PDC duration (min before dep)</label><input className="fi" type="number" value={config.pdcMinutesBeforeDeparture} onChange={e => setConfig(c => ({ ...c, pdcMinutesBeforeDeparture: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Clash Proximity Threshold (min)</label><input className="fi" type="number" value={config.clashProximityMinutes} onChange={e => setConfig(c => ({ ...c, clashProximityMinutes: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Transit vs PDC threshold (min)</label><input className="fi" type="number" value={config.transitVsPdcThresholdMinutes} onChange={e => setConfig(c => ({ ...c, transitVsPdcThresholdMinutes: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Movements per B1 staff</label><input className="fi" type="number" min="1" value={config.movementsPerB1Staff} onChange={e => setConfig(c => ({ ...c, movementsPerB1Staff: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Movements per CM staff</label><input className="fi" type="number" min="1" value={config.movementsPerCMStaff} onChange={e => setConfig(c => ({ ...c, movementsPerCMStaff: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Movements per NCS staff</label><input className="fi" type="number" min="1" value={config.movementsPerNCSStaff} onChange={e => setConfig(c => ({ ...c, movementsPerNCSStaff: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Unplanned method</label>
+              <select className="fi" value={config.unplannedMethod} onChange={e => setConfig(c => ({ ...c, unplannedMethod: e.target.value }))}>
+                <option value="frequency">Frequency-based (Unplanned Task Master)</option>
+                <option value="manpower_hours">Flat manpower-hours allowance</option>
+                <option value="both">Both (summed)</option>
+              </select>
+            </div>
+            <div className="fg"><label className="fl">Unplanned manpower-hrs/month</label><input className="fi" type="number" value={config.unplannedManpowerHoursPerMonth} onChange={e => setConfig(c => ({ ...c, unplannedManpowerHoursPerMonth: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Unplanned buffer %</label><input className="fi" type="number" value={config.unplannedBufferPct} onChange={e => setConfig(c => ({ ...c, unplannedBufferPct: e.target.value }))} /></div>
+          </div>
+          <div className="card-title" style={{ marginTop: 10 }}>Per-Shift Unplanned Buffer</div>
+          <div className="fg2">
+            {["B1", "B2", "CM", "NCS"].map(cat => (
+              <div className="fg" key={cat}><label className="fl">{cat}</label><input className="fi" type="number" min="0" value={config[`buffer${cat}`]} onChange={e => setConfig(c => ({ ...c, [`buffer${cat}`]: e.target.value }))} /></div>
+            ))}
+          </div>
+          <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={saveConfig} disabled={busy}>💾 Save Config</button>
+        </div>
+
+        <div className="card">
+          <div className="card-title">🛡 Mandatory Minimum Coverage</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>A non-negotiable floor — separate from workload-driven advisory sizing. Unmet mandatory coverage is reported as a critical violation.</div>
+          <table className="rt" style={{ width: "100%" }}>
+            <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Category</th><th>Morning</th><th>Afternoon</th><th>Night</th></tr></thead>
+            <tbody>
+              {CATEGORIES.map(cat => (
+                <tr key={cat}>
+                  <td style={{ textAlign: "left", paddingLeft: 9 }}><span className={`cat-tag cat-${cat}`}>{cat}</span></td>
+                  {["M", "A", "N"].map(sh => {
+                    const row = mandatory.find(m => m.category === cat && m.shift === sh);
+                    return (
+                      <td key={sh} style={{ textAlign: "center" }}>
+                        <input type="checkbox" checked={row.enabled} disabled={busy}
+                          onChange={e => saveMandatory({ ...row, enabled: e.target.checked })} />
+                        <input className="fi" type="number" min="1" style={{ width: 44, marginLeft: 4, display: "inline-block", fontSize: 10 }} value={row.minCount} disabled={busy || !row.enabled}
+                          onChange={e => setMandatory(list => list.map(m => (m === row ? { ...m, minCount: e.target.value } : m)))}
+                          onBlur={e => saveMandatory({ ...row, minCount: e.target.value })} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <div className="card">
+          <div className="card-title">🔧 Planned Task Master</div>
+          <div className="wl-scroll">
+            {plannedTasks.map(t => (
+              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 90px 70px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
+                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Frequency" value={t.frequency} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, frequency: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                <select className="fi" value={t.frequencyUnit} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, frequencyUnit: e.target.value } : x))); savePlannedTask({ ...t, frequencyUnit: e.target.value }); }} disabled={busy}>
+                  <option value="per_month">/month</option><option value="per_week">/week</option><option value="per_operating_day">/op-day</option>
+                </select>
+                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
+                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, [f]: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                ))}
+                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, preferredShift: e.target.value } : x))); savePlannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
+                  {PREFERRED_SHIFT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <button className="wl-del" onClick={() => removePlannedTask(t.id)} disabled={busy}>✕</button>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={addPlannedTask} disabled={busy}>＋ Add Planned Task</button>
+        </div>
+
+        <div className="card">
+          <div className="card-title">🛠 Unplanned Task Master</div>
+          <div className="wl-scroll">
+            {unplannedTasks.map(t => (
+              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 90px 90px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
+                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Avg freq/month" value={t.avgFreqPerMonth} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgFreqPerMonth: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
+                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, [f]: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                ))}
+                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, preferredShift: e.target.value } : x))); saveUnplannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
+                  {PREFERRED_SHIFT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+                <button className="wl-del" onClick={() => removeUnplannedTask(t.id)} disabled={busy}>✕</button>
+              </div>
+            ))}
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={addUnplannedTask} disabled={busy}>＋ Add Unplanned Task</button>
+        </div>
+
+        <div className="card">
+          <div className="card-title">📋 Manual Additional Demand</div>
+          <div className="fg" style={{ marginBottom: 8 }}><label className="fl">Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 40px 40px 40px 40px 1fr", gap: 4, marginBottom: 6 }}>
+            <input className="fi" type="date" style={{ fontSize: 9 }} value={demandForm.date} onChange={e => setDemandForm(f => ({ ...f, date: e.target.value }))} />
+            <input className="fi" type="time" style={{ fontSize: 9 }} value={demandForm.timeStart} onChange={e => setDemandForm(f => ({ ...f, timeStart: e.target.value }))} />
+            <input className="fi" type="time" style={{ fontSize: 9 }} value={demandForm.timeEnd} onChange={e => setDemandForm(f => ({ ...f, timeEnd: e.target.value }))} />
+            {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
+              <input key={f} className="fi" type="number" min="0" title={f} style={{ fontSize: 9, textAlign: "center" }} value={demandForm[f]} onChange={e => setDemandForm(v => ({ ...v, [f]: e.target.value }))} />
+            ))}
+            <input className="fi" placeholder="Remarks" style={{ fontSize: 9 }} value={demandForm.remarks} onChange={e => setDemandForm(f => ({ ...f, remarks: e.target.value }))} />
+          </div>
+          <button className="btn btn-ghost btn-sm" onClick={addManualDemand} disabled={busy}>＋ Add Demand Entry</button>
+          <div className="wl-scroll" style={{ marginTop: 8 }}>
+            {(manualDemand || []).map(m => (
+              <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                <span>{m.date?.slice(0, 10)} {m.timeStart || ""}{m.timeEnd ? `–${m.timeEnd}` : ""} — B1:{m.reqB1} B2:{m.reqB2} CM:{m.reqCM} NCS:{m.reqNCS} {m.remarks && `(${m.remarks})`}</span>
+                <button className="wl-del" onClick={() => removeManualDemand(m.id)} disabled={busy}>✕</button>
+              </div>
+            ))}
+            {(!manualDemand || manualDemand.length === 0) && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No manual demand entries this month.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══ TAB: RULE BUILDER ════════════════════════════════════════════════════════
+const HARD_CONDITION_TYPES = [
+  "max_consecutive_nights", "rest_after_night", "min_rest_hours", "forced_off_after_nights",
+  "max_weekly_hours", "max_monthly_hours", "night_only", "no_night",
+];
+const SOFT_CONDITION_TYPES = ["balance_total_hours", "balance_night_duties"];
+
+function RuleBuilderTab({ stationId }) {
+  const [groups, setGroups] = useState(null);
+  const [rules, setRules] = useState(null);
+  const [staff, setStaff] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [newGroupName, setNewGroupName] = useState("");
+
+  const load = useCallback(() => {
+    if (!stationId) return;
+    ruleBuilderApi.listStaffGroups(stationId).then(setGroups).catch(err => setError(err.message));
+    ruleBuilderApi.listRules(stationId).then(setRules).catch(err => setError(err.message));
+  }, [stationId]);
+  useEffect(load, [load]);
+  useEffect(() => {
+    if (!stationId) return;
+    staffApi.listStaff({ stationId, pageSize: 500 }).then(r => setStaff(r.items || r)).catch(() => {});
+  }, [stationId]);
+
+  async function addGroup() {
+    if (!newGroupName.trim()) return;
+    setBusy(true); setError("");
+    try { await ruleBuilderApi.upsertStaffGroup({ stationId, name: newGroupName.trim(), memberUserIds: [] }); setNewGroupName(""); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function toggleMember(group, userId) {
+    const memberUserIds = group.members.some(m => m.userId === userId) ? group.members.filter(m => m.userId !== userId).map(m => m.userId) : [...group.members.map(m => m.userId), userId];
+    setBusy(true); setError("");
+    try { await ruleBuilderApi.upsertStaffGroup({ id: group.id, stationId, name: group.name, memberUserIds }); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function removeGroup(id) {
+    setBusy(true); setError("");
+    try { await ruleBuilderApi.deleteStaffGroup(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  async function saveRule(r) {
+    setBusy(true); setError("");
+    try {
+      await ruleBuilderApi.upsertRule({
+        id: r.id, stationId, name: r.name, appliesToType: r.appliesToType, appliesToValue: r.appliesToValue || null,
+        conditionType: r.conditionType, limitValue: r.limitValue === "" ? null : Number(r.limitValue),
+        offDays: r.offDays === "" ? null : Number(r.offDays), priority: r.priority, type: r.type, enabled: r.enabled,
+      });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function addRule(type) {
+    setBusy(true); setError("");
+    try {
+      await ruleBuilderApi.upsertRule({
+        stationId, name: type === "hard" ? "New Hard Rule" : "New Soft Rule", appliesToType: "all",
+        conditionType: type === "hard" ? "max_consecutive_nights" : "balance_total_hours",
+        limitValue: type === "hard" ? 2 : null, priority: "Medium", type, enabled: true,
+      });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function removeRule(id) {
+    setBusy(true); setError("");
+    try { await ruleBuilderApi.deleteRule(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  if (!groups || !rules) return <div className="card">Loading…</div>;
+
+  return (
+    <div className="two-col">
+      <div>
+        <div className="card">
+          <div className="card-title">👥 Staff Groups</div>
+          {error && <div className="ab red">{error}</div>}
+          <div className="fg2" style={{ marginBottom: 8 }}>
+            <input className="fi" placeholder="New group name" value={newGroupName} onChange={e => setNewGroupName(e.target.value)} />
+            <button className="btn btn-ghost btn-sm" onClick={addGroup} disabled={busy}>＋ Add Group</button>
+          </div>
+          {groups.map(g => (
+            <div key={g.id} style={{ marginBottom: 10, borderBottom: "1px solid var(--border)", paddingBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
+                <span>{g.name} ({g.members.length})</span>
+                <button className="wl-del" onClick={() => removeGroup(g.id)} disabled={busy}>✕</button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 100, overflowY: "auto" }}>
+                {staff.map(s => (
+                  <label key={s.id} style={{ fontSize: 9, display: "flex", alignItems: "center", gap: 3 }}>
+                    <input type="checkbox" checked={g.members.some(m => m.userId === s.id)} onChange={() => toggleMember(g, s.id)} disabled={busy} />
+                    {s.fullName}
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div>
+        <div className="card">
+          <div className="card-title">🔒 Hard Rules (enforced during generation)</div>
+          {rules.filter(r => r.type === "hard").map(r => (
+            <RuleRow key={r.id} rule={r} groups={groups} conditionTypes={HARD_CONDITION_TYPES} onSave={saveRule} onDelete={removeRule} busy={busy} setRules={setRules} rules={rules} />
+          ))}
+          <button className="btn btn-ghost btn-sm" onClick={() => addRule("hard")} disabled={busy}>＋ Add Hard Rule</button>
+        </div>
+        <div className="card">
+          <div className="card-title">⚖ Soft Rules (scored only)</div>
+          {rules.filter(r => r.type === "soft").map(r => (
+            <RuleRow key={r.id} rule={r} groups={groups} conditionTypes={SOFT_CONDITION_TYPES} onSave={saveRule} onDelete={removeRule} busy={busy} setRules={setRules} rules={rules} />
+          ))}
+          <button className="btn btn-ghost btn-sm" onClick={() => addRule("soft")} disabled={busy}>＋ Add Soft Rule</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RuleRow({ rule: r, groups, conditionTypes, onSave, onDelete, busy, setRules, rules }) {
+  function update(field, value) { setRules(list => list.map(x => (x.id === r.id ? { ...x, [field]: value } : x))); }
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.2fr 90px 90px 130px 50px 50px 80px 40px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
+      <input className="fi" value={r.name} style={{ fontSize: 9 }} onChange={e => update("name", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
+      <select className="fi" value={r.appliesToType} style={{ fontSize: 9 }} onChange={e => { update("appliesToType", e.target.value); onSave({ ...r, appliesToType: e.target.value }); }} disabled={busy}>
+        <option value="all">All Staff</option><option value="category">Category</option><option value="group">Group</option><option value="staff">Staff</option>
+      </select>
+      {r.appliesToType === "category" ? (
+        <select className="fi" value={r.appliesToValue || ""} style={{ fontSize: 9 }} onChange={e => { update("appliesToValue", e.target.value); onSave({ ...r, appliesToValue: e.target.value }); }} disabled={busy}>
+          {CATEGORIES.concat("NCS").map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      ) : r.appliesToType === "group" ? (
+        <select className="fi" value={r.appliesToValue || ""} style={{ fontSize: 9 }} onChange={e => { update("appliesToValue", e.target.value); onSave({ ...r, appliesToValue: e.target.value }); }} disabled={busy}>
+          <option value="">—</option>{groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+      ) : <span style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.appliesToType === "staff" ? r.appliesToValue : "—"}</span>}
+      <select className="fi" value={r.conditionType} style={{ fontSize: 9 }} onChange={e => { update("conditionType", e.target.value); onSave({ ...r, conditionType: e.target.value }); }} disabled={busy}>
+        {conditionTypes.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <input className="fi" type="number" placeholder="limit" title="limitValue" style={{ fontSize: 9 }} value={r.limitValue ?? ""} onChange={e => update("limitValue", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
+      <input className="fi" type="number" placeholder="offDays" title="offDays" style={{ fontSize: 9 }} value={r.offDays ?? ""} onChange={e => update("offDays", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
+      <select className="fi" value={r.priority} style={{ fontSize: 9 }} onChange={e => { update("priority", e.target.value); onSave({ ...r, priority: e.target.value }); }} disabled={busy}>
+        <option>High</option><option>Medium</option><option>Low</option>
+      </select>
+      <label style={{ fontSize: 9 }}><input type="checkbox" checked={r.enabled} onChange={e => { update("enabled", e.target.checked); onSave({ ...r, enabled: e.target.checked }); }} disabled={busy} /></label>
+      <button className="wl-del" onClick={() => onDelete(r.id)} disabled={busy}>✕</button>
+    </div>
+  );
+}
+
+// ═══ TAB: DAILY OPERATIONAL ADJUSTMENT ════════════════════════════════════════
+function DailyOpsTab({ stationId }) {
+  const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
+  const [entries, setEntries] = useState(null);
+  const [comparison, setComparison] = useState(null);
+  const [form, setForm] = useState({ date: "", description: "", reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0 });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(() => {
+    if (!stationId) return;
+    dailyOpsApi.listAdjustments(stationId, monthKey).then(setEntries).catch(err => setError(err.message));
+    dailyOpsApi.getComparison(stationId, monthKey).then(setComparison).catch(err => setError(err.message));
+  }, [stationId, monthKey]);
+  useEffect(load, [load]);
+
+  async function add() {
+    if (!form.date || !form.description.trim()) { setError("Date and description are required"); return; }
+    setBusy(true); setError("");
+    try {
+      await dailyOpsApi.createAdjustment({ stationId, ...form, reqB1: Number(form.reqB1) || 0, reqB2: Number(form.reqB2) || 0, reqCM: Number(form.reqCM) || 0, reqNCS: Number(form.reqNCS) || 0 });
+      setForm({ date: "", description: "", reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0 });
+      load();
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  async function remove(id) {
+    setBusy(true); setError("");
+    try { await dailyOpsApi.deleteAdjustment(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  const STATUS_COLOR = { green: "var(--green)", amber: "var(--amber)", red: "var(--red)" };
+  const STATUS_ICON = { green: "✅", amber: "⚠", red: "🛑" };
+
+  return (
+    <div className="two-col">
+      <div>
+        <div className="card">
+          <div className="card-title">📅 Log Daily Operational Adjustment</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+            Records near-term operational reality as it becomes known — this NEVER auto-changes the published roster, it only informs the comparison view.
+          </div>
+          {error && <div className="ab red">{error}</div>}
+          <div className="fg2" style={{ marginBottom: 8 }}>
+            <div className="fg"><label className="fl">Date</label><input className="fi" type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} /></div>
+            <div className="fg"><label className="fl">Description</label><input className="fi" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} /></div>
+          </div>
+          <div className="fg2" style={{ marginBottom: 8 }}>
+            {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
+              <div className="fg" key={f}><label className="fl">{f.replace("req", "")}</label><input className="fi" type="number" min="0" value={form[f]} onChange={e => setForm(v => ({ ...v, [f]: e.target.value }))} /></div>
+            ))}
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={add} disabled={busy}>＋ Log Adjustment</button>
+        </div>
+        <div className="card">
+          <div className="card-title">📋 Entries — {monthKey}</div>
+          <div className="fg" style={{ marginBottom: 8 }}><label className="fl">Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
+          <div className="wl-scroll">
+            {(entries || []).map(e => (
+              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                <span>{e.date?.slice(0, 10)} — {e.description} (B1:{e.reqB1} B2:{e.reqB2} CM:{e.reqCM} NCS:{e.reqNCS})</span>
+                <button className="wl-del" onClick={() => remove(e.id)} disabled={busy}>✕</button>
+              </div>
+            ))}
+            {(!entries || entries.length === 0) && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No entries this month.</div>}
+          </div>
+        </div>
+      </div>
+      <div>
+        <div className="card">
+          <div className="card-title">🚦 Comparison vs Rostered Coverage</div>
+          {!comparison || comparison.length === 0 ? (
+            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No entries to compare this month.</div>
+          ) : comparison.map(c => (
+            <div key={c.id} style={{ marginBottom: 10, borderLeft: `3px solid ${STATUS_COLOR[c.overallStatus]}`, paddingLeft: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700 }}>{STATUS_ICON[c.overallStatus]} {c.date?.slice(0, 10)} — {c.description}</div>
+              <div style={{ display: "flex", gap: 10, fontSize: 9, marginTop: 3 }}>
+                {c.byCategory.map(bc => (
+                  <span key={bc.category} style={{ color: STATUS_COLOR[bc.status] }}>{bc.category}: {bc.rostered}/{bc.required}</span>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -709,8 +1296,50 @@ function GenerateTab({ stationId }) {
             </div>
             {preview && (
               <div className="card" style={{ borderColor: preview.violations.length ? "var(--amber)" : "var(--rp-green)" }}>
-                <div className="card-title">{preview.violations.length ? `⚠️ ${preview.violations.length} Coverage Gaps in Generated Roster` : "✅ Generated Roster: Full Coverage"}</div>
-                <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign</div>
+                <div className="card-title">{preview.violations.length ? `⚠️ ${preview.violations.length} Critical Coverage Gaps in Generated Roster` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
+                <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{preview.advisoryGaps?.length ? ` · ${preview.advisoryGaps.length} advisory gap(s)` : ""}</div>
+              </div>
+            )}
+
+            {preview?.analysis && (
+              <div className="card">
+                <div className="card-title">📈 Explainable Workload Analysis</div>
+                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 8 }}>
+                  Demand source: <strong style={{ color: preview.analysis.demandSource === "flight-schedule-driven" ? "var(--green)" : "var(--text-dim)" }}>{preview.analysis.demandSource}</strong> — {preview.analysis.demandReason}
+                </div>
+                <div className="manpower-grid">
+                  {["M", "A", "N"].map(sh => {
+                    const em = preview.analysis.explainableManpower[sh];
+                    return (
+                      <div className="mp-card" key={sh}>
+                        <div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>{SHIFT_LABELS[sh]}</div>
+                        <div className="mp-total" style={{ fontSize: 18, fontWeight: 800 }}>{em.required}</div>
+                        <div className="mp-breakdown" style={{ fontSize: 9, color: "var(--text-dim)" }}>Flight/PDC:{em.flightPdcDemand} · Planned:{em.plannedMaintenance} · Unplanned:{em.unplannedReserve}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {preview?.analysis && (
+              <div className="card">
+                <div className="card-title">⚖ Soft Rule Optimization Score</div>
+                {preview.analysis.softRuleScore.overallScore === null ? (
+                  <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No soft (balance) rules configured yet — see Rule Builder.</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--cyan)" }}>{preview.analysis.softRuleScore.overallScore}<span style={{ fontSize: 11, color: "var(--text-dim)" }}> / 100</span></div>
+                    {preview.analysis.softRuleScore.results.map((r, i) => (
+                      <div key={i} style={{ fontSize: 10, display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+                        <span>{r.ruleName} ({r.metric}, {r.appliesTo})</span><strong>{r.score}</strong>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {preview.analysis.hardRuleViolations.length > 0 && (
+                  <div className="ab red" style={{ marginTop: 8 }}>⚠ {preview.analysis.hardRuleViolations.length} hard rule violation(s) detected</div>
+                )}
               </div>
             )}
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>
@@ -723,7 +1352,7 @@ function GenerateTab({ stationId }) {
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
             <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {applied.violations.length} coverage gaps remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {applied.violations.length} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${applied.advisoryGaps.length} advisory gap(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
       </div>
