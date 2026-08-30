@@ -20,27 +20,32 @@
 //      that. `tailByUser` carries each staff member's real last 3 shift
 //      codes from the previous month (when "continue from previous" is on)
 //      so this look-back is continuous across the month boundary instead of
-//      assuming everyone was OFF on day zero.
-//   5. A coverage pass enforces the same rule the roster generator's
-//      publish step and the dashboard's coverage widget both check: every
-//      shift needs ≥1 B1, and Night specifically needs ≥1 B2. Where the
-//      rotation alone doesn't satisfy this, an available (not blocked, not
-//      on leave, currently OFF that day) staff member of the right category
-//      and not coming off a shift that would itself create a rest-gap
-//      violation is pulled onto that shift — same eligibility guard as the
-//      reference's fillMinCat, plus guards the reference's fillMinCat omits
-//      and this port deliberately adds: the candidate must currently be OFF
-//      that day (otherwise a tightly-staffed roster can silently overwrite
-//      their own already-assigned shift); no fill of any kind — Morning,
-//      Afternoon, or Night — is allowed to land on a day the rest-gap pass
-//      already committed to as a mandatory rest day (the day right after 2
-//      consecutive nights, or the second OFF day after that); and a Night
-//      fill specifically is also rejected if it would land immediately
-//      before a day already fixed to Morning. Without these, coverage-
-//      filling can retroactively undo a mandatory rest day the earlier pass
-//      just committed to, recreating the exact violation step 4 exists to
-//      prevent. Where NO eligible candidate exists, it's reported as a
-//      violation rather than silently left uncovered.
+//      assuming everyone was OFF on day zero. Any enabled night_only/no_night
+//      Workload Rule that applies to this staff member is enforced here too
+//      (proactively, not just flagged after the fact) — same as the
+//      reference's applyAutoRoster() checking nightRestrictionRules inline
+//      in the base rotation loop.
+//   5. A two-tier coverage pass — MANDATORY then ADVISORY — enforces the
+//      Mandatory Minimum Coverage grid (`mandatoryCoverageConfig`, keyed by
+//      category then shift, e.g. every shift needs >=1 B1 and Night needs
+//      >=1 B2 by default) exactly as the reference's fillMandatory() does,
+//      then tops up further, non-critical shortfalls against
+//      `advisoryDemand` (the day/shift/category targets
+//      workloadEngine.computeDailyShiftDemand produces) exactly as the
+//      reference's fillAdvisory() does. Both passes share one eligibility
+//      guard: the candidate must currently be OFF that day, must not be
+//      locked to an approved LMPM pattern (`lmpmLockedUserIds` — pulling a
+//      pattern-locked staff member onto a shift their pattern says they're
+//      off is never allowed, even under coverage pressure, matching the
+//      reference's `ALLOCATIONS[s.si].patternId !== 'MANUAL'` check), must
+//      not violate any enabled night_only/no_night rule that applies to
+//      them, and must not land on a day the rest-gap pass already committed
+//      to as a mandatory rest day or create a fresh rest-gap violation.
+//      Where NO eligible candidate exists for a MANDATORY slot, it's
+//      reported as a (critical) violation; an unmet ADVISORY slot is
+//      reported separately as a non-critical gap, never blocking generation.
+
+const { ruleAppliesToStaff } = require("./ruleEngine");
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 
@@ -61,9 +66,40 @@ function isMorn(code) { return MORN_CODES.has(code); }
 function isAft(code) { return AFT_CODES.has(code); }
 function isNight(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "night"; }
 function isLeaveType(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "leave"; }
+function isDutyType(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "duty"; }
 
-function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode }) {
+// Default Mandatory Minimum Coverage: every shift needs >=1 B1, Night also
+// needs >=1 B2 — exactly the hardcoded behavior this port had before the
+// config became adjustable, preserved as the default so existing callers
+// that don't pass mandatoryCoverageConfig see no behavior change.
+const DEFAULT_MANDATORY_COVERAGE_CONFIG = {
+  B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: true, min: 1 } },
+  B2: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: true, min: 1 } },
+  CM: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } },
+};
+
+function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId) {
+  if (!rules || !rules.length) return false;
+  const targetIsNight = isNight(shift, shiftDefsByCode);
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    if (!ruleAppliesToStaff(rule, s, staffGroupMembersByGroupId)) continue;
+    if (rule.conditionType === "no_night" && targetIsNight) return true;
+    if (rule.conditionType === "night_only" && !targetIsNight && isDutyType(shift, shiftDefsByCode)) return true;
+  }
+  return false;
+}
+
+function buildRosterAssignments({
+  staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
+  mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
+}) {
   const blocked = new Set(blockedUserIds || []);
+  const lmpmLocked = new Set(lmpmLockedUserIds || []);
+  const coverageConfig = mandatoryCoverageConfig || DEFAULT_MANDATORY_COVERAGE_CONFIG;
+  const nightRules = (nightRestrictionRules || []).filter(
+    r => r.enabled && r.type === "hard" && (r.conditionType === "night_only" || r.conditionType === "no_night"),
+  );
   const grid = {}; // userId -> array of nDays codes (1-indexed access via day-1)
 
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
@@ -98,6 +134,7 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
         if (isAft(proposed) && isNight(prev, shiftDefsByCode)) proposed = "O";
         if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) proposed = "O"; // after 2N -> OFF
         if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") proposed = "O"; // 2nd mandatory OFF day
+        if (violatesNightRestriction(nightRules, s, proposed, shiftDefsByCode, staffGroupMembersByGroupId)) proposed = "O";
       }
 
       codes[day - 1] = proposed;
@@ -105,19 +142,20 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
     grid[s.id] = codes;
   });
 
-  // Step 5: minimum coverage pass, per day in shift order M, A, N (B1), then
-  // N again (B2) — matching the reference's fillMinCat call order.
+  // Step 5: two-tier coverage pass, per day in shift order M, A, N — first
+  // Mandatory Minimum Coverage (critical if unmet), then Advisory workload-
+  // driven sizing on top of it (non-critical if unmet).
   const violations = [];
+  const advisoryGaps = [];
 
-  function ensureCategoryCovered(shift, category, day) {
-    const covered = staff.some(s => s.category === category && grid[s.id][day - 1] === shift);
-    if (covered) return;
-
-    const candidate = staff.find(s => {
+  function findEligible(shift, category, day) {
+    return staff.find(s => {
       if (s.category !== category) return false;
       if (blocked.has(s.id)) return false;
       if (leaveByUserDay?.[s.id]?.has(day)) return false;
       if (grid[s.id][day - 1] !== "O") return false; // must currently be idle that day
+      if (lmpmLocked.has(s.id)) return false; // never pull a pattern-locked staff member off their pattern's OFF day
+      if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
       const tail = tailByUser?.[s.id] || ["O", "O", "O"];
       const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
       const prev2 = day > 2 ? grid[s.id][day - 3] : (day === 2 ? tail[0] : tail[1]);
@@ -140,18 +178,44 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
       }
       return true;
     });
-    if (candidate) {
+  }
+
+  function fillCategory(shift, category, day, minCount, { mandatory }) {
+    let onShift = staff.filter(s => s.category === category && grid[s.id][day - 1] === shift).length;
+    while (onShift < minCount) {
+      const candidate = findEligible(shift, category, day);
+      if (!candidate) {
+        const target = mandatory ? violations : advisoryGaps;
+        target.push({ day, shift, category, issue: `No available ${category} to cover ${shift} on day ${day}` });
+        break;
+      }
       grid[candidate.id][day - 1] = shift;
-    } else {
-      violations.push({ day, shift, category, issue: `No available ${category} to cover ${shift} on day ${day}` });
+      onShift++;
     }
   }
 
   for (let day = 1; day <= nDays; day++) {
-    ensureCategoryCovered("M", "B1", day);
-    ensureCategoryCovered("A", "B1", day);
-    ensureCategoryCovered("N", "B1", day);
-    ensureCategoryCovered("N", "B2", day);
+    ["B1", "B2", "CM"].forEach(category => {
+      ["M", "A", "N"].forEach(shift => {
+        const cfg = coverageConfig[category]?.[shift];
+        if (cfg && cfg.enabled) fillCategory(shift, category, day, Math.max(1, +cfg.min || 1), { mandatory: true });
+      });
+    });
+  }
+
+  if (advisoryDemand) {
+    for (let day = 1; day <= nDays; day++) {
+      const dayDemand = advisoryDemand[day];
+      if (!dayDemand) continue;
+      ["M", "A", "N"].forEach(shift => {
+        const shiftDemand = dayDemand[shift];
+        if (!shiftDemand) return;
+        Object.entries(shiftDemand).forEach(([category, target]) => {
+          if (!target || target <= 0) return;
+          fillCategory(shift, category, day, target, { mandatory: false });
+        });
+      });
+    }
   }
 
   const assignments = [];
@@ -161,7 +225,7 @@ function buildRosterAssignments({ staff, nDays, leaveByUserDay, blockedUserIds, 
     }
   }
 
-  return { assignments, violations, staffCount: staff.length };
+  return { assignments, violations, advisoryGaps, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG };

@@ -194,3 +194,94 @@ describe("buildRosterAssignments — blocking and leave", () => {
     expect(codeOn(8)).not.toBe("L");
   });
 });
+
+describe("buildRosterAssignments — LMPM pattern lock (verification case 4)", () => {
+  it("never assigns a shift on a locked pattern-holder's OFF day, even under coverage pressure that would otherwise reclaim it", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
+
+    // Without a lock, the earlier "pattern-based mode" test proves this exact
+    // setup gets day 3 and day 6 reclaimed as "M" by the coverage pass.
+    const withoutLock = buildRosterAssignments({ staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser });
+    expect(withoutLock.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
+
+    const withLock = buildRosterAssignments({
+      staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["b1_0"],
+    });
+    const codes = withLock.assignments.map(a => a.code);
+    expect(codes).toEqual(["G", "G", "O", "G", "G", "O"]); // day 3 and 6 stay OFF — never reclaimed
+
+    // The coverage gap this leaves behind must be honestly reported, not silently absorbed.
+    expect(withLock.violations.some(v => v.day === 3)).toBe(true);
+    expect(withLock.violations.some(v => v.day === 6)).toBe(true);
+  });
+
+  it("still allows an UNLOCKED staff member on the same pattern to be pulled onto coverage as before", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: [],
+    });
+    expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
+  });
+});
+
+describe("buildRosterAssignments — proactive night_only / no_night rule enforcement", () => {
+  it("never assigns a Night shift to a staff member covered by an enabled no_night rule, in either the base rotation or coverage-fill", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const nightRestrictionRules = [
+      { name: "No Night - u1", type: "hard", enabled: true, conditionType: "no_night", appliesToType: "staff", appliesToValue: "b1_0" },
+    ];
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], nightRestrictionRules });
+    expect(result.assignments.every(a => a.code !== "N")).toBe(true);
+  });
+
+  it("never assigns a non-Night duty shift to a staff member covered by an enabled night_only rule", () => {
+    const staff = [{ id: "b1_0", category: "B1" }, { id: "b1_1", category: "B1" }];
+    const nightRestrictionRules = [
+      { name: "Night Only - u1", type: "hard", enabled: true, conditionType: "night_only", appliesToType: "staff", appliesToValue: "b1_0" },
+    ];
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], nightRestrictionRules });
+    const codesU1 = result.assignments.filter(a => a.userId === "b1_0").map(a => a.code);
+    expect(codesU1.every(c => c === "N" || c === "O")).toBe(true);
+  });
+
+  it("a disabled rule never restricts anything", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const nightRestrictionRules = [
+      { name: "No Night - u1", type: "hard", enabled: false, conditionType: "no_night", appliesToType: "staff", appliesToValue: "b1_0" },
+    ];
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], nightRestrictionRules });
+    expect(result.assignments.some(a => a.code === "N")).toBe(true);
+  });
+});
+
+describe("buildRosterAssignments — Mandatory vs Advisory two-tier coverage config", () => {
+  it("a disabled mandatory category/shift is never force-filled, matching the configured grid instead of the old hardcoded default", () => {
+    const staff = Array.from({ length: 3 }, (_, i) => ({ id: `cm${i}`, category: "CM" }));
+    const mandatoryCoverageConfig = { CM: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({ staff, nDays: 5, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    expect(result.violations).toHaveLength(0); // nothing mandatory configured -> nothing to violate
+  });
+
+  it("raising the mandatory minimum above 1 produces at least as much coverage as the default min:1 config", () => {
+    const staff = Array.from({ length: 4 }, (_, i) => ({ id: `b1${i}`, category: "B1" }));
+    const base = buildRosterAssignments({ staff, nDays: 10, leaveByUserDay: {}, blockedUserIds: [] });
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 2 }, A: { enabled: true, min: 2 }, N: { enabled: true, min: 2 } } };
+    const boosted = buildRosterAssignments({ staff, nDays: 10, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    const dutyCount = (result) => result.assignments.filter(a => ["M", "A", "N"].includes(a.code)).length;
+    expect(dutyCount(boosted)).toBeGreaterThanOrEqual(dutyCount(base));
+  });
+
+  it("advisory demand tops up coverage beyond the mandatory minimum, non-critically", () => {
+    const staff = Array.from({ length: 6 }, (_, i) => ({ id: `b1${i}`, category: "B1" }));
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: true, min: 1 } } };
+    const advisoryDemand = { 1: { M: { B1: 3 } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, advisoryDemand,
+    });
+    const day1M = result.assignments.filter(a => a.day === 1 && a.code === "M").length;
+    expect(day1M).toBeGreaterThanOrEqual(3);
+    expect(result.violations).toHaveLength(0); // an advisory shortfall never counts as a critical violation
+  });
+});

@@ -142,6 +142,15 @@ model Station {
   auditFindings   AuditFinding[]
   shiftPatterns   ShiftPattern[]
   workloadItems   WorkloadItem[]
+  flightScheduleImports FlightScheduleImport[]
+  workloadConfig  StationWorkloadConfig?
+  mandatoryCoverageRules MandatoryCoverageRule[]
+  plannedTaskMasterEntries PlannedTaskMaster[]
+  unplannedTaskMasterEntries UnplannedTaskMaster[]
+  manualDemandEntries ManualDemand[]
+  staffGroups     StaffGroup[]
+  workloadRules   WorkloadRule[]
+  dailyOperationalAdjustments DailyOperationalAdjustment[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -205,6 +214,7 @@ model User {
   capaOwned         Capa[]            @relation("CapaOwner")
   activityLogs      ActivityLog[]
   shiftAllocation   StaffShiftAllocation?
+  staffGroupMemberships WorkloadRuleStaffGroupMember[]
 
   @@index([airlineId])
   @@index([stationId])
@@ -439,6 +449,250 @@ model WorkloadItem {
   deletedAt   DateTime?
 
   @@map("workload_items")
+}
+
+// ─── Flight Schedule import (Turn Report Excel) ──────────────────────────────
+// Ported from the RosterPro PWA's Flight Schedule tab — one import per
+// station+month, holding the raw parsed rows so every downstream workload
+// calculation (Workload Config, Generate) re-derives from the same source
+// rather than a separately-stored summary that could drift from it.
+model FlightScheduleImport {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  year      Int
+  month     Int // 1-12
+  turnRowCount    Int @default(0)
+  charterRowCount Int @default(0)
+
+  importedById String?
+  importedAt   DateTime @default(now())
+
+  turnRecords    TurnRecord[]
+  charterRecords CharterRecord[]
+
+  @@unique([stationId, year, month])
+  @@map("flight_schedule_imports")
+}
+
+// One row of the Turn Report's main Inbound/Outbound sheet. daysOfWeekPattern
+// stores the decoded 7-character pattern (e.g. "1234567", ".2.4.6."), never
+// the raw Excel value — decodeDaysOfWeek() runs once at import time.
+model TurnRecord {
+  id       String   @id @default(uuid())
+  importId String
+  import   FlightScheduleImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  aln             String?
+  inboundFlt      String?
+  inboundDepSta   String?
+  inboundDepMin   Int?
+  inboundArrSta   String?
+  inboundArrMin   Int?
+  groundTimeMin   Int?
+  outboundDepSta  String?
+  outboundFlt     String?
+  outboundDepMin  Int?
+  outboundArrSta  String?
+  outboundArrMin  Int?
+  effectiveDate   DateTime?
+  discontinueDate DateTime?
+  daysOfWeekPattern String? // 7-char pattern, Monday-first; null = no valid pattern decoded
+  remark          String?
+
+  @@map("turn_records")
+}
+
+// One row of the separate Charter Flights sheet — single-leg, not an
+// inbound/outbound turn pair.
+model CharterRecord {
+  id       String   @id @default(uuid())
+  importId String
+  import   FlightScheduleImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  flightDesg      String?
+  effectiveDate   DateTime?
+  discontinueDate DateTime?
+  daysOfWeekPattern String?
+  depSta          String?
+  depMin          Int?
+  arrSta          String?
+  arrMin          Int?
+  serviceType     String?
+
+  @@map("charter_records")
+}
+
+// ─── Workload Config (standard durations, ratios, mandatory coverage) ───────
+// One row per station — every number here is a configurable default the
+// engine actually reads at generation time, never a hardcoded assumption.
+model StationWorkloadConfig {
+  id        String  @id @default(uuid())
+  stationId String  @unique
+  station   Station @relation(fields: [stationId], references: [id])
+
+  transitMinutesDefault      Int @default(40)  // fallback ONLY when a turn's real ground time is missing
+  pdcMinutesBeforeDeparture  Int @default(60)
+  clashProximityMinutes      Int @default(60)  // deliberately separate from PDC duration — "how close together do two departures count as a clash", not "how long a PDC takes"
+  transitVsPdcThresholdMinutes Int @default(120) // ground time <= this = Transit; > this = PDC. Mutually exclusive.
+  movementsPerB1Staff  Int @default(4)
+  movementsPerCMStaff  Int @default(1)
+  movementsPerNCSStaff Int @default(1)
+  unplannedMethod                  String @default("frequency") // frequency | manpower_hours | both
+  unplannedManpowerHoursPerMonth   Int    @default(0)
+  unplannedBufferPct               Int    @default(20)
+  bufferB1  Int @default(0) // Per-Shift Unplanned Buffer — a standing per-shift reserve, distinct from the Unplanned Task Master's monthly frequency-based capacity
+  bufferB2  Int @default(0)
+  bufferCM  Int @default(0)
+  bufferNCS Int @default(0)
+
+  updatedById String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("station_workload_configs")
+}
+
+// Which categories require a MANDATORY minimum on which shifts — a
+// non-negotiable safety/certification floor, completely separate from
+// workload-driven advisory sizing. Defaults preserve B1 mandatory on all 3
+// shifts, B2 mandatory only at Night, CM not mandatory anywhere.
+model MandatoryCoverageRule {
+  id        String  @id @default(uuid())
+  stationId String
+  station   Station @relation(fields: [stationId], references: [id])
+  category  String // B1 | B2 | CM
+  shift     String // M | A | N
+  enabled   Boolean @default(false)
+  minCount  Int     @default(1)
+
+  @@unique([stationId, category, shift])
+  @@map("mandatory_coverage_rules")
+}
+
+// ─── Task Masters + Manual Demand ─────────────────────────────────────────────
+model PlannedTaskMaster {
+  id        String  @id @default(uuid())
+  stationId String
+  station   Station @relation(fields: [stationId], references: [id])
+  name      String
+  frequency Int     @default(0)
+  frequencyUnit String @default("per_month") // per_month | per_week | per_operating_day
+  avgDurationMin Int @default(0)
+  reqB1  Int @default(0)
+  reqB2  Int @default(0)
+  reqCM  Int @default(0)
+  reqNCS Int @default(0)
+  preferredShift  String? // M | A | N | null (null/"Any" = split evenly across all 3)
+  nightApplicable Boolean @default(false)
+  remarks String?
+  sortOrder Int @default(0)
+
+  @@map("planned_task_master_entries")
+}
+
+model UnplannedTaskMaster {
+  id        String  @id @default(uuid())
+  stationId String
+  station   Station @relation(fields: [stationId], references: [id])
+  name      String
+  avgFreqPerMonth Int @default(0)
+  avgDurationMin  Int @default(0)
+  reqB1  Int @default(0)
+  reqB2  Int @default(0)
+  reqCM  Int @default(0)
+  reqNCS Int @default(0)
+  preferredShift  String?
+  nightApplicable Boolean @default(false)
+  remarks String?
+  sortOrder Int @default(0)
+
+  @@map("unplanned_task_master_entries")
+}
+
+// Manual additional demand, entered per date/time-window — NEVER overwrites
+// automatically-detected clashes; always shown and totaled separately.
+model ManualDemand {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  date      DateTime
+  timeStart String? // "HH:MM" — routes to the correct shift via classifyTimeToShift
+  timeEnd   String?
+  reqB1  Int @default(0)
+  reqB2  Int @default(0)
+  reqCM  Int @default(0)
+  reqNCS Int @default(0)
+  remarks String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@map("manual_demand_entries")
+}
+
+// ─── Rule Builder: Staff Groups + Rules ──────────────────────────────────────
+model StaffGroup {
+  id        String  @id @default(uuid())
+  stationId String
+  station   Station @relation(fields: [stationId], references: [id])
+  name      String
+
+  members WorkloadRuleStaffGroupMember[]
+
+  @@map("staff_groups")
+}
+
+model WorkloadRuleStaffGroupMember {
+  id           String     @id @default(uuid())
+  staffGroupId String
+  staffGroup   StaffGroup @relation(fields: [staffGroupId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+
+  @@unique([staffGroupId, userId])
+  @@map("staff_group_members")
+}
+
+// Unified hard/soft rule store — "type" is the only thing distinguishing a
+// hard rule (genuinely enforced/detected) from a soft one (scored only).
+model WorkloadRule {
+  id        String  @id @default(uuid())
+  stationId String
+  station   Station @relation(fields: [stationId], references: [id])
+  name      String
+  appliesToType  String @default("all") // all | category | group | staff
+  appliesToValue String? // category code, StaffGroup id, or User id depending on appliesToType
+  conditionType  String // see RULE_CONDITION_TYPES: max_consecutive_nights, rest_after_night, min_rest_hours, forced_off_after_nights, max_weekly_hours, max_monthly_hours, night_only, no_night, balance_total_hours, balance_night_duties
+  limitValue Int?
+  offDays    Int? // only used by forced_off_after_nights
+  priority   String @default("Medium") // High | Medium | Low
+  type       String // hard | soft
+  enabled    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("workload_rules")
+}
+
+// ─── Daily Operational Adjustment ─────────────────────────────────────────────
+// Real near-term info logged once known, compared against what's rostered —
+// never auto-changes the published roster.
+model DailyOperationalAdjustment {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  date      DateTime
+  description String
+  reqB1  Int @default(0)
+  reqB2  Int @default(0)
+  reqCM  Int @default(0)
+  reqNCS Int @default(0)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@map("daily_operational_adjustments")
 }
 
 model Roster {
