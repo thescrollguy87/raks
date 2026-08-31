@@ -34,6 +34,10 @@ export function deleteUnplannedTask(id) {
   return api.delete(`/api/workload-config/unplanned-tasks/${id}`);
 }
 
+export function getFlightDerivedSummary(stationId, year, month) {
+  return api.get("/api/workload-config/flight-derived-summary", { stationId, year, month });
+}
+
 export function listManualDemand(stationId, monthKey) {
   return api.get("/api/workload-config/manual-demand", { stationId, monthKey });
 }

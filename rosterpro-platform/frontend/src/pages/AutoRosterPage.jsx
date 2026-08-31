@@ -506,6 +506,22 @@ function LeaveAbsenceTab({ stationId }) {
   );
 }
 
+// Collapsible "How to use this tab" help box — matches the reference PWA's
+// own header pattern on every Auto-Roster sub-tab (collapsed by default so
+// it doesn't crowd out the actual controls).
+function HowToUseTab({ children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="ab" style={{ background: "rgba(0,198,255,.07)", borderColor: "var(--cyan)", cursor: "pointer" }} onClick={() => setOpen(o => !o)}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "var(--cyan)" }}>{open ? "▼" : "▶"} ⓘ How to use this tab (click to expand)</div>
+      {open && <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 6, lineHeight: 1.5 }}>{children}</div>}
+    </div>
+  );
+}
+
+const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
 // ═══ TAB: FLIGHT SCHEDULE ═════════════════════════════════════════════════════
 function FlightScheduleTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
@@ -514,14 +530,17 @@ function FlightScheduleTab({ stationId }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [importResult, setImportResult] = useState(null);
+  const [expandedDay, setExpandedDay] = useState(null);
 
   const [year, month] = monthKey.split("-").map(Number);
+  const monthLabel = `${MONTH_LONG[month - 1]} ${year}`;
 
   const load = useCallback(() => {
     if (!stationId) return;
     flightScheduleApi.getFlightSchedule(stationId, year, month).then(setSchedule).catch(err => setError(err.message));
   }, [stationId, year, month]);
   useEffect(load, [load]);
+  useEffect(() => setExpandedDay(null), [monthKey]);
 
   async function doImport() {
     if (!file) { setError("Choose a Turn Report / Charter Excel file (.xlsx) first"); return; }
@@ -537,57 +556,74 @@ function FlightScheduleTab({ stationId }) {
   }
 
   return (
-    <div className="two-col">
-      <div>
-        <div className="card">
-          <div className="card-title">✈ Import Turn Report / Charter Schedule</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-            Upload the monthly Turn Report Excel export (Inbound/Outbound sheet, plus an optional Charter Flights sheet). Re-importing the same month replaces its previous data.
-          </div>
-          {error && <div className="ab red">{error}</div>}
-          {importResult && <div className="ab green">✅ Imported: {importResult.turnRowCount} turn row(s), {importResult.charterRowCount} charter row(s)</div>}
-          <div className="fg2" style={{ marginBottom: 10 }}>
-            <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setImportResult(null); }} /></div>
-            <div className="fg"><label className="fl">Excel File (.xlsx)</label><input className="fi" type="file" accept=".xlsx" onChange={e => setFile(e.target.files?.[0] || null)} /></div>
-          </div>
-          <button className="btn btn-primary btn-sm" onClick={doImport} disabled={busy}>{busy ? "Importing…" : "⬆ Import Schedule"}</button>
-        </div>
+    <div>
+      <HowToUseTab>
+        Import your Turn Report Excel exactly as exported — no reformatting needed. The importer reads the "Inbound/Outbound" turn sheet and, if present, a "Charter Flights" sheet and expands each row's Effective Date / Discontinue Date / Days of Week into the actual calendar dates it operates within your selected target month.
+      </HowToUseTab>
 
-        {schedule?.imported && (
-          <div className="card">
-            <div className="card-title">📊 Workload Summary — {monthKey}</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, fontSize: 11 }}>
-              <div>Operating days: <strong>{schedule.summary.operatingDays}</strong> / {schedule.summary.daysInMonth}</div>
-              <div>Total movements: <strong>{schedule.summary.totalMovements}</strong></div>
-              <div>Avg daily movements: <strong>{schedule.summary.avgDailyMovements}</strong></div>
-              <div>Peak daily movements: <strong>{schedule.summary.peakDailyMovements}</strong> {schedule.summary.peakDate ? `(${schedule.summary.peakDate})` : ""}</div>
-              <div>Turn rows: <strong>{schedule.summary.turnRowCount}</strong></div>
-              <div>Charter rows: <strong>{schedule.summary.charterRowCount}</strong></div>
-            </div>
-          </div>
-        )}
-      </div>
-      <div>
-        <div className="card">
-          <div className="card-title">📅 Day-by-Day Schedule — {monthKey}</div>
-          {!schedule ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Loading…</div> : !schedule.imported ? (
-            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No flight schedule imported for this month yet.</div>
-          ) : (
-            <div className="wl-scroll" style={{ maxHeight: 520 }}>
-              {Array.from({ length: schedule.daysInMonth }, (_, i) => i + 1).map(d => (
-                <div key={d} style={{ borderBottom: "1px solid var(--border)", padding: "5px 0" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "var(--cyan)" }}>Day {d}{!schedule.byDay[d]?.length ? " — no flights" : ""}</div>
-                  {(schedule.byDay[d] || []).map((f, i) => (
-                    <div key={i} style={{ fontSize: 9, color: "var(--text-dim)", display: "flex", justifyContent: "space-between", paddingLeft: 8 }}>
-                      <span>{f.type === "Turn" ? "🔄" : "🛩"} {f.flightRef} <span style={{ color: "var(--text-dim)" }}>{f.route}</span></span>
-                      <span>{f.arr !== "-" ? `Arr ${f.arr}` : ""} {f.dep !== "-" ? `Dep ${f.dep}` : ""} {f.ground !== "-" ? `GT ${f.ground}` : ""}</span>
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          )}
+      <div className="card">
+        <div className="card-title">✈ Flight Schedule Import (Turn Report)</div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+          Upload the monthly Turn Report Excel export (Inbound/Outbound sheet, plus an optional Charter Flights sheet). Re-importing the same month replaces its previous data.
         </div>
+        {error && <div className="ab red">{error}</div>}
+        <div className="fg2" style={{ marginBottom: 10 }}>
+          <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setImportResult(null); }} /></div>
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={doImport} disabled={busy}>{busy ? "Importing…" : "⬆ Import Turn Report"}</button>
+        <input className="fi" type="file" accept=".xlsx" style={{ marginTop: 8 }} onChange={e => setFile(e.target.files?.[0] || null)} />
+        {importResult && <div className="ab green" style={{ marginTop: 10 }}>✅ Imported: {importResult.turnRowCount} turn-report row(s), {importResult.charterRowCount} charter row(s)</div>}
+      </div>
+
+      {schedule?.imported && (
+        <div className="card">
+          <div className="card-title">📊 Flight Workload — Derived From Import</div>
+          <div className="manpower-grid">
+            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Operating Days</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.operatingDays}<span style={{ fontSize: 12, color: "var(--text-dim)" }}> / {schedule.summary.daysInMonth}</span></div></div>
+            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Total Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.totalMovements}</div></div>
+            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Avg Daily Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.avgDailyMovements}</div></div>
+            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Peak Daily Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.peakDailyMovements}</div><div className="mp-breakdown" style={{ fontSize: 9, color: "var(--text-dim)" }}>{schedule.summary.peakDate || ""}</div></div>
+          </div>
+          <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 8 }}>
+            Source: {schedule.summary.turnRowCount} turn-report row(s), {schedule.summary.charterRowCount} charter row(s) — expanded against Effective/Discontinue dates and Days of the Week for the selected month. "Movements" = one takeoff or landing (a turn-report row contributes up to 2 per operating day: inbound arrival + outbound departure).
+          </div>
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">🛫 Full Daily Flight Schedule — {monthLabel}</div>
+        {!schedule ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Loading…</div> : !schedule.imported ? (
+          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No flight schedule imported for this month yet.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>Click any day to expand its full flight list. Every day of the month is listed, including days with zero flights.</div>
+            <div className="wl-scroll" style={{ maxHeight: 560 }}>
+              {Array.from({ length: schedule.daysInMonth }, (_, i) => i + 1).map(d => {
+                const weekday = WEEKDAY_SHORT[new Date(year, month - 1, d).getDay()];
+                const flights = schedule.byDay[d] || [];
+                const isOpen = expandedDay === d;
+                return (
+                  <div key={d} style={{ borderBottom: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 4px", cursor: "pointer" }} onClick={() => setExpandedDay(isOpen ? null : d)}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--cyan)" }}>{isOpen ? "▼" : "▶"} Day {d} ({weekday})</span>
+                      <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{flights.length} flight(s)</span>
+                    </div>
+                    {isOpen && (
+                      <div style={{ paddingLeft: 16, paddingBottom: 6 }}>
+                        {flights.length === 0 ? <div style={{ fontSize: 9, color: "var(--text-dim)" }}>No flights this day.</div> : flights.map((f, i) => (
+                          <div key={i} style={{ fontSize: 9, color: "var(--text-dim)", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                            <span>{f.type === "Turn" ? "🔄" : "🛩"} {f.flightRef} <span style={{ color: "var(--text-dim)" }}>{f.route}</span></span>
+                            <span>{f.arr !== "-" ? `Arr ${f.arr}` : ""} {f.dep !== "-" ? `Dep ${f.dep}` : ""} {f.ground !== "-" ? `GT ${f.ground}` : ""}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -707,6 +743,7 @@ function WorkloadConfigTab({ stationId }) {
   const [plannedTasks, setPlannedTasks] = useState(null);
   const [unplannedTasks, setUnplannedTasks] = useState(null);
   const [manualDemand, setManualDemand] = useState(null);
+  const [flightDerived, setFlightDerived] = useState(null);
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -723,6 +760,8 @@ function WorkloadConfigTab({ stationId }) {
   useEffect(() => {
     if (!stationId) return;
     workloadConfigApi.listManualDemand(stationId, monthKey).then(setManualDemand).catch(err => setError(err.message));
+    const [y, m] = monthKey.split("-").map(Number);
+    workloadConfigApi.getFlightDerivedSummary(stationId, y, m).then(setFlightDerived).catch(() => setFlightDerived({ imported: false }));
   }, [stationId, monthKey]);
 
   const NUMERIC_CONFIG_FIELDS = [
@@ -813,72 +852,121 @@ function WorkloadConfigTab({ stationId }) {
 
   if (!config || !mandatory || !plannedTasks || !unplannedTasks) return <div className="card">Loading…</div>;
 
-  return (
-    <div className="two-col">
-      <div>
-        <div className="card">
-          <div className="card-title">⚙ Standard Durations & Ratios</div>
-          {error && <div className="ab red">{error}</div>}
-          <div className="fg2">
-            <div className="fg"><label className="fl">Transit fallback (min)</label><input className="fi" type="number" value={config.transitMinutesDefault} onChange={e => setConfig(c => ({ ...c, transitMinutesDefault: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">PDC duration (min before dep)</label><input className="fi" type="number" value={config.pdcMinutesBeforeDeparture} onChange={e => setConfig(c => ({ ...c, pdcMinutesBeforeDeparture: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Clash Proximity Threshold (min)</label><input className="fi" type="number" value={config.clashProximityMinutes} onChange={e => setConfig(c => ({ ...c, clashProximityMinutes: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Transit vs PDC threshold (min)</label><input className="fi" type="number" value={config.transitVsPdcThresholdMinutes} onChange={e => setConfig(c => ({ ...c, transitVsPdcThresholdMinutes: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Movements per B1 staff</label><input className="fi" type="number" min="1" value={config.movementsPerB1Staff} onChange={e => setConfig(c => ({ ...c, movementsPerB1Staff: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Movements per CM staff</label><input className="fi" type="number" min="1" value={config.movementsPerCMStaff} onChange={e => setConfig(c => ({ ...c, movementsPerCMStaff: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Movements per NCS staff</label><input className="fi" type="number" min="1" value={config.movementsPerNCSStaff} onChange={e => setConfig(c => ({ ...c, movementsPerNCSStaff: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Unplanned method</label>
-              <select className="fi" value={config.unplannedMethod} onChange={e => setConfig(c => ({ ...c, unplannedMethod: e.target.value }))}>
-                <option value="frequency">Frequency-based (Unplanned Task Master)</option>
-                <option value="manpower_hours">Flat manpower-hours allowance</option>
-                <option value="both">Both (summed)</option>
-              </select>
-            </div>
-            <div className="fg"><label className="fl">Unplanned manpower-hrs/month</label><input className="fi" type="number" value={config.unplannedManpowerHoursPerMonth} onChange={e => setConfig(c => ({ ...c, unplannedManpowerHoursPerMonth: e.target.value }))} /></div>
-            <div className="fg"><label className="fl">Unplanned buffer %</label><input className="fi" type="number" value={config.unplannedBufferPct} onChange={e => setConfig(c => ({ ...c, unplannedBufferPct: e.target.value }))} /></div>
-          </div>
-          <div className="card-title" style={{ marginTop: 10 }}>Per-Shift Unplanned Buffer</div>
-          <div className="fg2">
-            {["B1", "B2", "CM", "NCS"].map(cat => (
-              <div className="fg" key={cat}><label className="fl">{cat}</label><input className="fi" type="number" min="0" value={config[`buffer${cat}`]} onChange={e => setConfig(c => ({ ...c, [`buffer${cat}`]: e.target.value }))} /></div>
-            ))}
-          </div>
-          <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={saveConfig} disabled={busy}>💾 Save Config</button>
-        </div>
+  const incompletePlanned = plannedTasks.filter(t => !t.frequency);
+  const incompleteUnplanned = unplannedTasks.filter(t => !t.avgFreqPerMonth);
+  const hasIncomplete = incompletePlanned.length > 0 || incompleteUnplanned.length > 0;
 
-        <div className="card">
-          <div className="card-title">🛡 Mandatory Minimum Coverage</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>A non-negotiable floor — separate from workload-driven advisory sizing. Unmet mandatory coverage is reported as a critical violation.</div>
-          <table className="rt" style={{ width: "100%" }}>
-            <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Category</th><th>Morning</th><th>Afternoon</th><th>Night</th></tr></thead>
-            <tbody>
-              {CATEGORIES.map(cat => (
-                <tr key={cat}>
-                  <td style={{ textAlign: "left", paddingLeft: 9 }}><span className={`cat-tag cat-${cat}`}>{cat}</span></td>
-                  {["M", "A", "N"].map(sh => {
-                    const row = mandatory.find(m => m.category === cat && m.shift === sh);
-                    return (
-                      <td key={sh} style={{ textAlign: "center" }}>
-                        <input type="checkbox" checked={row.enabled} disabled={busy}
-                          onChange={e => saveMandatory({ ...row, enabled: e.target.checked })} />
-                        <input className="fi" type="number" min="1" style={{ width: 44, marginLeft: 4, display: "inline-block", fontSize: 10 }} value={row.minCount} disabled={busy || !row.enabled}
-                          onChange={e => setMandatory(list => list.map(m => (m === row ? { ...m, minCount: e.target.value } : m)))}
-                          onBlur={e => saveMandatory({ ...row, minCount: e.target.value })} />
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+  return (
+    <div>
+      <HowToUseTab>
+        Set the standard durations, staffing ratios, and task masters generation reads from. Transit and PDC are mutually exclusive — every turn is classified as ONE or the other by its actual ground time against the Transit vs PDC Threshold below, never counted as both. Task Master rows contribute nothing to workload until a frequency/occurrence is set — the warning banner below always lists which ones are still at zero.
+      </HowToUseTab>
+
+      <div className="card">
+        <div className="card-title">⚙ Standard Durations & Unplanned Method</div>
+        {error && <div className="ab red">{error}</div>}
+        <div className="fg2">
+          <div className="fg"><label className="fl">Transit Duration (min, fallback only)</label><input className="fi" type="number" value={config.transitMinutesDefault} onChange={e => setConfig(c => ({ ...c, transitMinutesDefault: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">PDC Duration Before Departure (min)</label><input className="fi" type="number" value={config.pdcMinutesBeforeDeparture} onChange={e => setConfig(c => ({ ...c, pdcMinutesBeforeDeparture: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">Clash Proximity Threshold (min) <span className="help-tip" tabIndex={0} title="Independent of PDC duration — how close together two departures have to be to count as a clash, not how long a PDC takes.">ⓘ</span></label><input className="fi" type="number" value={config.clashProximityMinutes} onChange={e => setConfig(c => ({ ...c, clashProximityMinutes: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">Transit vs PDC Threshold (min) <span className="help-tip" tabIndex={0} title="Ground time <= this = Transit (quick turn); ground time > this = PDC (needs a full check). Mutually exclusive.">ⓘ</span></label><input className="fi" type="number" value={config.transitVsPdcThresholdMinutes} onChange={e => setConfig(c => ({ ...c, transitVsPdcThresholdMinutes: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">Unplanned Method</label>
+            <select className="fi" value={config.unplannedMethod} onChange={e => setConfig(c => ({ ...c, unplannedMethod: e.target.value }))}>
+              <option value="frequency">Frequency Based</option>
+              <option value="manpower_hours">Manpower-Hours Allowance</option>
+              <option value="both">Both (summed)</option>
+            </select>
+          </div>
+          <div className="fg"><label className="fl">Unplanned Manpower-Hours/Month</label><input className="fi" type="number" value={config.unplannedManpowerHoursPerMonth} onChange={e => setConfig(c => ({ ...c, unplannedManpowerHoursPerMonth: e.target.value }))} /></div>
         </div>
+        <div className="fg" style={{ marginTop: 8, maxWidth: 260 }}><label className="fl">Unplanned Buffer % (on planned hours)</label><input className="fi" type="number" value={config.unplannedBufferPct} onChange={e => setConfig(c => ({ ...c, unplannedBufferPct: e.target.value }))} /></div>
+        <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={saveConfig} disabled={busy}>💾 Save Config</button>
       </div>
 
-      <div>
-        <div className="card">
-          <div className="card-title">🔧 Planned Task Master</div>
-          <div className="wl-scroll">
-            {plannedTasks.map(t => (
+      <div className="card">
+        <div className="card-title">👥 Transit/PDC → Staffing Ratios & Per-Shift Buffer</div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+          How many CONCURRENT transit/PDC movements one staff member of each category can reasonably cover within a shift — based on PEAK CONCURRENCY within that shift, not a raw count of everything touching it. E.g. 3 transits spread across a shift with real gaps between them (never more than 1 active at once) need only 1 person per category, not 3. Default ratio of 1 means "1 concurrent movement needs 1 person of that category."
+        </div>
+        <div className="fg2">
+          <div className="fg"><label className="fl">Concurrent Movements per B1</label><input className="fi" type="number" min="1" value={config.movementsPerB1Staff} onChange={e => setConfig(c => ({ ...c, movementsPerB1Staff: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">Concurrent Movements per CM</label><input className="fi" type="number" min="1" value={config.movementsPerCMStaff} onChange={e => setConfig(c => ({ ...c, movementsPerCMStaff: e.target.value }))} /></div>
+          <div className="fg"><label className="fl">Concurrent Movements per NCS</label><input className="fi" type="number" min="1" value={config.movementsPerNCSStaff} onChange={e => setConfig(c => ({ ...c, movementsPerNCSStaff: e.target.value }))} /></div>
+        </div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", margin: "10px 0 6px" }}>
+          Standing per-shift reserve for unplanned/ad-hoc work DURING a shift (e.g. "give every shift 1 extra NCS") — separate from the Unplanned Task Master's monthly frequency-based planning above. Defaults to 0 until set.
+        </div>
+        <div className="fg2">
+          {["B1", "B2", "CM", "NCS"].map(cat => (
+            <div className="fg" key={cat}><label className="fl">{cat}</label><input className="fi" type="number" min="0" value={config[`buffer${cat}`]} onChange={e => setConfig(c => ({ ...c, [`buffer${cat}`]: e.target.value }))} /></div>
+          ))}
+        </div>
+        <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={saveConfig} disabled={busy}>💾 Save Config</button>
+      </div>
+
+      {hasIncomplete && (
+        <div className="ab red">
+          ⚠ Task master configuration looks incomplete — these will currently contribute ZERO to any workload calculation:
+          <br />• Zero frequency configured: {[...incompletePlanned.map(t => `"${t.name}" (Planned)`), ...incompleteUnplanned.map(t => `"${t.name}" (Unplanned)`)].join(", ")}
+        </div>
+      )}
+
+      <div className="card">
+        <div className="card-title">🔒 Mandatory Minimum Coverage</div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>A non-negotiable floor — separate from workload-driven advisory sizing. Unmet mandatory coverage is reported as a critical violation.</div>
+        <table className="rt" style={{ width: "100%" }}>
+          <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Category</th><th>Morning</th><th>Afternoon</th><th>Night</th></tr></thead>
+          <tbody>
+            {CATEGORIES.map(cat => (
+              <tr key={cat}>
+                <td style={{ textAlign: "left", paddingLeft: 9 }}><span className={`cat-tag cat-${cat}`}>{cat}</span></td>
+                {["M", "A", "N"].map(sh => {
+                  const row = mandatory.find(m => m.category === cat && m.shift === sh);
+                  return (
+                    <td key={sh} style={{ textAlign: "center" }}>
+                      <input type="checkbox" checked={row.enabled} disabled={busy}
+                        onChange={e => saveMandatory({ ...row, enabled: e.target.checked })} />
+                      <input className="fi" type="number" min="1" style={{ width: 44, marginLeft: 4, display: "inline-block", fontSize: 10 }} value={row.minCount} disabled={busy || !row.enabled}
+                        onChange={e => setMandatory(list => list.map(m => (m === row ? { ...m, minCount: e.target.value } : m)))}
+                        onBlur={e => saveMandatory({ ...row, minCount: e.target.value })} />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="card">
+        <div className="card-title">🔧 Planned Maintenance Task Master</div>
+        {flightDerived?.imported && (
+          <div className="wl-scroll" style={{ marginBottom: 10 }}>
+            <table className="rt" style={{ width: "100%" }}>
+              <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Source</th><th>Occurrences (this month)</th><th>Classification Rule</th><th>Manpower Conversion</th></tr></thead>
+              <tbody>
+                <tr>
+                  <td style={{ textAlign: "left", paddingLeft: 9 }}>✈ Transit (auto, from Flight Schedule)</td>
+                  <td style={{ textAlign: "center" }}>{flightDerived.transitOccurrences}</td>
+                  <td style={{ fontSize: 9, color: "var(--text-dim)" }}>Ground time ≤ {flightDerived.transitVsPdcThresholdMinutes} min (quick turn)</td>
+                  <td style={{ fontSize: 9, color: "var(--text-dim)" }}>B1: 1-per-{flightDerived.movementsPerB1Staff} · CM: 1-per-{flightDerived.movementsPerCMStaff} · NCS: 1-per-{flightDerived.movementsPerNCSStaff} (peak concurrency)</td>
+                </tr>
+                <tr>
+                  <td style={{ textAlign: "left", paddingLeft: 9 }}>✈ PDC (auto, from Flight Schedule)</td>
+                  <td style={{ textAlign: "center" }}>{flightDerived.pdcOccurrences}</td>
+                  <td style={{ fontSize: 9, color: "var(--text-dim)" }}>Ground time &gt; {flightDerived.transitVsPdcThresholdMinutes} min (needs a full check)</td>
+                  <td style={{ fontSize: 9, color: "var(--text-dim)" }}>B1: 1-per-{flightDerived.movementsPerB1Staff} · CM: 1-per-{flightDerived.movementsPerCMStaff} · NCS: 1-per-{flightDerived.movementsPerNCSStaff} (peak concurrency)</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 4 }}>Mutually exclusive — each turn is classified as ONE or the other by its actual ground time, never counted as both. Threshold and durations are set above (Standard Durations card).</div>
+          </div>
+        )}
+        <div className="wl-scroll">
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 90px 70px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 4, fontSize: 9, color: "var(--text-dim)", fontWeight: 700 }}>
+            <span>Task</span><span>Freq</span><span>Unit</span><span>Duration (min)</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span>Preferred Shift</span><span></span>
+          </div>
+          {plannedTasks.map(t => (
               <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 90px 70px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
                 <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
                 <input className="fi" type="number" min="0" title="Frequency" value={t.frequency} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, frequency: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
@@ -900,8 +988,11 @@ function WorkloadConfigTab({ stationId }) {
         </div>
 
         <div className="card">
-          <div className="card-title">🛠 Unplanned Task Master</div>
+          <div className="card-title">⚠ Unplanned Maintenance Task Master</div>
           <div className="wl-scroll">
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 90px 90px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 4, fontSize: 9, color: "var(--text-dim)", fontWeight: 700 }}>
+              <span>Task</span><span>Freq/Month</span><span>Duration (min)</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span>Preferred Shift</span><span></span>
+            </div>
             {unplannedTasks.map(t => (
               <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 90px 90px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
                 <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
@@ -921,9 +1012,15 @@ function WorkloadConfigTab({ stationId }) {
         </div>
 
         <div className="card">
-          <div className="card-title">📋 Manual Additional Demand</div>
-          <div className="fg" style={{ marginBottom: 8 }}><label className="fl">Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 40px 40px 40px 40px 1fr", gap: 4, marginBottom: 6 }}>
+          <div className="card-title">➕ Manual Additional Demand</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+            Planner-added demand, by category — shown separately from automatic calculations and never overwrites them, but IS added on top when generating that specific date's shift (the time window determines which shift — Morning/Afternoon/Night — it applies to).
+          </div>
+          <div className="fg" style={{ marginBottom: 8, maxWidth: 200 }}><label className="fl">Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 40px 40px 40px 40px 1fr auto", gap: 4, marginBottom: 4, fontSize: 9, color: "var(--text-dim)", fontWeight: 700 }}>
+            <span>Date</span><span>From</span><span>To</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span>Remarks</span><span></span>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 70px 70px 40px 40px 40px 40px 1fr auto", gap: 4, marginBottom: 6, alignItems: "center" }}>
             <input className="fi" type="date" style={{ fontSize: 9 }} value={demandForm.date} onChange={e => setDemandForm(f => ({ ...f, date: e.target.value }))} />
             <input className="fi" type="time" style={{ fontSize: 9 }} value={demandForm.timeStart} onChange={e => setDemandForm(f => ({ ...f, timeStart: e.target.value }))} />
             <input className="fi" type="time" style={{ fontSize: 9 }} value={demandForm.timeEnd} onChange={e => setDemandForm(f => ({ ...f, timeEnd: e.target.value }))} />
@@ -931,8 +1028,8 @@ function WorkloadConfigTab({ stationId }) {
               <input key={f} className="fi" type="number" min="0" title={f} style={{ fontSize: 9, textAlign: "center" }} value={demandForm[f]} onChange={e => setDemandForm(v => ({ ...v, [f]: e.target.value }))} />
             ))}
             <input className="fi" placeholder="Remarks" style={{ fontSize: 9 }} value={demandForm.remarks} onChange={e => setDemandForm(f => ({ ...f, remarks: e.target.value }))} />
+            <button className="btn btn-primary btn-sm" onClick={addManualDemand} disabled={busy}>＋ Add</button>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={addManualDemand} disabled={busy}>＋ Add Demand Entry</button>
           <div className="wl-scroll" style={{ marginTop: 8 }}>
             {(manualDemand || []).map(m => (
               <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
@@ -940,10 +1037,9 @@ function WorkloadConfigTab({ stationId }) {
                 <button className="wl-del" onClick={() => removeManualDemand(m.id)} disabled={busy}>✕</button>
               </div>
             ))}
-            {(!manualDemand || manualDemand.length === 0) && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No manual demand entries this month.</div>}
+            {(!manualDemand || manualDemand.length === 0) && <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No manual additions yet.</div>}
           </div>
         </div>
-      </div>
     </div>
   );
 }
@@ -1196,7 +1292,35 @@ function GenerateTab({ stationId }) {
   const [preview, setPreview] = useState(null);
   const [applied, setApplied] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
   const [error, setError] = useState("");
+  const [mandatory, setMandatory] = useState(null);
+
+  useEffect(() => {
+    if (!stationId) return;
+    workloadConfigApi.listMandatoryCoverageRules(stationId).then(setMandatory).catch(() => {});
+  }, [stationId]);
+
+  async function saveMandatory(row) {
+    setBusy(true);
+    try {
+      await workloadConfigApi.upsertMandatoryCoverageRule({ stationId, category: row.category, shift: row.shift, enabled: row.enabled, minCount: Number(row.minCount) || 1 });
+      workloadConfigApi.listMandatoryCoverageRules(stationId).then(setMandatory);
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  // Runs the same underlying preview computation as Calculate & Generate,
+  // but independently — a planner can review the Explainable Workload
+  // Analysis / Real Requirement panels before touching Mandatory Coverage
+  // or committing to an actual generation run.
+  async function runWorkloadAnalysis() {
+    setAnalysisBusy(true);
+    setError("");
+    try {
+      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave });
+      setPreview(previewResult);
+    } catch (err) { setError(err.message); } finally { setAnalysisBusy(false); }
+  }
 
   async function calculate() {
     setBusy(true);
@@ -1242,7 +1366,147 @@ function GenerateTab({ stationId }) {
     URL.revokeObjectURL(url);
   }
 
+  const a = preview?.analysis;
+
   return (
+    <div>
+      <HowToUseTab>
+        Every number below is broken down into what produced it — flight/PDC demand, planned maintenance, and unplanned reserve — never a single opaque total. The mandatory safety floor per shift is set separately in the Mandatory Minimum Coverage table below, not here. Requires a Flight Schedule import (see the Flight Schedule tab) for the target month.
+      </HowToUseTab>
+
+      <div className="card">
+        <div className="card-title">📈 Explainable Workload Analysis</div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+          Every number below is broken down into what produced it — flight/PDC demand, planned maintenance, and unplanned reserve — never a single opaque total. The mandatory safety floor per shift is set separately in the Mandatory Minimum Coverage table below, not here. Requires a Flight Schedule import (see the Flight Schedule tab) for the target month.
+        </div>
+        <button className="btn btn-primary btn-sm" onClick={runWorkloadAnalysis} disabled={analysisBusy}>{analysisBusy ? "Analyzing…" : "▶ Run Workload Analysis"}</button>
+      </div>
+
+      {a && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div className="card">
+              <div className="card-title">✈ Flight Workload</div>
+              <div style={{ fontSize: 11, display: "flex", flexDirection: "column", gap: 3 }}>
+                <div>Operating Days <strong style={{ float: "right" }}>{a.flightWorkload.operatingDays} / {a.flightWorkload.daysInMonth}</strong></div>
+                <div>Total Flight Movements <strong style={{ float: "right" }}>{a.flightWorkload.totalMovements}</strong></div>
+                <div>Average Daily Flights <strong style={{ float: "right" }}>{a.flightWorkload.avgDailyMovements}</strong></div>
+                <div>Transit Occurrences <strong style={{ float: "right" }}>{a.flightWorkload.transitOccurrences}</strong></div>
+                <div>Average Daily Transit <strong style={{ float: "right" }}>{a.flightWorkload.avgDailyTransit}</strong></div>
+                <div>Peak Simultaneous Transit <strong style={{ float: "right" }}>{a.flightWorkload.peakSimultaneousTransit}{a.flightWorkload.peakSimultaneousTransitDate ? ` (${a.flightWorkload.peakSimultaneousTransitDate})` : ""}</strong></div>
+                <div>PDC Occurrences <strong style={{ float: "right" }}>{a.flightWorkload.pdcOccurrences}</strong></div>
+                <div>Peak Departure Clash <strong style={{ float: "right" }}>{a.flightWorkload.peakDepartureClash}{a.flightWorkload.peakDepartureClashDate ? ` (${a.flightWorkload.peakDepartureClashDate})` : " (-)"}</strong></div>
+                <div>Manual Additional Demand <span style={{ float: "right", fontSize: 9, color: "var(--text-dim)" }}>B1:+{a.flightWorkload.manualAdditionalDemand.B1} B2:+{a.flightWorkload.manualAdditionalDemand.B2} CM:+{a.flightWorkload.manualAdditionalDemand.CM} NCS:+{a.flightWorkload.manualAdditionalDemand.NCS}</span></div>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-title">⚡ Automatic Departure Clashes (2+ Simultaneous)</div>
+              {a.automaticClashes.clashDays.length === 0 ? (
+                <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No clashes detected.</div>
+              ) : (
+                <div style={{ fontSize: 10, display: "flex", flexDirection: "column", gap: 4, maxHeight: 160, overflowY: "auto" }}>
+                  {a.automaticClashes.clashDays.map((c, i) => (
+                    <div key={i}>{c.date} {c.timeWindowStart} — {c.simultaneousCount} simultaneous: {c.flights.join(", ")}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="card">
+              <div className="card-title">🔧 Planned Maintenance (Expected)</div>
+              <div style={{ fontSize: 11 }}>Expected Manpower-Hours: <strong>{a.plannedMaintenance.expectedManpowerHours}h</strong></div>
+              <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 4 }}>
+                B1 {a.plannedMaintenance.byCategory.B1.toFixed(1)}h · B2 {a.plannedMaintenance.byCategory.B2.toFixed(1)}h · CM {a.plannedMaintenance.byCategory.CM.toFixed(1)}h · NCS {a.plannedMaintenance.byCategory.NCS.toFixed(1)}h
+              </div>
+              <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 4 }}>
+                By shift (per each task's own Preferred Shift, not an even split): Morning {a.plannedMaintenance.byShift.M.toFixed(1)}h · Afternoon {a.plannedMaintenance.byShift.A.toFixed(1)}h · Night {a.plannedMaintenance.byShift.N.toFixed(1)}h
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-title">⚠ Expected Unplanned Workload</div>
+              <div style={{ fontSize: 11 }}>From Tasks/Allowance: <strong>{a.unplannedWorkload.fromTasksOrAllowance}h</strong> + Buffer ({a.unplannedWorkload.bufferPct}%): <strong>{a.unplannedWorkload.bufferHours}h</strong></div>
+              <div style={{ fontSize: 11, marginTop: 4 }}>Total: <strong>{a.unplannedWorkload.totalHours}h</strong> — planning estimate, not a confirmed maintenance event</div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">👥 Manpower Requirement — Explainable Breakdown</div>
+            <table className="rt" style={{ width: "100%" }}>
+              <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Shift</th><th>Flight/PDC Demand</th><th>Planned Maint.</th><th>Unplanned Reserve</th><th>Required</th></tr></thead>
+              <tbody>
+                {["M", "A", "N"].map(sh => (
+                  <tr key={sh}>
+                    <td style={{ textAlign: "left", paddingLeft: 9, fontWeight: 700 }}>{SHIFT_LABELS[sh]}</td>
+                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].flightPdcDemand}</td>
+                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].plannedMaintenance}</td>
+                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].unplannedReserve}</td>
+                    <td style={{ textAlign: "center", fontWeight: 800, color: "var(--cyan)" }}>{a.manpowerRequirement[sh].required}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 6 }}>This is the advisory/optimization layer only — the mandatory safety floor per shift is set separately in Mandatory Minimum Coverage below.</div>
+            <div style={{ fontSize: 9, color: "var(--text-dim)" }}>This is a MONTHLY-AVERAGE view for a quick read. The table below is what generation actually enforces — real per-day figures, since a roster sized to the average day understaffs every busier-than-average day.</div>
+          </div>
+
+          <div className="card">
+            <div className="card-title">📐 Real Requirement — Average vs Peak Day (what generation actually uses)</div>
+            <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 8 }}>Computed by the exact same function generation calls — PEAK CONCURRENCY within each shift (not raw movement counts) — this can never silently disagree with what actually gets generated.</div>
+            <table className="rt" style={{ width: "100%" }}>
+              <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Shift</th><th>B1 Avg/Peak</th><th>CM Avg/Peak</th><th>NCS Avg/Peak</th><th>Peak Date</th></tr></thead>
+              <tbody>
+                {["M", "A", "N"].map(sh => {
+                  const row = a.averagePeakByShift[sh];
+                  return (
+                    <tr key={sh}>
+                      <td style={{ textAlign: "left", paddingLeft: 9, fontWeight: 700 }}>{SHIFT_LABELS[sh]}</td>
+                      <td style={{ textAlign: "center" }}>{row.B1.avg} / <strong>{row.B1.peak}</strong></td>
+                      <td style={{ textAlign: "center" }}>{row.CM.avg} / <strong>{row.CM.peak}</strong></td>
+                      <td style={{ textAlign: "center" }}>{row.NCS.avg} / <strong>{row.NCS.peak}</strong></td>
+                      <td style={{ textAlign: "center", fontSize: 9, color: "var(--text-dim)" }}>Day {row.peakDay ?? "-"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {a.hardRuleViolations.length > 0 && (
+            <div className="ab red">⚠ {a.hardRuleViolations.length} hard rule violation(s) detected — see Rule Builder.</div>
+          )}
+        </>
+      )}
+
+      {mandatory && (
+        <div className="card">
+          <div className="card-title">🔒 Mandatory Minimum Coverage</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>
+            Choose which categories genuinely need a guaranteed minimum on which shifts before generating — this is the non-negotiable safety floor the generator attempts FIRST, above and separate from workload-driven extra staffing. Turn a cell off if that category/shift combination doesn't apply at your station (e.g. no Certifying Mechanics, or B2 not required outside Night). Changes apply the next time you generate.
+          </div>
+          <table className="rt" style={{ width: "100%" }}>
+            <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Category</th><th>Morning</th><th>Afternoon</th><th>Night</th></tr></thead>
+            <tbody>
+              {CATEGORIES.map(cat => (
+                <tr key={cat}>
+                  <td style={{ textAlign: "left", paddingLeft: 9 }}><span className={`cat-tag cat-${cat}`}>{cat}</span></td>
+                  {["M", "A", "N"].map(sh => {
+                    const row = mandatory.find(m => m.category === cat && m.shift === sh);
+                    return (
+                      <td key={sh} style={{ textAlign: "center" }}>
+                        <input type="checkbox" checked={row.enabled} disabled={busy}
+                          onChange={e => saveMandatory({ ...row, enabled: e.target.checked })} />
+                        <input className="fi" type="number" min="1" style={{ width: 44, marginLeft: 4, display: "inline-block", fontSize: 10 }} value={row.minCount} disabled={busy || !row.enabled}
+                          onChange={e => setMandatory(list => list.map(m => (m === row ? { ...m, minCount: e.target.value } : m)))}
+                          onBlur={e => saveMandatory({ ...row, minCount: e.target.value })} />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
     <div className="two-col">
       <div>
         <div className="card">
@@ -1301,45 +1565,15 @@ function GenerateTab({ stationId }) {
               </div>
             )}
 
-            {preview?.analysis && (
-              <div className="card">
-                <div className="card-title">📈 Explainable Workload Analysis</div>
-                <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 8 }}>
-                  Demand source: <strong style={{ color: preview.analysis.demandSource === "flight-schedule-driven" ? "var(--green)" : "var(--text-dim)" }}>{preview.analysis.demandSource}</strong> — {preview.analysis.demandReason}
-                </div>
-                <div className="manpower-grid">
-                  {["M", "A", "N"].map(sh => {
-                    const em = preview.analysis.explainableManpower[sh];
-                    return (
-                      <div className="mp-card" key={sh}>
-                        <div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>{SHIFT_LABELS[sh]}</div>
-                        <div className="mp-total" style={{ fontSize: 18, fontWeight: 800 }}>{em.required}</div>
-                        <div className="mp-breakdown" style={{ fontSize: 9, color: "var(--text-dim)" }}>Flight/PDC:{em.flightPdcDemand} · Planned:{em.plannedMaintenance} · Unplanned:{em.unplannedReserve}</div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {preview?.analysis && (
+            {preview?.analysis?.softRuleScore?.overallScore !== null && preview?.analysis && (
               <div className="card">
                 <div className="card-title">⚖ Soft Rule Optimization Score</div>
-                {preview.analysis.softRuleScore.overallScore === null ? (
-                  <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No soft (balance) rules configured yet — see Rule Builder.</div>
-                ) : (
-                  <>
-                    <div style={{ fontSize: 20, fontWeight: 800, color: "var(--cyan)" }}>{preview.analysis.softRuleScore.overallScore}<span style={{ fontSize: 11, color: "var(--text-dim)" }}> / 100</span></div>
-                    {preview.analysis.softRuleScore.results.map((r, i) => (
-                      <div key={i} style={{ fontSize: 10, display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
-                        <span>{r.ruleName} ({r.metric}, {r.appliesTo})</span><strong>{r.score}</strong>
-                      </div>
-                    ))}
-                  </>
-                )}
-                {preview.analysis.hardRuleViolations.length > 0 && (
-                  <div className="ab red" style={{ marginTop: 8 }}>⚠ {preview.analysis.hardRuleViolations.length} hard rule violation(s) detected</div>
-                )}
+                <div style={{ fontSize: 20, fontWeight: 800, color: "var(--cyan)" }}>{preview.analysis.softRuleScore.overallScore}<span style={{ fontSize: 11, color: "var(--text-dim)" }}> / 100</span></div>
+                {preview.analysis.softRuleScore.results.map((r, i) => (
+                  <div key={i} style={{ fontSize: 10, display: "flex", justifyContent: "space-between", padding: "3px 0", borderBottom: "1px solid var(--border)" }}>
+                    <span>{r.ruleName} ({r.metric}, {r.appliesTo})</span><strong>{r.score}</strong>
+                  </div>
+                ))}
               </div>
             )}
             <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 }}>
@@ -1402,6 +1636,7 @@ function GenerateTab({ stationId }) {
           )}
         </div>
       </div>
+    </div>
     </div>
   );
 }
