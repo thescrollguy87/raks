@@ -13,12 +13,6 @@ import * as dailyOpsApi from "../api/dailyOps.js";
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
 const SHIFT_TYPES = ["duty", "night", "off", "leave", "other"];
-const WORKLOAD_SECTIONS = [
-  { key: "transit", title: "🛬 Transit Flights", countLabel: "Count/day" },
-  { key: "nighthalt", title: "🌙 Night Halt Workscope", countLabel: "Freq/month" },
-  { key: "clash", title: "⚡ Clashing Departures", countLabel: "Max/day" },
-  { key: "task", title: "🔧 Planned Tasks & Checks", countLabel: "Count/month" },
-];
 const LEAVE_TYPE_OPTIONS = [
   { value: "ANNUAL", label: "L — Annual/Earned" },
   { value: "SICK", label: "SL — Sick" },
@@ -29,12 +23,12 @@ const LEAVE_TYPE_OPTIONS = [
   { value: "OTHER", label: "Other" },
 ];
 
-// The RosterPro PWA's Auto-Roster Generator is a 6-tab wizard — Shift
-// Definitions, Shift Patterns, Staff Allocation, Leave & Absence, Workload
-// Input, Generate — backed by real station-scoped data (ShiftPattern,
-// StaffShiftAllocation, WorkloadItem) instead of that PWA's in-browser-only
-// arrays, feeding the same buildRosterAssignments()/computeManpowerPlan()
-// ports used everywhere else in this app.
+// The RosterPro PWA's Auto-Roster Generator is a multi-tab wizard — Shift
+// Definitions, Shift Patterns, Staff Allocation, Leave & Absence, Flight
+// Schedule, Workload Config, Rule Builder, Daily Ops, Generate — backed by
+// real station-scoped data instead of that PWA's in-browser-only arrays,
+// feeding the same buildRosterAssignments()/computeManpowerPlan() ports
+// used everywhere else in this app.
 export default function AutoRosterPage() {
   const { stationId, currentStation } = useStation();
   const [tab, setTab] = useState("defs");
@@ -47,7 +41,6 @@ export default function AutoRosterPage() {
     { key: "allocation", label: "👤 Staff Allocation" },
     { key: "leave", label: "🌴 Leave & Absence" },
     { key: "flightschedule", label: "✈ Flight Schedule" },
-    { key: "workload", label: "📦 Workload Input" },
     { key: "workloadconfig", label: "⚙ Workload Config" },
     { key: "rulebuilder", label: "📐 Rule Builder" },
     { key: "dailyops", label: "📅 Daily Ops" },
@@ -67,7 +60,6 @@ export default function AutoRosterPage() {
       {tab === "allocation" && <StaffAllocationTab stationId={stationId} />}
       {tab === "leave" && <LeaveAbsenceTab stationId={stationId} />}
       {tab === "flightschedule" && <FlightScheduleTab stationId={stationId} />}
-      {tab === "workload" && <WorkloadInputTab stationId={stationId} />}
       {tab === "workloadconfig" && <WorkloadConfigTab stationId={stationId} />}
       {tab === "rulebuilder" && <RuleBuilderTab stationId={stationId} />}
       {tab === "dailyops" && <DailyOpsTab stationId={stationId} />}
@@ -624,110 +616,6 @@ function FlightScheduleTab({ stationId }) {
             </div>
           </>
         )}
-      </div>
-    </div>
-  );
-}
-
-// ═══ TAB 5: WORKLOAD INPUT ════════════════════════════════════════════════════
-function WorkloadInputTab({ stationId }) {
-  const [items, setItems] = useState(null);
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [aogBuffer, setAogBuffer] = useState(2);
-  const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
-
-  const load = useCallback(() => {
-    if (!stationId) return;
-    planningApi.listWorkloadItems(stationId).then(setItems).catch(err => setError(err.message));
-  }, [stationId]);
-  useEffect(load, [load]);
-
-  async function save(item) {
-    setBusy(true);
-    setError("");
-    try {
-      await planningApi.upsertWorkloadItem({
-        id: item.id, stationId, section: item.section, label: item.label,
-        count: Number(item.count) || 0, b1: Number(item.b1) || 0, b2: Number(item.b2) || 0, cm: Number(item.cm) || 0, ncs: Number(item.ncs) || 0,
-      });
-      load();
-    } catch (err) { setError(err.message); } finally { setBusy(false); }
-  }
-
-  async function addRow(section) {
-    setBusy(true);
-    setError("");
-    try {
-      await planningApi.upsertWorkloadItem({ stationId, section, label: "New Item", count: 0, b1: 0, b2: 0, cm: 0, ncs: 0 });
-      load();
-    } catch (err) { setError(err.message); } finally { setBusy(false); }
-  }
-
-  async function removeRow(id) {
-    setBusy(true);
-    setError("");
-    try { await planningApi.deleteWorkloadItem(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
-  }
-
-  function updateField(id, field, value) {
-    setItems(list => list.map(it => (it.id === id ? { ...it, [field]: value } : it)));
-  }
-
-  if (!items) return <div className="card">Loading…</div>;
-
-  return (
-    <div className="two-col">
-      <div>
-        {WORKLOAD_SECTIONS.map(sec => (
-          <div className="card" key={sec.key}>
-            <div className="card-title">{sec.title}</div>
-            <div className="wl-scroll">
-              <div className="wl-row-hdr"><span>Label</span><span>{sec.countLabel}</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span></span></div>
-              {items.filter(it => it.section === sec.key).map(it => (
-                <div className="wl-row" key={it.id}>
-                  <input className="fi" value={it.label} style={{ fontSize: 10 }} onChange={e => updateField(it.id, "label", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <input className="fi" type="number" min="0" value={it.count} style={{ fontSize: 10, textAlign: "center" }} onChange={e => updateField(it.id, "count", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <input className="fi" type="number" min="0" value={it.b1} style={{ fontSize: 10, textAlign: "center" }} onChange={e => updateField(it.id, "b1", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <input className="fi" type="number" min="0" value={it.b2} style={{ fontSize: 10, textAlign: "center" }} onChange={e => updateField(it.id, "b2", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <input className="fi" type="number" min="0" value={it.cm} style={{ fontSize: 10, textAlign: "center" }} onChange={e => updateField(it.id, "cm", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <input className="fi" type="number" min="0" value={it.ncs} style={{ fontSize: 10, textAlign: "center" }} onChange={e => updateField(it.id, "ncs", e.target.value)} onBlur={() => save(items.find(x => x.id === it.id))} disabled={busy} />
-                  <button className="wl-del" onClick={() => removeRow(it.id)} disabled={busy}>✕</button>
-                </div>
-              ))}
-            </div>
-            <button className="btn btn-ghost btn-sm" onClick={() => addRow(sec.key)} disabled={busy}>＋ Add</button>
-          </div>
-        ))}
-        {error && <div className="ab red">{error}</div>}
-      </div>
-      <div>
-        <div className="card">
-          <div className="card-title">📋 Availability Buffers</div>
-          <div className="fg2">
-            <div className="fg"><label className="fl">AOG buffer (extra staff)</label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
-            <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
-          </div>
-        </div>
-        <div className="card">
-          <div className="card-title">⚖️ Rules Applied</div>
-          <div style={{ fontSize: 10, display: "flex", flexDirection: "column", gap: 4 }}>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ 48h weekly rolling cap</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ N→M, A→M, N→A rest gaps</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ 2×Night → 2 OFF mandatory</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ Leave days auto-blocked</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ Expired qualifications blocked</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ Pattern-based rotation honoured</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ Min 1 B1 AME per shift (M/A/N)</div>
-            <div className="ab green" style={{ margin: 0, padding: "5px 8px" }}>✅ Min 1 B2 AME on Night shift</div>
-          </div>
-        </div>
-        <div className="card" style={{ marginTop: 0 }}>
-          <div className="card-title">ℹ️ How Freq/month Tasks Are Calculated</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", lineHeight: 1.5 }}>
-            Enter the manpower needed for <strong>one occurrence</strong> of the task (per layover, per weekly check, per A-check, etc). Given the frequency/month, the engine works out how many can realistically fall on the same day (occurrences ÷ days in month, rounded up) and multiplies that by your per-task manpower to get the concurrent requirement used for shift coverage.
-          </div>
-        </div>
       </div>
     </div>
   );
