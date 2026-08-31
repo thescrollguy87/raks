@@ -1,6 +1,6 @@
 const {
   findPeakConcurrency, computeDailyShiftDemand, computeTaskMasterDemand,
-  computeExplainableManpower, computeUnplannedWorkload,
+  computeExplainableManpower, computeUnplannedWorkload, computeAveragePeakByShift,
 } = require("../src/utils/workloadEngine");
 const { decodeDaysOfWeek } = require("../src/utils/flightScheduleParser");
 
@@ -131,5 +131,26 @@ describe("computeTaskMasterDemand + computeExplainableManpower — correct month
     const result = computeTaskMasterDemand(taskMaster, 30, 30);
     expect(result.byShift.M).toBeCloseTo(result.byShift.A, 5);
     expect(result.byShift.A).toBeCloseTo(result.byShift.N, 5);
+  });
+});
+
+describe("computeAveragePeakByShift — Real Requirement Average vs Peak Day table", () => {
+  it("reports the plain average and the actual peak day's value separately, and they can genuinely differ", () => {
+    // Morning demand: mostly light (B1=1) with one busy day (B1=3) — the
+    // average must NOT hide that spike the way a flat monthly figure would.
+    const demand = {};
+    for (let d = 1; d <= 5; d++) demand[d] = { M: { B1: 1, CM: 1, NCS: 1 }, A: { B1: 0, CM: 0, NCS: 0 }, N: { B1: 0, CM: 0, NCS: 0 } };
+    demand[3].M = { B1: 3, CM: 4, NCS: 4 }; // day 3 is the busy day
+    const result = computeAveragePeakByShift(demand, 5);
+    expect(result.M.B1.peak).toBe(3);
+    expect(result.M.B1.avg).toBeCloseTo((1 + 1 + 3 + 1 + 1) / 5, 5);
+    expect(result.M.B1.peak).toBeGreaterThan(result.M.B1.avg);
+    expect(result.M.peakDay).toBe(3); // the day driving B1/CM/NCS's combined peak, shared across the row
+  });
+
+  it("returns zero avg/peak for a shift with no demand at all", () => {
+    const demand = { 1: { M: { B1: 0, CM: 0, NCS: 0 }, A: { B1: 0, CM: 0, NCS: 0 }, N: { B1: 0, CM: 0, NCS: 0 } } };
+    const result = computeAveragePeakByShift(demand, 1);
+    expect(result.A.B1).toEqual({ avg: 0, peak: 0 });
   });
 });

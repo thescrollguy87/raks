@@ -67,8 +67,31 @@ async function getMandatoryCoverageConfigForGeneration(stationId) {
 }
 
 // ─── Task Masters ─────────────────────────────────────────────────────────────
-function listPlannedTasks(stationId) {
-  return repo.listPlannedTasks(stationId);
+// Default task names — matches the reference PWA's own Task Master seed
+// list exactly, so a station that's never touched this tab still sees the
+// same named rows the reference ships with (all at zero frequency until a
+// planner fills them in) rather than an empty table with no starting point.
+const PLANNED_TASK_DEFAULTS = [
+  "Layover Inspection", "Weekly Inspection", "Service Check", "A-Check",
+  "Borescope Inspection", "Planned Defect Rectification", "Component Replacement (Planned)",
+];
+const UNPLANNED_TASK_DEFAULTS = [
+  "Wheel Change", "Brake Change", "Troubleshooting", "Component Replacement (Unplanned)",
+  "Engine Change", "Water Wash", "Escape Slide Replacement", "AOG Rectification",
+];
+
+async function listPlannedTasks(stationId) {
+  let tasks = await repo.listPlannedTasks(stationId);
+  if (tasks.length === 0) {
+    for (let i = 0; i < PLANNED_TASK_DEFAULTS.length; i++) {
+      await repo.upsertPlannedTask({
+        stationId, name: PLANNED_TASK_DEFAULTS[i], frequency: 0, frequencyUnit: "per_month",
+        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "N", sortOrder: i,
+      });
+    }
+    tasks = await repo.listPlannedTasks(stationId);
+  }
+  return tasks;
 }
 
 async function upsertPlannedTask(input, actor, req) {
@@ -87,8 +110,18 @@ async function deletePlannedTask(id, actor, req) {
   return { id };
 }
 
-function listUnplannedTasks(stationId) {
-  return repo.listUnplannedTasks(stationId);
+async function listUnplannedTasks(stationId) {
+  let tasks = await repo.listUnplannedTasks(stationId);
+  if (tasks.length === 0) {
+    for (let i = 0; i < UNPLANNED_TASK_DEFAULTS.length; i++) {
+      await repo.upsertUnplannedTask({
+        stationId, name: UNPLANNED_TASK_DEFAULTS[i], avgFreqPerMonth: 0,
+        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any", sortOrder: i,
+      });
+    }
+    tasks = await repo.listUnplannedTasks(stationId);
+  }
+  return tasks;
 }
 
 async function upsertUnplannedTask(input, actor, req) {
@@ -134,10 +167,42 @@ async function deleteManualDemand(id, actor, req) {
   return { id };
 }
 
+// Powers the Planned Task Master's "auto, from Flight Schedule" source
+// rows — the real Transit/PDC occurrence counts for a target month, using
+// the station's own saved thresholds/ratios, so the table shows exactly
+// what generation itself will derive from the same import rather than a
+// separate, potentially-drifted estimate.
+async function getFlightDerivedSummary(stationId, year, month) {
+  const flightScheduleService = require("./flightScheduleService");
+  const { buildTransitWorkloadEvents, buildPDCWorkloadEvents } = require("../utils/workloadEngine");
+  const rosterRepo = require("../repositories/rosterRepository");
+
+  const [config, schedule, station] = await Promise.all([
+    getWorkloadConfig(stationId),
+    flightScheduleService.getFlightScheduleForMonth(stationId, year, month),
+    rosterRepo.findStationById(stationId),
+  ]);
+  if (!schedule) return { imported: false };
+
+  const homeStation = station?.iataCode;
+  const transitEvents = buildTransitWorkloadEvents(schedule.turnRecords, year, month, homeStation, config);
+  const pdcEvents = buildPDCWorkloadEvents(schedule.turnRecords, schedule.charterRecords, year, month, homeStation, config);
+  return {
+    imported: true,
+    transitOccurrences: transitEvents.length,
+    pdcOccurrences: pdcEvents.length,
+    transitVsPdcThresholdMinutes: config.transitVsPdcThresholdMinutes,
+    movementsPerB1Staff: config.movementsPerB1Staff,
+    movementsPerCMStaff: config.movementsPerCMStaff,
+    movementsPerNCSStaff: config.movementsPerNCSStaff,
+  };
+}
+
 module.exports = {
   getWorkloadConfig, upsertWorkloadConfig,
   listMandatoryCoverageRules, upsertMandatoryCoverageRule, getMandatoryCoverageConfigForGeneration,
   listPlannedTasks, upsertPlannedTask, deletePlannedTask,
   listUnplannedTasks, upsertUnplannedTask, deleteUnplannedTask,
   listManualDemand, createManualDemand, deleteManualDemand,
+  getFlightDerivedSummary,
 };

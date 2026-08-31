@@ -12,7 +12,9 @@ const { parseCycle } = require("../utils/shiftPatternCycle");
 const { computeFlightWorkloadSummary } = require("../utils/flightScheduleParser");
 const {
   computeDailyShiftDemand, computeTaskMasterDemand, computeUnplannedWorkload,
-  computeExplainableManpower, getManualDemandByDayShift,
+  computeExplainableManpower, getManualDemandByDayShift, computeAveragePeakByShift,
+  buildTransitWorkloadEvents, buildPDCWorkloadEvents, buildClashEvents,
+  computeDailyPeaks, computeAutomaticClashes,
 } = require("../utils/workloadEngine");
 const { checkHardRuleCompliance, computeSoftRuleScore } = require("../utils/ruleEngine");
 
@@ -173,16 +175,45 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
 
   const flightSummary = flightSchedule
     ? computeFlightWorkloadSummary(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month)
-    : { totalMovements: 0, operatingDays: 0 };
+    : { totalMovements: 0, operatingDays: 0, daysInMonth: nDays };
   const plannedDemand = computeTaskMasterDemand(plannedTasks, nDays, flightSummary.operatingDays);
   const unplannedDemand = computeUnplannedWorkload(unplannedTasks, config, plannedDemand.totalHours);
   const explainableManpower = computeExplainableManpower(flightSummary, plannedDemand, unplannedDemand, nDays);
+  const averagePeakByShift = computeAveragePeakByShift(demandResult.demand, nDays);
+
+  // Automatic clash detection + real Transit/PDC occurrence counts — only
+  // meaningful once a flight schedule actually exists for this month;
+  // otherwise there are no departure times to derive any of this from.
+  let automaticClashes = { clashDays: [], peakSimultaneous: 0, peakDate: null, peakFlights: [] };
+  let transitOccurrences = 0, pdcOccurrences = 0, peakSimultaneousTransit = 0, peakSimultaneousTransitDate = null;
+  if (flightSchedule) {
+    const homeStation = station?.iataCode;
+    const transitEvents = buildTransitWorkloadEvents(flightSchedule.turnRecords, year, month, homeStation, config);
+    const pdcEvents = buildPDCWorkloadEvents(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month, homeStation, config);
+    const clashEvents = buildClashEvents(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month, homeStation, config);
+    transitOccurrences = transitEvents.length;
+    pdcOccurrences = pdcEvents.length;
+    const transitPeaks = computeDailyPeaks(transitEvents);
+    peakSimultaneousTransit = transitPeaks.monthPeak;
+    peakSimultaneousTransitDate = transitPeaks.monthPeakDay?.date || null;
+    automaticClashes = computeAutomaticClashes(clashEvents);
+  }
+
+  const manualAdditionalDemand = { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  manualDemandEntries.forEach(m => {
+    manualAdditionalDemand.B1 += (+m.reqB1 || 0);
+    manualAdditionalDemand.B2 += (+m.reqB2 || 0);
+    manualAdditionalDemand.CM += (+m.reqCM || 0);
+    manualAdditionalDemand.NCS += (+m.reqNCS || 0);
+  });
 
   return {
     mandatoryCoverageConfig, nightRestrictionRules, allRules: rules,
     staffGroupMembersByGroupId, staffGroupNameById,
     advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason,
-    explainableManpower, plannedDemand, unplannedDemand, flightSummary,
+    explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
+    automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
+    manualAdditionalDemand, config,
   };
 }
 
@@ -274,9 +305,27 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     workloadContext.allRules, staffWithShifts, nDays, usePatterns, isPatternLocked, shiftDefsByCode,
     workloadContext.staffGroupMembersByGroupId, workloadContext.staffGroupNameById,
   );
+  const fs = workloadContext.flightSummary;
+  const avgDailyTransit = fs.operatingDays ? Math.round((workloadContext.transitOccurrences / fs.operatingDays) * 10) / 10 : 0;
   const analysis = {
-    explainableManpower: workloadContext.explainableManpower,
     demandSource: workloadContext.demandSource, demandReason: workloadContext.demandReason,
+    flightWorkload: {
+      operatingDays: fs.operatingDays || 0, daysInMonth: fs.daysInMonth || nDays,
+      totalMovements: fs.totalMovements || 0, avgDailyMovements: fs.avgDailyMovements || 0,
+      transitOccurrences: workloadContext.transitOccurrences, avgDailyTransit,
+      peakSimultaneousTransit: workloadContext.peakSimultaneousTransit, peakSimultaneousTransitDate: workloadContext.peakSimultaneousTransitDate,
+      pdcOccurrences: workloadContext.pdcOccurrences,
+      peakDepartureClash: workloadContext.automaticClashes.peakSimultaneous, peakDepartureClashDate: workloadContext.automaticClashes.peakDate,
+      manualAdditionalDemand: workloadContext.manualAdditionalDemand,
+    },
+    automaticClashes: workloadContext.automaticClashes,
+    plannedMaintenance: {
+      expectedManpowerHours: workloadContext.plannedDemand.totalHours,
+      byCategory: workloadContext.plannedDemand.byCategory, byShift: workloadContext.plannedDemand.byShift,
+    },
+    unplannedWorkload: { ...workloadContext.unplannedDemand, bufferPct: workloadContext.config.unplannedBufferPct },
+    manpowerRequirement: workloadContext.explainableManpower,
+    averagePeakByShift: workloadContext.averagePeakByShift,
     hardRuleViolations, softRuleScore,
   };
 

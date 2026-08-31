@@ -45,8 +45,13 @@ const deleteManualDemand = asyncHandler(async (req, res) => {
   res.json(await svc.deleteManualDemand(req.params.id, req.user, req));
 });
 
+const getFlightDerivedSummary = asyncHandler(async (req, res) => {
+  const { stationId, year, month } = req.query;
+  res.json(await svc.getFlightDerivedSummary(stationId, Number(year), Number(month)));
+});
+
 module.exports = {
-  getConfig, upsertConfig,
+  getConfig, upsertConfig, getFlightDerivedSummary,
   listMandatoryCoverageRules, upsertMandatoryCoverageRule,
   listPlannedTasks, upsertPlannedTask, deletePlannedTask,
   listUnplannedTasks, upsertUnplannedTask, deleteUnplannedTask,

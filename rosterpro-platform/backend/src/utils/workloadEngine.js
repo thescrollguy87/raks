@@ -358,10 +358,47 @@ function computeExplainableManpower(flightSummary, plannedDemand, unplannedDeman
   return result;
 }
 
+// "Average vs Peak Day" per shift — computeDailyShiftDemand's demand object
+// already holds a REAL per-day figure for every day of the month (peak
+// concurrency within that day's shift window, not a flat monthly average);
+// this just reduces that day-by-day series to what the reference PWA's own
+// Real Requirement panel shows: the plain average across all days (the
+// number a naive "divide the month total by days" calculation would give)
+// alongside the actual peak day's figure (what generation itself has to be
+// able to cover) — the whole point of surfacing this table is showing how
+// far apart those two can be. peakDate is the day whose COMBINED B1+CM+NCS
+// demand for that shift is highest, so all three peak figures on one row
+// trace back to one real day, not three independently-chosen days.
+function computeAveragePeakByShift(demand, daysInMonth) {
+  const result = {};
+  ["M", "A", "N"].forEach(sh => {
+    const cats = { B1: [], CM: [], NCS: [] };
+    let peakCombined = -1, peakDay = null;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const day = demand[d]?.[sh];
+      if (!day) continue;
+      cats.B1.push(day.B1 || 0);
+      cats.CM.push(day.CM || 0);
+      cats.NCS.push(day.NCS || 0);
+      const combined = (day.B1 || 0) + (day.CM || 0) + (day.NCS || 0);
+      if (combined > peakCombined) { peakCombined = combined; peakDay = d; }
+    }
+    const avg = arr => (arr.length ? Math.round((arr.reduce((a, b) => a + b, 0) / arr.length) * 10) / 10 : 0);
+    const peak = arr => (arr.length ? Math.max(...arr) : 0);
+    result[sh] = {
+      B1: { avg: avg(cats.B1), peak: peak(cats.B1) },
+      CM: { avg: avg(cats.CM), peak: peak(cats.CM) },
+      NCS: { avg: avg(cats.NCS), peak: peak(cats.NCS) },
+      peakDay,
+    };
+  });
+  return result;
+}
+
 module.exports = {
   findPeakConcurrency, dateAndMinutesToAbsMin, getEffectiveGroundTime,
   buildTransitWorkloadEvents, buildPDCWorkloadEvents, buildClashEvents,
   computeDailyPeaks, computeAutomaticClashes, classifyTimeToShift,
   getManualDemandByDayShift, computeDailyShiftDemand, computeTaskMasterDemand,
-  computeUnplannedWorkload, computeExplainableManpower,
+  computeUnplannedWorkload, computeExplainableManpower, computeAveragePeakByShift,
 };

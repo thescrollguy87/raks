@@ -5,7 +5,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate, validateQuery } = require("../middleware/validate");
 const { requireOwnStation } = require("../utils/stationScope");
 const {
-  stationQuerySchema, manualDemandQuerySchema,
+  stationQuerySchema, manualDemandQuerySchema, flightDerivedQuerySchema,
   upsertConfigSchema, upsertMandatoryCoverageRuleSchema,
   upsertPlannedTaskSchema, upsertUnplannedTaskSchema, createManualDemandSchema,
 } = require("../validators/workloadConfigValidators");
@@ -16,6 +16,9 @@ router.use(requireAuth);
 // ─── Standard durations / ratios / buffers ───────────────────────────────────
 router.get("/", requirePermission("roster", "read"), validateQuery(stationQuerySchema), requireOwnStation("query"), ctrl.getConfig);
 router.put("/", requirePermission("roster", "update"), validate(upsertConfigSchema), requireOwnStation("body"), ctrl.upsertConfig);
+
+// ─── Planned Task Master's "auto, from Flight Schedule" source rows ─────────
+router.get("/flight-derived-summary", requirePermission("roster", "read"), validateQuery(flightDerivedQuerySchema), requireOwnStation("query"), ctrl.getFlightDerivedSummary);
 
 // ─── Mandatory Minimum Coverage grid ──────────────────────────────────────────
 router.get("/mandatory-coverage", requirePermission("roster", "read"), validateQuery(stationQuerySchema), requireOwnStation("query"), ctrl.listMandatoryCoverageRules);

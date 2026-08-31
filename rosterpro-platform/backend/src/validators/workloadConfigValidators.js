@@ -3,6 +3,11 @@ const { z } = require("zod");
 const stationQuerySchema = z.object({ stationId: z.string().uuid() });
 const monthKey = z.string().regex(/^\d{4}-\d{2}$/, "Expected month as YYYY-MM");
 const manualDemandQuerySchema = z.object({ stationId: z.string().uuid(), monthKey });
+const flightDerivedQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  year: z.coerce.number().int().min(2000).max(2100),
+  month: z.coerce.number().int().min(1).max(12),
+});
 
 const upsertConfigSchema = z.object({
   stationId: z.string().uuid(),
@@ -70,7 +75,7 @@ const createManualDemandSchema = z.object({
 }).transform(v => ({ ...v, date: new Date(v.date) }));
 
 module.exports = {
-  stationQuerySchema, manualDemandQuerySchema,
+  stationQuerySchema, manualDemandQuerySchema, flightDerivedQuerySchema,
   upsertConfigSchema, upsertMandatoryCoverageRuleSchema,
   upsertPlannedTaskSchema, upsertUnplannedTaskSchema, createManualDemandSchema,
 };
