@@ -141,6 +141,17 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     if (def) shiftDefsFull[code] = { start: def.startTime, end: def.endTime, type: def.type };
   });
 
+  // ruleEngine.js's checkers (checkHardRuleCompliance, computeSoftRuleScore)
+  // expect shiftDefsByCode as { code: { type, start, end, breakMin } } — a
+  // different shape from rosterGenerationAlgorithm.js's own shiftType(),
+  // which expects { code: typeString } directly. Covers every code (not
+  // just M/A/N) since a staff member's shifts can include pattern codes
+  // (G, G1, ...), O, and L, all of which these checkers read.
+  const ruleShiftDefsByCode = {};
+  allShiftDefs.forEach(d => {
+    ruleShiftDefsByCode[d.code] = { type: d.type, start: d.startTime, end: d.endTime, breakMin: d.breakMin };
+  });
+
   const baseCoverage = {};
   ["M", "A", "N"].forEach(sh => {
     const cfg = mandatoryCoverageConfig?.B1?.[sh];
@@ -213,7 +224,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason,
     explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
     automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
-    manualAdditionalDemand, config,
+    manualAdditionalDemand, config, ruleShiftDefsByCode,
   };
 }
 
@@ -297,12 +308,20 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   // whether or not it's actually persisted yet.
   const staffWithShifts = buildStaffWithShifts(staff, assignments, nDays);
   const isPatternLocked = s => lmpmLockedUserIds.includes(s.id);
+  // NOTE: ruleEngine.js's checkers need the OBJECT-shaped
+  // ruleShiftDefsByCode ({code: {type, start, end}}), not the flat-string
+  // shiftDefsByCode buildRosterAssignments uses above — passing the wrong
+  // one here previously made every isNight()/netHrs() lookup silently
+  // resolve to nothing, so max_consecutive_nights, rest_after_night,
+  // min_rest_hours, forced_off_after_nights, max_weekly/monthly_hours,
+  // night_only, and no_night never fired (or, for night_only, fired on the
+  // wrong shifts), and the two soft-rule scores always came back null.
   const hardRuleViolations = checkHardRuleCompliance(
-    workloadContext.allRules, staffWithShifts, nDays, shiftDefsByCode,
+    workloadContext.allRules, staffWithShifts, nDays, workloadContext.ruleShiftDefsByCode,
     workloadContext.staffGroupMembersByGroupId, workloadContext.staffGroupNameById,
   );
   const softRuleScore = computeSoftRuleScore(
-    workloadContext.allRules, staffWithShifts, nDays, usePatterns, isPatternLocked, shiftDefsByCode,
+    workloadContext.allRules, staffWithShifts, nDays, usePatterns, isPatternLocked, workloadContext.ruleShiftDefsByCode,
     workloadContext.staffGroupMembersByGroupId, workloadContext.staffGroupNameById,
   );
   const fs = workloadContext.flightSummary;
