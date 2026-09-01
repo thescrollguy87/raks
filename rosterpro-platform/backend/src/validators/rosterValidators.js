@@ -43,6 +43,7 @@ const generateRosterSchema = z.object({
   continueFromPrevious: z.boolean().optional(),
   usePatterns: z.boolean().optional(),
   applyLeave: z.boolean().optional(),
+  aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
 });
 
 const archiveQuerySchema = z.object({

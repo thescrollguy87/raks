@@ -116,7 +116,7 @@ async function buildPatternByUser(stationId, staff) {
 // real flight-schedule-driven advisory demand for this exact month (falling
 // back cleanly to flat base coverage + Manual Demand when nothing has been
 // imported for it), and the Staff Group lookups rules scoped by group need.
-async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfigOverride) {
+async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfigOverride, aogBuffer = 0) {
   const { year, month } = yearMonth(monthKey);
   const nDays = daysInMonth(monthKey);
 
@@ -157,7 +157,15 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     const cfg = mandatoryCoverageConfig?.B1?.[sh];
     baseCoverage[sh] = cfg?.enabled ? Math.max(1, +cfg.min || 1) : 0;
   });
-  const perShiftBuffer = { B1: config.bufferB1, B2: config.bufferB2, CM: config.bufferCM, NCS: config.bufferNCS };
+  // AOG Buffer (a Generate-tab, per-run planning input — not a stored
+  // config value) is spread evenly across the 3 shifts and folded into B1's
+  // per-shift buffer, exactly like the station's own configured Per-Shift
+  // Unplanned Buffer (bufferB1) — same additive treatment, so it flows
+  // through computeDailyShiftDemand into BOTH the Real Requirement
+  // Average/Peak panel and the actual advisoryDemand generation uses,
+  // instead of only affecting the separate legacy Manpower Plan display.
+  const aogPerShift = Math.ceil((+aogBuffer || 0) / 3);
+  const perShiftBuffer = { B1: (config.bufferB1 || 0) + aogPerShift, B2: config.bufferB2, CM: config.bufferCM, NCS: config.bufferNCS };
 
   const demandResult = computeDailyShiftDemand({
     year, month, homeStation: station?.iataCode, baseCoverage,
@@ -165,9 +173,16 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     config, manualDemandEntries, shiftDefs: shiftDefsFull, perShiftBuffer,
   });
 
-  // B2 advisory sizing comes ONLY from Manual Demand, never from
-  // flight-schedule-driven peak concurrency — computeDailyShiftDemand's own
-  // demand object deliberately has no B2 key for that reason.
+  // B2 has no flight-schedule-driven peak-concurrency demand (deliberately —
+  // there's no B2-specific movement ratio the way B1/CM/NCS have), but it
+  // DOES still get its own Mandatory Minimum Coverage floor plus the
+  // station's configured Per-Shift Unplanned Buffer (bufferB2) — previously
+  // missing entirely, which left bufferB2 with nowhere to apply.
+  const baseCoverageB2 = {};
+  ["M", "A", "N"].forEach(sh => {
+    const cfg = mandatoryCoverageConfig?.B2?.[sh];
+    baseCoverageB2[sh] = cfg?.enabled ? Math.max(1, +cfg.min || 1) : 0;
+  });
   const manualByDayShift = getManualDemandByDayShift(manualDemandEntries, year, month, shiftDefsFull);
   const advisoryDemand = {};
   for (let d = 1; d <= nDays; d++) {
@@ -177,7 +192,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
         B1: demandResult.demand[d][sh].B1,
         CM: demandResult.demand[d][sh].CM,
         NCS: demandResult.demand[d][sh].NCS,
-        B2: manualByDayShift[d]?.[sh]?.B2 || 0,
+        B2: baseCoverageB2[sh] + (perShiftBuffer.B2 || 0) + (manualByDayShift[d]?.[sh]?.B2 || 0),
       };
     });
   }
@@ -242,7 +257,7 @@ function buildStaffWithShifts(staff, assignments, nDays) {
 // "apply this exact previewed plan" path to keep in sync — a second call is
 // the apply.
 async function generateRoster(stationId, monthKey, actor, req, options = {}) {
-  const { preview = false, continueFromPrevious = false, usePatterns = false, applyLeave = true } = options;
+  const { preview = false, continueFromPrevious = false, usePatterns = false, applyLeave = true, aogBuffer = 0 } = options;
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
@@ -263,7 +278,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     rosterRepo.findAllShiftDefs(),
     continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
     usePatterns ? buildPatternByUser(stationId, staff) : Promise.resolve(undefined),
-    buildWorkloadContext(stationId, monthKey),
+    buildWorkloadContext(stationId, monthKey, undefined, aogBuffer),
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);

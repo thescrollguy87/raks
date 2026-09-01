@@ -1205,7 +1205,7 @@ function GenerateTab({ stationId }) {
     setAnalysisBusy(true);
     setError("");
     try {
-      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave });
+      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave, aogBuffer });
       setPreview(previewResult);
     } catch (err) { setError(err.message); } finally { setAnalysisBusy(false); }
   }
@@ -1217,7 +1217,7 @@ function GenerateTab({ stationId }) {
     try {
       const [planResult, previewResult] = await Promise.all([
         planningApi.getManpowerPlan(stationId, monthKey, aogBuffer),
-        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave }),
+        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave, aogBuffer }),
       ]);
       setPlan(planResult);
       setPreview(previewResult);
@@ -1231,7 +1231,7 @@ function GenerateTab({ stationId }) {
     setBusy(true);
     setError("");
     try {
-      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, applyLeave });
+      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, applyLeave, aogBuffer });
       setApplied(result);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -1420,7 +1420,7 @@ function GenerateTab({ stationId }) {
                 <option value="0">No — start a completely new cycle</option>
               </select>
             </div>
-            <div className="fg"><label className="fl">AOG Buffer</label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
+            <div className="fg"><label className="fl">AOG Buffer <span className="help-tip" tabIndex={0} title="Extra standby headcount to hold in reserve for unplanned Aircraft-On-Ground events, split evenly across the 3 shifts and added to B1 requirement. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
           </div>
           <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: 12, fontSize: 13 }} onClick={calculate} disabled={busy}>
             {busy ? "Calculating…" : "🤖 Calculate & Generate Roster"}
