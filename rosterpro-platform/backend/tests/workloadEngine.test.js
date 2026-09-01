@@ -70,6 +70,40 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(findPeakConcurrency(events2).peak).toBe(1);
   });
 
+  it("automatic departure clashes floor B1 to the clash count — one B1 cannot cover two departures within clashProximityMinutes", () => {
+    // Two short (5-min ground time) transits whose GROUND-TIME windows never
+    // overlap (09:00-09:05 and 09:30-09:35), so peak transit concurrency is
+    // only 1 — but their DEPARTURES (09:05 and 09:35) are 30 minutes apart,
+    // well inside the default 60-minute clashProximityMinutes, so their
+    // clash windows (±30min around each departure) DO overlap.
+    const turn1 = quickTurn("09:00", "09:05");
+    const turn2 = quickTurn("09:30", "09:35");
+    const highRatioConfig = { ...DEFAULT_CONFIG, movementsPerB1Staff: 100 }; // ratio alone would floor B1 at 1
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: highRatioConfig,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    // Without the clash floor this would be ceil(1/100) = 1 — one B1 "covering"
+    // two departures that are only 30 minutes apart is physically impossible.
+    expect(result.demand[1].A.B1).toBe(2);
+    // The recurring flight pattern (all 7 days of week, whole month) clashes
+    // in shift A on every day of the month, not just day 1.
+    expect(result.reason).toMatch(/30 shift\(s\) had a departure clash \(within 60min\)/);
+  });
+
+  it("does NOT raise the B1 floor when departures are outside the clash proximity window", () => {
+    const turn1 = quickTurn("09:00", "09:05");
+    const turn2 = quickTurn("11:00", "11:05"); // 2 hours apart — no clash
+    const highRatioConfig = { ...DEFAULT_CONFIG, movementsPerB1Staff: 100 };
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: highRatioConfig,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(result.demand[1].A.B1).toBe(1);
+  });
+
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
     // Ground time exactly at the 120-min threshold -> Transit; one minute over -> PDC, not both.
     const quickRec = quickTurn("09:00", "11:00"); // 120 min ground time

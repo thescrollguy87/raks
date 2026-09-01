@@ -243,6 +243,17 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
   const ratioCM = Math.max(1, config.movementsPerCMStaff || 1);
   const ratioNCS = Math.max(1, config.movementsPerNCSStaff || 1);
 
+  // Automatic Departure Clashes: departures within clashProximityMinutes of
+  // each other (default 60) each need their OWN B1 physically present to
+  // release/sign off that specific departure — one B1 cannot cover two
+  // simultaneous departures the way the movementsPerB1Staff ratio lets one
+  // B1 cover several spaced-out transits. This is therefore a FLOOR
+  // (Math.max, ratio of 1-per-clash), not folded into the ratio-divided
+  // peakConcurrency figure above, which would silently let a busy ratio
+  // dilute a real clash back down below the headcount it actually needs.
+  const clashEvents = buildClashEvents(turnRecords, charterRecords, year, month, homeStation, config);
+  let clashDrivenShiftCount = 0;
+
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d);
     const manual = manualByDayShift[d];
@@ -260,12 +271,20 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
         .filter(e => e.start < endAbs && e.end > startAbs)
         .map(e => ({ start: Math.max(e.start, startAbs), end: Math.min(e.end, endAbs) }));
       const peakConcurrency = findPeakConcurrency(clipped).peak;
-      demand[d][sh].B1 = Math.max(baseCoverage[sh] || 0, Math.ceil(peakConcurrency / ratioB1)) + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
+      const clippedClash = clashEvents
+        .filter(e => e.start < endAbs && e.end > startAbs)
+        .map(e => ({ start: Math.max(e.start, startAbs), end: Math.min(e.end, endAbs) }));
+      const clashPeak = findPeakConcurrency(clippedClash).peak;
+      if (clashPeak > 0) clashDrivenShiftCount++;
+      demand[d][sh].B1 = Math.max(baseCoverage[sh] || 0, Math.ceil(peakConcurrency / ratioB1), clashPeak) + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
       demand[d][sh].CM = Math.ceil(peakConcurrency / ratioCM) + (manual?.[sh].CM || 0) + (buf.CM || 0);
       demand[d][sh].NCS = Math.ceil(peakConcurrency / ratioNCS) + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
     });
   }
-  return { demand, source: "flight-schedule-driven", reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift (B1 1-per-${ratioB1}, CM 1-per-${ratioCM}, NCS 1-per-${ratioNCS}), plus Manual Demand and the per-shift unplanned buffer.` };
+  return {
+    demand, source: "flight-schedule-driven",
+    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift (B1 1-per-${ratioB1}, CM 1-per-${ratioCM}, NCS 1-per-${ratioNCS}), plus Manual Demand and the per-shift unplanned buffer. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that raised the B1 floor beyond the ratio-based figure.`,
+  };
 }
 
 // Converts a task master's configured frequency into expected manpower-
