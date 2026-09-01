@@ -70,38 +70,81 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(findPeakConcurrency(events2).peak).toBe(1);
   });
 
-  it("automatic departure clashes floor B1 to the clash count — one B1 cannot cover two departures within clashProximityMinutes", () => {
+  it("a 2-way departure clash needs 1 B1 + 1 CM + 2 NCS with default ratios — NOT 2 B1", () => {
     // Two short (5-min ground time) transits whose GROUND-TIME windows never
     // overlap (09:00-09:05 and 09:30-09:35), so peak transit concurrency is
     // only 1 — but their DEPARTURES (09:05 and 09:35) are 30 minutes apart,
     // well inside the default 60-minute clashProximityMinutes, so their
-    // clash windows (±30min around each departure) DO overlap.
+    // clash windows (±30min around each departure) DO overlap (clashPeak 2).
     const turn1 = quickTurn("09:00", "09:05");
     const turn2 = quickTurn("09:30", "09:35");
-    const highRatioConfig = { ...DEFAULT_CONFIG, movementsPerB1Staff: 100 }; // ratio alone would floor B1 at 1
     const result = computeDailyShiftDemand({
       year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
-      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: highRatioConfig,
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    // Without the clash floor this would be ceil(1/100) = 1 — one B1 "covering"
-    // two departures that are only 30 minutes apart is physically impossible.
-    expect(result.demand[1].A.B1).toBe(2);
-    // The recurring flight pattern (all 7 days of week, whole month) clashes
-    // in shift A on every day of the month, not just day 1.
+    // With default ratios, the ordinary peak-concurrency figures already
+    // give B1=1 (ceil(1/4)) and CM=1 (ceil(1/1)) — combined 2, exactly
+    // matching the 2-departure clash count, so no extra top-up is needed.
+    // This reproduces the operational example exactly: "1 CM + 1 NCS & 1 B1
+    // + 1 NCS can give 1 departure each" — a mix, never 2 B1.
+    expect(result.demand[1].A.B1).toBe(1);
+    expect(result.demand[1].A.CM).toBe(1);
+    expect(result.demand[1].A.NCS).toBe(2);
     expect(result.reason).toMatch(/30 shift\(s\) had a departure clash \(within 60min\)/);
   });
 
-  it("does NOT raise the B1 floor when departures are outside the clash proximity window", () => {
+  it("a 3-way clash needs one additional NCS and one additional (CM or B1) beyond the 2-way case", () => {
+    // Three departures all mutually within 30 min of a common midpoint
+    // (09:05, 09:20, 09:35) — clash windows (±30min) all overlap at 09:20,
+    // giving clashPeak 3, one more than the 2-way case above.
     const turn1 = quickTurn("09:00", "09:05");
-    const turn2 = quickTurn("11:00", "11:05"); // 2 hours apart — no clash
-    const highRatioConfig = { ...DEFAULT_CONFIG, movementsPerB1Staff: 100 };
+    const turn2 = quickTurn("09:15", "09:20");
+    const turn3 = quickTurn("09:30", "09:35");
     const result = computeDailyShiftDemand({
       year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
-      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: highRatioConfig,
+      flightSchedule: { turnRecords: [turn1, turn2, turn3], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
+    // B1 stays at its own natural baseline (1) — the extra head needed to
+    // reach the 3-way clash count is added to CM, not B1, matching "either
+    // 1 CM or 1 B1 more" rather than forcing another B1 specifically.
     expect(result.demand[1].A.B1).toBe(1);
+    expect(result.demand[1].A.CM).toBe(2);
+    expect(result.demand[1].A.NCS).toBe(3);
+    expect(result.demand[1].A.B1 + result.demand[1].A.CM).toBe(3); // combined >= clash count
+  });
+
+  it("does not top up CM when B1's own existing requirement already covers the clash count", () => {
+    const turn1 = quickTurn("09:00", "09:05");
+    const turn2 = quickTurn("09:30", "09:35"); // same 2-departure clash as above
+    // Mandatory coverage already requires 3 B1 in shift A regardless of
+    // flights — that alone (combined with CM's own baseline of 1) already
+    // exceeds the 2-departure clash count, so CM must NOT be inflated.
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 3, N: 0 },
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(result.demand[1].A.B1).toBe(3);
+    expect(result.demand[1].A.CM).toBe(1); // its own ratio-based baseline, not inflated further
+    expect(result.demand[1].A.NCS).toBe(2);
+  });
+
+  it("does NOT raise the NCS floor when departures are outside the clash proximity window", () => {
+    const turn1 = quickTurn("09:00", "09:05");
+    const turn2 = quickTurn("11:00", "11:05"); // 2 hours apart — no clash (clashPeak stays 1)
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    // Same ratio-based B1/CM baseline as the clashing case above, but NCS
+    // stays at its own ratio-based 1 instead of being floored to 2 — the
+    // direct contrast proving the clash floor only fires on a real clash.
+    expect(result.demand[1].A.B1).toBe(1);
+    expect(result.demand[1].A.CM).toBe(1);
+    expect(result.demand[1].A.NCS).toBe(1);
   });
 
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
