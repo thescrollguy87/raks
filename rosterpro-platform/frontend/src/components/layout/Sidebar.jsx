@@ -30,7 +30,7 @@ const NAV_SECTIONS = [
 ];
 
 export default function Sidebar() {
-  const { user, hasPermission, logout } = useAuth();
+  const { user, hasPermission, hasRole, logout } = useAuth();
   const { needsSwitcher, currentStation } = useStation();
 
   return (
@@ -55,6 +55,11 @@ export default function Sidebar() {
           </div>
         ))}
         <div className="nav-sl">Admin</div>
+        {hasRole("SUPER_ADMIN") && (
+          <NavLink to="/tenants" className={({ isActive }) => `ni${isActive ? " active" : ""}`}>
+            <span className="ni-icon">🏢</span>Tenants
+          </NavLink>
+        )}
         <button className="ni" onClick={logout}>
           <span className="ni-icon">🔓</span>Sign Out
         </button>

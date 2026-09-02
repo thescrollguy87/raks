@@ -16,6 +16,7 @@ import CoveragePage from "./pages/CoveragePage.jsx";
 import PastRostersPage from "./pages/PastRostersPage.jsx";
 import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
 import ImportExportPage from "./pages/ImportExportPage.jsx";
+import TenantsPage from "./pages/TenantsPage.jsx";
 
 export default function App() {
   return (
@@ -66,6 +67,10 @@ export default function App() {
         <Route
           path="/import-export"
           element={<ProtectedRoute permission={["reports", "export"]}><ImportExportPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/tenants"
+          element={<ProtectedRoute role="SUPER_ADMIN"><TenantsPage /></ProtectedRoute>}
         />
       </Route>
     </Routes>
