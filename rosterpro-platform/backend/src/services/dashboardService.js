@@ -8,16 +8,10 @@ const ApiError = require("../utils/ApiError");
 // ── 1. Qualification expiry ──────────────────────────────────────────────
 
 async function qualificationExpiryWidget(stationId, windowDays = 30) {
-  const staff = await rosterRepo.getActiveStaffContacts(stationId);
-  const staffIds = new Set(staff.map(s => s.id));
-
-  const [expiringQuals, expiringLicenses] = await Promise.all([
-    complianceRepo.qualification.listExpiringWithin(windowDays),
-    complianceRepo.license.listExpiringWithin(windowDays),
+  const [quals, licenses] = await Promise.all([
+    complianceRepo.qualification.listExpiringWithin(windowDays, { stationId }),
+    complianceRepo.license.listExpiringWithin(windowDays, { stationId }),
   ]);
-  // Station-scope the results — the repo queries are global, filter here.
-  const quals = expiringQuals.filter(q => staffIds.has(q.userId));
-  const licenses = expiringLicenses.filter(l => staffIds.has(l.userId));
 
   const now = new Date();
   const countByStatus = (items) => ({

@@ -9,10 +9,11 @@ const HEADER = ["Code", "Name", "Start Time (HH:MM)", "End Time (HH:MM)", "Break
 const VALID_TYPES = new Set(["duty", "night", "off", "leave", "other"]);
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
-// Shift definitions are airline-wide reference data, not per-station (see
-// ShiftDefinition in schema.prisma — no stationId column) — this import/
-// export pair is the one exception to "everything in this tab is scoped to
-// the current station" for that reason, not by oversight.
+// Shift definitions are per-airline reference data, not per-station (see
+// ShiftDefinition in schema.prisma) — this import/export pair is the one
+// exception to "everything in this tab is scoped to the current station"
+// for that reason, not by oversight: they're scoped one level up, to
+// req.user.airlineId, instead.
 
 function generateTemplate() {
   const legend = "Fill in one row per shift code. Leave Start/End Time blank for non-duty codes (e.g. Off, Leave) — both must be set together, or both left blank. Break is in minutes.";
@@ -23,8 +24,8 @@ function generateTemplate() {
   return buildStyledSheet("Shift Definitions Template", HEADER, exampleRows, { legend });
 }
 
-async function exportShiftDefinitions() {
-  const defs = await rosterRepo.findAllShiftDefs();
+async function exportShiftDefinitions(airlineId) {
+  const defs = await rosterRepo.findAllShiftDefs(airlineId);
   const rows = defs.map(d => [d.code, d.name, d.startTime || "", d.endTime || "", d.breakMin, d.type]);
   return buildStyledSheet("Shift Definitions", ["Code", "Name", "Start Time", "End Time", "Break (min)", "Type"], rows);
 }
@@ -86,13 +87,13 @@ async function importShiftDefinitions(buffer, actor, req) {
   // than silently applying the good rows and skipping the rest.
   if (errors.length) throw ApiError.badRequest("Fix the following and re-upload — nothing was imported.", errors);
 
-  const existing = await rosterRepo.findAllShiftDefsIncludingInactive();
+  const existing = await rosterRepo.findAllShiftDefsIncludingInactive(actor.airlineId);
   const existingByCode = new Map(existing.map(d => [d.code, d]));
   let created = 0, updated = 0;
 
   for (const row of rows) {
     const before = existingByCode.get(row.code);
-    const saved = await rosterRepo.upsertShiftDef(row);
+    const saved = await rosterRepo.upsertShiftDef(actor.airlineId, row);
     if (before) {
       updated++;
       await auditTrail.recordUpdate(

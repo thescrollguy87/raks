@@ -48,7 +48,7 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
 
   const [staff, shiftDefs] = await Promise.all([
     rosterRepo.getActiveStaffForGeneration(stationId),
-    rosterRepo.findAllShiftDefs(),
+    rosterRepo.findAllShiftDefs(actor.airlineId),
   ]);
   const validCodes = new Set(shiftDefs.map(d => d.code));
   const byEmployeeId = new Map(staff.filter(s => s.employeeId).map(s => [s.employeeId, s]));

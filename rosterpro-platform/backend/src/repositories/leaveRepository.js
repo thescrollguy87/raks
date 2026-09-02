@@ -39,12 +39,17 @@ function findOverlapping(userId, fromDate, toDate, excludeId) {
   });
 }
 
-function list({ userId, stationId, reportsToId, status, from, to, page, pageSize }) {
+// stationIdIn is the multi-station form of stationId — an airline-wide
+// caller who didn't name one specific station gets every station in THEIR
+// OWN airline (a real DB-level filter the caller resolves), never every
+// leave request on the whole platform.
+function list({ userId, stationId, stationIdIn, reportsToId, status, from, to, page, pageSize }) {
   const where = {
     deletedAt: null,
     ...(userId ? { userId } : {}),
     ...(status ? { status } : {}),
     ...(stationId ? { user: { stationId } } : {}),
+    ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
     ...(reportsToId ? { user: { reportsToId } } : {}),
     ...(from ? { toDate: { gte: from } } : {}),
     ...(to ? { fromDate: { lte: to } } : {}),

@@ -1,44 +1,118 @@
 const ApiError = require("./ApiError");
+const stationRepo = require("../repositories/stationRepository");
 
-// SUPER_ADMIN sees every airline; AIRLINE_ADMIN sees every station within
-// their own airline. Everyone else (STATION_MANAGER, LMM, SHIFT_ENGINEER,
-// AME, TECHNICIAN, STORE_KEEPER, READ_ONLY_AUDITOR) is scoped to exactly
-// the one station on their own token — this is the same distinction
-// userController.list already drew inline; this is that logic made
-// reusable so every station-scoped endpoint enforces it the same way,
-// not just the ones that happened to remember to check.
-function isAirlineWide(actor) {
-  return actor.roles?.includes("SUPER_ADMIN") || actor.roles?.includes("AIRLINE_ADMIN");
+// SUPER_ADMIN is the ONLY role that legitimately crosses tenant (airline)
+// boundaries — the platform owner. Never provisioned by self-signup: there
+// is no public registration endpoint in this app (see authRoutes.js), and
+// granting it to someone else requires already being SUPER_ADMIN yourself
+// (see userService.assignRoles's escalation guard).
+function isSuperAdmin(actor) {
+  return !!actor.roles?.includes("SUPER_ADMIN");
 }
 
-// Throws 403 if the actor isn't airline-wide and targetStationId isn't
-// their own station. Use this in services for anything resolved from a
-// record (a leave request's owner, a tool's station, a flight's station) —
-// where the "requested station" isn't a route param, it's whatever the
-// looked-up row actually belongs to.
-function assertOwnStation(actor, targetStationId) {
-  if (isAirlineWide(actor)) return;
-  if (!targetStationId || targetStationId !== actor.stationId) {
-    throw ApiError.forbidden("You can only access your own station's data");
+// AIRLINE_ADMIN sees every station WITHIN THEIR OWN AIRLINE; everyone else
+// (STATION_MANAGER, LMM, SHIFT_INCHARGE, AME, TECHNICIAN, STORE_KEEPER,
+// READ_ONLY_AUDITOR, ...) is scoped to exactly the one station on their own
+// token. This flag alone does NOT mean "skip the ownership check" — see
+// assertOwnStation below, which is the actual security boundary. It's kept
+// as its own export because call sites like userController.list/
+// stationController.list use it purely to decide "show me one station's
+// worth of data or every station I can legitimately see" — a query-shaping
+// decision, not itself an authorization decision.
+function isAirlineWide(actor) {
+  return isSuperAdmin(actor) || !!actor.roles?.includes("AIRLINE_ADMIN");
+}
+
+// THE tenant-isolation boundary. Every station-scoped read or write in this
+// app that resolves a stationId — whether it's a route param/query/body
+// value up front, or a station belonging to some other record (a leave
+// request's owner, a tool, a flight) — must pass its target through here
+// before doing anything with it.
+//
+// - SUPER_ADMIN: always allowed (the one legitimate cross-airline role).
+// - A plain station-scoped actor (not airline-wide): must be their own
+//   exact station.
+// - AIRLINE_ADMIN: airline-wide within their OWN airline only. This used to
+//   be treated the same as SUPER_ADMIN and skip the check entirely — that
+//   was the core multi-tenancy hole this function exists to close. An
+//   AIRLINE_ADMIN's claimed target station is now always resolved from the
+//   database and its REAL airlineId compared against the actor's — a
+//   station belonging to a different airline is rejected exactly like one
+//   that doesn't exist.
+//
+// Every mismatch — including "no such station" and "wrong airline" — comes
+// back as 404, never 403: a 403 would itself leak that the ID is real, just
+// off-limits, which is precisely the kind of cross-tenant existence leak
+// this function is meant to prevent.
+async function assertOwnStation(actor, targetStationId) {
+  if (isSuperAdmin(actor)) return;
+  if (!targetStationId) throw ApiError.notFound("Station not found");
+
+  if (!actor.roles?.includes("AIRLINE_ADMIN")) {
+    if (targetStationId !== actor.stationId) throw ApiError.notFound("Station not found");
+    return;
+  }
+
+  const station = await stationRepo.findStationAirlineId(targetStationId);
+  if (!station || station.airlineId !== actor.airlineId) {
+    throw ApiError.notFound("Station not found");
   }
 }
 
-// Express middleware for routes where the requested stationId IS a route
-// param/query/body value up front (dashboard/:stationId, ?stationId=... on
-// roster/reports, stationId in a create-tool/create-flight body). Rejects
-// before the controller/service even runs, rather than fetching data for
-// a station the caller has no business seeing and filtering it out after.
+// Express middleware form of assertOwnStation, for routes where the
+// requested stationId IS a route param/query/body value up front
+// (dashboard/:stationId, ?stationId=... on roster/reports, stationId in a
+// create-tool/create-flight body). Rejects before the controller/service
+// even runs, rather than fetching data for a station the caller has no
+// business seeing and filtering it out after.
 function requireOwnStation(source) {
-  return function (req, res, next) {
-    if (isAirlineWide(req.user)) return next();
-    const stationId = source
-      ? req[source]?.stationId
-      : req.params?.stationId || req.query?.stationId || req.body?.stationId;
-    if (!stationId || stationId !== req.user.stationId) {
-      return next(ApiError.forbidden("You can only access your own station's data"));
+  return async function (req, res, next) {
+    try {
+      const stationId = source
+        ? req[source]?.stationId
+        : req.params?.stationId || req.query?.stationId || req.body?.stationId;
+      await assertOwnStation(req.user, stationId);
+      next();
+    } catch (err) {
+      next(err);
     }
-    next();
   };
 }
 
-module.exports = { isAirlineWide, assertOwnStation, requireOwnStation };
+// Same boundary as assertOwnStation, for the rarer records that carry an
+// airlineId directly instead of (or in addition to) a stationId — Flight,
+// Aircraft. A client-supplied airlineId must NEVER be trusted at face
+// value: this is what stops an actor from writing a record that claims to
+// belong to a different airline than the one they're actually scoped to.
+function assertOwnAirline(actor, targetAirlineId) {
+  if (isSuperAdmin(actor)) return;
+  if (!targetAirlineId || targetAirlineId !== actor.airlineId) {
+    throw ApiError.notFound("Airline not found");
+  }
+}
+
+// For a list endpoint that's internally unscoped (an "every station"
+// query with no natural single stationId to check) but must still come
+// back station-scoped for anyone but SUPER_ADMIN — audit trail/activity,
+// expiring qualifications/licenses, leave lists, anything that used to
+// mean "give me everything" whenever an airline-wide caller simply didn't
+// name a station. Returns { stationId, stationIdIn } for the repository to
+// turn into a real WHERE clause — pass a specific stationId through
+// unfiltered ({stationId} only) once it's been verified; the "no specific
+// station named" case resolves to every station belonging to the ACTOR'S
+// OWN airline ({stationIdIn}), a genuine DB-level filter, never "no
+// filter at all" (that was the actual hole: an unfiltered query used to
+// mean "every station on the whole platform," not "every station I'm
+// allowed to see").
+async function resolveStationScope(actor, requestedStationId) {
+  if (isSuperAdmin(actor)) return { stationId: requestedStationId || undefined, stationIdIn: undefined };
+  if (!isAirlineWide(actor)) return { stationId: actor.stationId, stationIdIn: undefined };
+  if (requestedStationId) {
+    await assertOwnStation(actor, requestedStationId);
+    return { stationId: requestedStationId, stationIdIn: undefined };
+  }
+  const stations = await stationRepo.listStations({ airlineId: actor.airlineId, isSuperAdmin: false });
+  return { stationId: undefined, stationIdIn: stations.map(s => s.id) };
+}
+
+module.exports = { isSuperAdmin, isAirlineWide, assertOwnStation, requireOwnStation, assertOwnAirline, resolveStationScope };

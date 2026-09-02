@@ -24,7 +24,7 @@ async function getRosterGrid(stationId, monthKey, actor) {
 async function publishRoster(rosterId, actor, req) {
   const roster = await rosterRepo.findRosterById(rosterId);
   if (!roster) throw ApiError.notFound("Roster not found");
-  assertOwnStation(actor, roster.stationId);
+  await assertOwnStation(actor, roster.stationId);
   if (roster.isPublished) throw ApiError.conflict("Roster is already published");
 
   const updated = await rosterRepo.publishRoster(rosterId, actor.sub);
@@ -56,7 +56,7 @@ async function publishRoster(rosterId, actor, req) {
 async function unpublishRoster(rosterId, reason, actor, req) {
   const roster = await rosterRepo.findRosterById(rosterId);
   if (!roster) throw ApiError.notFound("Roster not found");
-  assertOwnStation(actor, roster.stationId);
+  await assertOwnStation(actor, roster.stationId);
   if (!roster.isPublished) throw ApiError.conflict("Roster is not currently published");
   if (!reason || !reason.trim()) throw ApiError.badRequest("A reason is required to unpublish a live roster");
 
@@ -90,7 +90,7 @@ async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate,
   try {
     const [user, oldDef] = await Promise.all([
       userRepo.findById(userId),
-      oldShiftDefId ? rosterRepo.findShiftDefById(oldShiftDefId) : null,
+      oldShiftDefId ? rosterRepo.findShiftDefById(actor.airlineId, oldShiftDefId) : null,
     ]);
     if (!user) return;
     await notificationService.notifyShiftChanged(user, { shiftDate, oldCode: oldDef?.code || null, newCode });
@@ -109,7 +109,7 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
     throw ApiError.forbidden("Roster is published — republish is required after further edits, or contact an admin to unpublish");
   }
 
-  const shiftDef = await rosterRepo.findShiftDefByCode(shiftCode);
+  const shiftDef = await rosterRepo.findShiftDefByCode(actor.airlineId, shiftCode);
   if (!shiftDef) throw ApiError.badRequest(`Unknown shift code: ${shiftCode}`);
 
   const dateObj = new Date(shiftDate + "T00:00:00.000Z");
@@ -144,7 +144,7 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
     throw ApiError.forbidden("Roster is published — unpublish before bulk-editing");
   }
 
-  const shiftDefs = await rosterRepo.findAllShiftDefs();
+  const shiftDefs = await rosterRepo.findAllShiftDefs(actor.airlineId);
   const codeToId = Object.fromEntries(shiftDefs.map(d => [d.code, d.id]));
 
   const unknownCodes = assignments.map(a => a.shiftCode).filter(c => !codeToId[c]);
@@ -166,8 +166,8 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
   return { count: results.length };
 }
 
-function listShiftDefinitions() {
-  return rosterRepo.findAllShiftDefs();
+function listShiftDefinitions(airlineId) {
+  return rosterRepo.findAllShiftDefs(airlineId);
 }
 
 function listRostersForStation(stationId) {

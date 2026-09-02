@@ -7,10 +7,22 @@ const qualification = {
   update: (id, data) => prisma.qualification.update({ where: { id }, data }),
   softDelete: (id, actorId) => prisma.qualification.update({ where: { id }, data: { deletedAt: new Date(), updatedById: actorId } }),
   listForUser: (userId) => prisma.qualification.findMany({ where: { userId, deletedAt: null }, orderBy: { expiryDate: "asc" } }),
-  listExpiringWithin: (days) => {
+  // scope ({ stationId } or { stationIdIn }) is optional and omitted
+  // entirely by the daily reminder job, which legitimately needs every
+  // station on the platform — every OTHER caller (the compliance
+  // controller's HTTP endpoint, the dashboard widget) always passes one,
+  // resolved via utils/stationScope's resolveStationScope, so this stays a
+  // real DB-level WHERE filter rather than an unbounded query some caller
+  // has to remember to narrow down afterward.
+  listExpiringWithin: (days, scope = {}) => {
     const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const { stationId, stationIdIn } = scope;
     return prisma.qualification.findMany({
-      where: { deletedAt: null, expiryDate: { lte: cutoff }, status: { not: "EXPIRED" } },
+      where: {
+        deletedAt: null, expiryDate: { lte: cutoff }, status: { not: "EXPIRED" },
+        ...(stationId ? { user: { stationId } } : {}),
+        ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
+      },
       include: { user: { select: { id: true, fullName: true, email: true, stationId: true } } },
       orderBy: { expiryDate: "asc" },
     });
@@ -25,10 +37,15 @@ const license = {
   update: (id, data) => prisma.license.update({ where: { id }, data }),
   softDelete: (id, actorId) => prisma.license.update({ where: { id }, data: { deletedAt: new Date(), updatedById: actorId } }),
   listForUser: (userId) => prisma.license.findMany({ where: { userId, deletedAt: null }, orderBy: { expiryDate: "asc" } }),
-  listExpiringWithin: (days) => {
+  listExpiringWithin: (days, scope = {}) => {
     const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const { stationId, stationIdIn } = scope;
     return prisma.license.findMany({
-      where: { deletedAt: null, expiryDate: { lte: cutoff } },
+      where: {
+        deletedAt: null, expiryDate: { lte: cutoff },
+        ...(stationId ? { user: { stationId } } : {}),
+        ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
+      },
       include: { user: { select: { id: true, fullName: true, email: true, stationId: true } } },
       orderBy: { expiryDate: "asc" },
     });

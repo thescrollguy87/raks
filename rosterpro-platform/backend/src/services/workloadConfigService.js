@@ -20,7 +20,7 @@ async function getWorkloadConfig(stationId) {
 }
 
 async function upsertWorkloadConfig(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const config = await repo.upsertConfig({ ...input, actorId: actor.sub });
   await auditTrail.logActivity("Workload config saved", `Station ${config.stationId} standard durations/ratios updated`, config.stationId, actor, req);
   return config;
@@ -48,7 +48,7 @@ async function listMandatoryCoverageRules(stationId) {
 }
 
 async function upsertMandatoryCoverageRule(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const rule = await repo.upsertMandatoryCoverageRule(input);
   await auditTrail.logActivity("Mandatory coverage rule saved", `${rule.category} / ${rule.shift}: ${rule.enabled ? `min ${rule.minCount}` : "disabled"}`, rule.stationId, actor, req);
   return rule;
@@ -80,6 +80,24 @@ const UNPLANNED_TASK_DEFAULTS = [
   "Engine Change", "Water Wash", "Escape Slide Replacement", "AOG Rectification",
 ];
 
+// KNOWN ISSUE (flagged, not fixed here — see the multi-tenancy audit's
+// final report): this silently CREATES 7 real PlannedTaskMaster rows in
+// the database the first time a station with none yet has this endpoint
+// called — for a brand-new airline's very first station, a mere GET
+// request attaches a starter task list nobody asked for, which is exactly
+// the "shared default task master silently attached to every new
+// airline" pattern the rest of this audit eliminated everywhere else.
+// It's lower severity than the access-control gaps fixed elsewhere (the
+// rows are generic, all-zero placeholders — never copied from another
+// airline's real configured data, and they don't expose anyone's
+// information) but it's still the wrong default. Not changed in this pass
+// because the obvious fix — synthesizing these in memory instead of
+// persisting them, the same way getWorkloadConfig/listMandatoryCoverageRules
+// already do below — breaks AutoRosterPage.jsx's edit flow: it matches
+// rows by `x.id === t.id` and multiple synthesized rows sharing id: null
+// would collide (editing one would edit all of them). Fixing this
+// properly needs a coordinated frontend change (a stable per-row key that
+// isn't the DB id) alongside the backend one.
 async function listPlannedTasks(stationId) {
   let tasks = await repo.listPlannedTasks(stationId);
   if (tasks.length === 0) {
@@ -95,7 +113,7 @@ async function listPlannedTasks(stationId) {
 }
 
 async function upsertPlannedTask(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const task = await repo.upsertPlannedTask(input);
   await auditTrail.logActivity("Planned task master saved", task.name, task.stationId, actor, req);
   return task;
@@ -104,12 +122,15 @@ async function upsertPlannedTask(input, actor, req) {
 async function deletePlannedTask(id, actor, req) {
   const task = await repo.findPlannedTask(id);
   if (!task) throw ApiError.notFound("Planned task not found");
-  assertOwnStation(actor, task.stationId);
+  await assertOwnStation(actor, task.stationId);
   await repo.deletePlannedTask(id);
   await auditTrail.logActivity("Planned task master removed", task.name, task.stationId, actor, req);
   return { id };
 }
 
+// Same known issue as listPlannedTasks above (silently persists a starter
+// template on first read) and the same reason it's flagged rather than
+// changed here.
 async function listUnplannedTasks(stationId) {
   let tasks = await repo.listUnplannedTasks(stationId);
   if (tasks.length === 0) {
@@ -125,7 +146,7 @@ async function listUnplannedTasks(stationId) {
 }
 
 async function upsertUnplannedTask(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const task = await repo.upsertUnplannedTask(input);
   await auditTrail.logActivity("Unplanned task master saved", task.name, task.stationId, actor, req);
   return task;
@@ -134,7 +155,7 @@ async function upsertUnplannedTask(input, actor, req) {
 async function deleteUnplannedTask(id, actor, req) {
   const task = await repo.findUnplannedTask(id);
   if (!task) throw ApiError.notFound("Unplanned task not found");
-  assertOwnStation(actor, task.stationId);
+  await assertOwnStation(actor, task.stationId);
   await repo.deleteUnplannedTask(id);
   await auditTrail.logActivity("Unplanned task master removed", task.name, task.stationId, actor, req);
   return { id };
@@ -152,7 +173,7 @@ function listManualDemand(stationId, monthKey) {
 }
 
 async function createManualDemand(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const entry = await repo.createManualDemand({ ...input, actorId: actor.sub });
   await auditTrail.logActivity("Manual demand entry added", `${entry.date.toISOString().slice(0, 10)}: B1${entry.reqB1} B2${entry.reqB2} CM${entry.reqCM} NCS${entry.reqNCS}`, entry.stationId, actor, req);
   return entry;
@@ -161,7 +182,7 @@ async function createManualDemand(input, actor, req) {
 async function deleteManualDemand(id, actor, req) {
   const entry = await repo.findManualDemand(id);
   if (!entry) throw ApiError.notFound("Manual demand entry not found");
-  assertOwnStation(actor, entry.stationId);
+  await assertOwnStation(actor, entry.stationId);
   await repo.deleteManualDemand(id);
   await auditTrail.logActivity("Manual demand entry removed", entry.date.toISOString().slice(0, 10), entry.stationId, actor, req);
   return { id };

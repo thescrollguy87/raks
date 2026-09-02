@@ -47,8 +47,8 @@ async function buildDayDepartures(stationId, year, month, day) {
   return departures;
 }
 
-async function loadShiftDefsFull() {
-  const allShiftDefs = await rosterRepo.findAllShiftDefs();
+async function loadShiftDefsFull(airlineId) {
+  const allShiftDefs = await rosterRepo.findAllShiftDefs(airlineId);
   const shiftDefsFull = {};
   ["M", "A", "N"].forEach(code => {
     const def = allShiftDefs.find(d => d.code === code);
@@ -76,8 +76,8 @@ function addUTCDays(date, n) {
 // departures resolving to different shifts never draw from each other's
 // crews. A departure with no roster at all for its resolved shift+date
 // gets an empty pool — never silently borrowed from elsewhere.
-async function resolveDeparturePools(stationId, departures, dayDate) {
-  const shiftDefsFull = await loadShiftDefsFull();
+async function resolveDeparturePools(stationId, departures, dayDate, airlineId) {
+  const shiftDefsFull = await loadShiftDefsFull(airlineId);
   const resolved = departures.map(dep => {
     const r = resolveRosterShiftForDeparture(dep.depMin, shiftDefsFull);
     if (!r) return { ...dep, shiftCode: null, rosterDate: null, poolKey: null };
@@ -136,7 +136,7 @@ async function resolveDeparturePools(stationId, departures, dayDate) {
 // plain page load where no allocation was just attempted, but not as
 // precise as the real clash computation.
 async function getDayAllocation(stationId, year, month, day, actor, reasonOverrides = {}) {
-  assertOwnStation(actor, stationId);
+  await assertOwnStation(actor, stationId);
   const date = new Date(Date.UTC(year, month - 1, day));
   const [departures, existingRows] = await Promise.all([
     buildDayDepartures(stationId, year, month, day),
@@ -145,7 +145,7 @@ async function getDayAllocation(stationId, year, month, day, actor, reasonOverri
   const existingByKey = {};
   existingRows.forEach(r => { existingByKey[`${r.eventType}:${r.eventId}:${date.toISOString().slice(0, 10)}`] = r; });
 
-  const resolved = await resolveDeparturePools(stationId, departures, date);
+  const resolved = await resolveDeparturePools(stationId, departures, date, actor.airlineId);
 
   return resolved.map(dep => {
     const existing = existingByKey[dep.key];
@@ -172,7 +172,7 @@ async function getDayAllocation(stationId, year, month, day, actor, reasonOverri
 // whole station) — a manual pick already on file is preserved untouched
 // (never silently overwritten by re-running this).
 async function autoAllocateDay(stationId, year, month, day, actor, req) {
-  assertOwnStation(actor, stationId);
+  await assertOwnStation(actor, stationId);
   const date = new Date(Date.UTC(year, month - 1, day));
   const [departures, existingRows, config] = await Promise.all([
     buildDayDepartures(stationId, year, month, day),
@@ -181,7 +181,7 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
   ]);
   if (departures.length === 0) return [];
 
-  const resolved = await resolveDeparturePools(stationId, departures, date);
+  const resolved = await resolveDeparturePools(stationId, departures, date, actor.airlineId);
   const dateKey = date.toISOString().slice(0, 10);
   const existingByKey = {};
   existingRows.forEach(r => {
@@ -229,7 +229,7 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
 // a security boundary this needs to re-enforce server-side beyond that.
 async function manualAssign(input, actor, req) {
   const { stationId, year, month, day, eventType, eventId, flightRef, releaserUserId, releaserCategory, supportUserId } = input;
-  assertOwnStation(actor, stationId);
+  await assertOwnStation(actor, stationId);
   if (releaserUserId && releaserCategory !== "B1" && releaserCategory !== "CM") {
     throw ApiError.badRequest("releaserCategory must be B1 or CM when a releaser is assigned");
   }

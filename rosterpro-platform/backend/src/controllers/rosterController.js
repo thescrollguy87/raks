@@ -41,7 +41,7 @@ const unpublish = asyncHandler(async (req, res) => {
 });
 
 const shiftDefinitions = asyncHandler(async (req, res) => {
-  const result = await rosterService.listShiftDefinitions();
+  const result = await rosterService.listShiftDefinitions(req.user.airlineId);
   res.json(result);
 });
 
@@ -69,7 +69,7 @@ const shiftDefinitionsTemplate = asyncHandler(async (req, res) => {
 });
 
 const shiftDefinitionsExport = asyncHandler(async (req, res) => {
-  const buffer = await shiftDefinitionService.exportShiftDefinitions();
+  const buffer = await shiftDefinitionService.exportShiftDefinitions(req.user.airlineId);
   sendXlsx(res, buffer, "Shift_Definitions.xlsx");
 });
 

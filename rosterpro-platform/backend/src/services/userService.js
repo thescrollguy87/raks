@@ -1,9 +1,10 @@
 const userRepo = require("../repositories/userRepository");
 const userListRepo = require("../repositories/userListRepository");
+const stationRepo = require("../repositories/stationRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const { hashPassword, isPasswordStrong } = require("../utils/password");
-const { assertOwnStation } = require("../utils/stationScope");
+const { assertOwnStation, isSuperAdmin } = require("../utils/stationScope");
 
 // Fields a caller is allowed to see changed/created — mirrors what
 // userListRepository already selects, so create/update responses look like
@@ -36,6 +37,17 @@ async function createStaff(body, actor, req) {
   if (!stationId) {
     throw ApiError.badRequest("A station is required to add a new staff member");
   }
+  // Whatever station ends up being used — the actor's own, or one an
+  // airline-wide actor explicitly chose — must genuinely belong to an
+  // airline the actor is allowed to place staff at (this 404s for an
+  // AIRLINE_ADMIN naming another airline's station). The new hire's own
+  // airlineId is then derived from that station's REAL airline, never
+  // copied from the actor's own token — the two only coincide by
+  // construction once this check has passed, but deriving it explicitly
+  // keeps a SUPER_ADMIN provisioning staff for some other airline correct
+  // too, instead of silently stamping their own airlineId onto the row.
+  await assertOwnStation(actor, stationId);
+  const station = await stationRepo.findStationAirlineId(stationId);
 
   const passwordHash = await hashPassword(body.password);
   const user = await userRepo.create({
@@ -48,7 +60,7 @@ async function createStaff(body, actor, req) {
     designation: body.designation || null,
     reportsToId: body.reportsToId || null,
     stationId,
-    airlineId: actor.airlineId || null,
+    airlineId: station.airlineId,
     isEmailVerified: true, // an admin-created account doesn't need self-verification
     createdById: actor.sub,
   });
@@ -63,13 +75,26 @@ async function createStaff(body, actor, req) {
 async function updateStaff(id, body, actor, req) {
   const before = await userRepo.findById(id);
   if (!before) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, before.stationId);
+  await assertOwnStation(actor, before.stationId);
 
   // Only an airline-wide admin can move someone to a different station —
   // a Station Manager who holds staff:update shouldn't be able to smuggle
   // a stationId change through this endpoint to reassign staff elsewhere.
   const isAdmin = ["SUPER_ADMIN", "AIRLINE_ADMIN"].some(r => actor.roles.includes(r));
-  const data = isAdmin ? { ...body } : { ...body, stationId: before.stationId };
+  let data;
+  if (isAdmin && body.stationId && body.stationId !== before.stationId) {
+    // Being moved to a genuinely different station — that station must
+    // belong to an airline the actor is allowed to place staff at too
+    // (same rule as createStaff), or an AIRLINE_ADMIN could otherwise
+    // "kidnap" someone into a different tenant entirely just by setting
+    // stationId on an update. airlineId is re-derived from wherever they
+    // end up so it never drifts out of sync with their actual station.
+    await assertOwnStation(actor, body.stationId);
+    const station = await stationRepo.findStationAirlineId(body.stationId);
+    data = { ...body, airlineId: station.airlineId };
+  } else {
+    data = isAdmin ? { ...body } : { ...body, stationId: before.stationId };
+  }
 
   const after = await userRepo.update(id, { ...data, updatedById: actor.sub });
   await auditTrail.recordUpdate("User", id, before.stationId, before, body, actor, req);
@@ -79,7 +104,7 @@ async function updateStaff(id, body, actor, req) {
 async function setActive(id, isActive, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, user.stationId);
+  await assertOwnStation(actor, user.stationId);
   if (user.isActive === isActive) return toPublicShape(user); // no-op, already in that state
 
   const updated = await userRepo.setActive(id, isActive);
@@ -93,7 +118,18 @@ async function setActive(id, isActive, actor, req) {
 async function assignRoles(id, roleNames, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, user.stationId);
+  await assertOwnStation(actor, user.stationId);
+
+  // SUPER_ADMIN crosses every tenant boundary in this app — granting it is
+  // itself a tenant-isolation decision, not an ordinary permissions edit.
+  // Without this, an AIRLINE_ADMIN (who legitimately holds users:assign_role
+  // for their own airline) could grant SUPER_ADMIN to anyone at their own
+  // station and hand them unrestricted cross-airline access — a full
+  // escalation around everything else this audit fixed. Only someone who
+  // is already SUPER_ADMIN may grant or revoke it.
+  if (roleNames.includes("SUPER_ADMIN") && !isSuperAdmin(actor)) {
+    throw ApiError.forbidden("Only a Super Admin can grant the Super Admin role");
+  }
 
   await userRepo.setRoles(id, roleNames);
   const updated = await userRepo.findById(id);
@@ -113,7 +149,7 @@ async function assignRoles(id, roleNames, actor, req) {
 async function deleteStaff(id, actor, req) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, user.stationId);
+  await assertOwnStation(actor, user.stationId);
 
   // Checked up front (not just caught as a generic FK failure after the
   // fact) so the message names EXACTLY which historical record is

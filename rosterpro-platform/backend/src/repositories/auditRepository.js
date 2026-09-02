@@ -14,11 +14,18 @@ function entityHistory(entityType, entityId) {
 // changed this week" rather than needing to already know which record to
 // look at. stationId filters to the entity's own station (a real column on
 // the row, not derived from who made the change).
-async function listAuditTrail({ entityType, changedById, stationId, from, to, page = 1, pageSize = 50 }) {
+// stationIdIn is the multi-station form of the same scope stationId
+// expresses for one station — an airline-wide caller who didn't name a
+// single station gets every station belonging to their OWN airline (a
+// real DB-level IN filter resolved by the caller), never every station on
+// the platform. Passing neither (SUPER_ADMIN, or nothing at all) means no
+// station filter — the one case that's actually meant to see everything.
+async function listAuditTrail({ entityType, changedById, stationId, stationIdIn, from, to, page = 1, pageSize = 50 }) {
   const where = {
     ...(entityType ? { entityType } : {}),
     ...(changedById ? { changedById } : {}),
     ...(stationId ? { stationId } : {}),
+    ...(stationIdIn ? { stationId: { in: stationIdIn } } : {}),
     ...(from || to ? { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
   const [total, items] = await Promise.all([
@@ -36,10 +43,11 @@ async function listAuditTrail({ entityType, changedById, stationId, from, to, pa
 // station manager's daily "what happened" check actually wants. stationId
 // filters to the affected entity's own station (a real column on the row),
 // not the acting user's station.
-async function listActivity({ userId, stationId, from, to, page = 1, pageSize = 50 }) {
+async function listActivity({ userId, stationId, stationIdIn, from, to, page = 1, pageSize = 50 }) {
   const where = {
     ...(userId ? { userId } : {}),
     ...(stationId ? { stationId } : {}),
+    ...(stationIdIn ? { stationId: { in: stationIdIn } } : {}),
     ...(from || to ? { timestamp: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}),
   };
   const [total, items] = await Promise.all([

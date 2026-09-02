@@ -11,7 +11,7 @@ const { assertOwnStation } = require("../utils/stationScope");
 async function assertActorSharesStationWith(actor, userId) {
   const target = await userRepo.findStationId(userId);
   if (!target) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, target.stationId);
+  await assertOwnStation(actor, target.stationId);
   return target.stationId;
 }
 
@@ -88,10 +88,14 @@ function listQualificationsForUser(userId) {
     .then(rows => rows.map(r => ({ ...r, status: deriveStatus(r.expiryDate) })));
 }
 
-// Feeds Module 4's daily expiry-reminder job and the dashboard's
-// "qualification expiry" widget.
-function listExpiringQualifications(days = EXPIRING_WINDOW_DAYS) {
-  return repo.qualification.listExpiringWithin(days);
+// Feeds Module 4's daily expiry-reminder job (called with no scope — it
+// legitimately needs every station on the platform) and the compliance
+// controller's HTTP endpoint (always passes a resolved scope — see
+// resolveStationScope — so a caller never gets back more than their own
+// airline's data) and the dashboard's "qualification expiry" widget
+// (passes its own already-verified single stationId).
+function listExpiringQualifications(days = EXPIRING_WINDOW_DAYS, scope) {
+  return repo.qualification.listExpiringWithin(days, scope);
 }
 
 // ── Licenses ──────────────────────────────────────────────────────────────
@@ -137,8 +141,8 @@ function listLicensesForUser(userId) {
     .then(rows => rows.map(r => ({ ...r, status: deriveStatus(r.expiryDate) })));
 }
 
-function listExpiringLicenses(days = EXPIRING_WINDOW_DAYS) {
-  return repo.license.listExpiringWithin(days);
+function listExpiringLicenses(days = EXPIRING_WINDOW_DAYS, scope) {
+  return repo.license.listExpiringWithin(days, scope);
 }
 
 // ── Training ──────────────────────────────────────────────────────────────

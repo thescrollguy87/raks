@@ -30,7 +30,21 @@ services:
     name: rosterpro-backend
     plan: free
     rootDir: rosterpro-platform/backend
-    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && node scripts/create-admin.js && node scripts/seed-stations.js
+    # `npx prisma db seed` runs prisma/seed.js — deliberately the ONLY
+    # seed script in this pipeline, since it's just the platform-wide
+    # role/permission matrix (every airline shares it, not tenant data).
+    # scripts/create-admin.js only ever touches the very first station/
+    # admin login for a brand-new database, and is a no-op once either
+    # exists. Two scripts are intentionally NOT here, because they contain
+    # one specific airline's real/curated data, not generic tenant
+    # provisioning: prisma/seed-demo.js (demo shift codes/patterns/
+    # workload figures — run by hand with `npm run seed:demo` against a
+    # dev/demo database only) and scripts/seed-stations.js (Akasa's
+    # curated Indian-station list — run by hand with `npm run
+    # seed-stations` if it's ever needed again). Adding either back here
+    # would mean every future tenant silently inherits that data on its
+    # very first deploy.
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && node scripts/create-admin.js
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:

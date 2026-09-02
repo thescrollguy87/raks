@@ -1,11 +1,22 @@
 const repo = require("../repositories/flightRepository");
+const stationRepo = require("../repositories/stationRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const { assertOwnStation } = require("../utils/stationScope");
 
+// airlineId is NEVER taken from the request body — a client could otherwise
+// claim any airlineId regardless of which station the flight is actually
+// tied to, planting a record that doesn't belong to the tenant it says it
+// does. It's always derived from the target station's own real airlineId,
+// the same station requireOwnStation("body") on the route already confirms
+// belongs to the actor (or, for SUPER_ADMIN, whichever airline that station
+// genuinely belongs to).
 async function createFlight(body, actor, req) {
+  const station = await stationRepo.findStationAirlineId(body.stationId);
+  if (!station) throw ApiError.notFound("Station not found");
+
   const flight = await repo.createFlight({
-    airlineId: body.airlineId, stationId: body.stationId, aircraftId: body.aircraftId || null,
+    airlineId: station.airlineId, stationId: body.stationId, aircraftId: body.aircraftId || null,
     flightNumber: body.flightNumber.toUpperCase(),
     scheduledIn: body.scheduledIn ? new Date(body.scheduledIn) : null,
     scheduledOut: body.scheduledOut ? new Date(body.scheduledOut) : null,
@@ -18,7 +29,7 @@ async function createFlight(body, actor, req) {
 async function updateFlightStatus(id, body, actor, req) {
   const existing = await repo.findFlightById(id);
   if (!existing) throw ApiError.notFound("Flight not found");
-  assertOwnStation(actor, existing.stationId);
+  await assertOwnStation(actor, existing.stationId);
 
   const data = {
     status: body.status,
@@ -34,7 +45,7 @@ async function updateFlightStatus(id, body, actor, req) {
 async function recordDelay(body, actor, req) {
   const flight = await repo.findFlightById(body.flightId);
   if (!flight) throw ApiError.notFound("Flight not found");
-  assertOwnStation(actor, flight.stationId);
+  await assertOwnStation(actor, flight.stationId);
 
   const delay = await repo.createDelay({
     flightId: body.flightId, delayCode: body.delayCode, minutes: body.minutes,

@@ -88,7 +88,7 @@ async function buildContinuationTails(stationId, monthKey, staff) {
 // the returned map is, by definition, a staff member on an approved (not
 // MANUAL) pattern — exactly the LMPM-lock population the generator must
 // never pull off their pattern's OFF day, even under coverage pressure.
-async function buildPatternByUser(stationId, staff) {
+async function buildPatternByUser(stationId, staff, airlineId) {
   const [allocations, patterns] = await Promise.all([
     planningRepo.findAllocationsForStation(stationId),
     planningRepo.findPatternsForStation(stationId),
@@ -96,7 +96,7 @@ async function buildPatternByUser(stationId, staff) {
   const patternById = new Map(patterns.map(p => [p.id, p]));
   const allocByUserId = new Map(allocations.map(a => [a.userId, a]));
   const staffIds = new Set(staff.map(s => s.id));
-  const knownCodes = (await rosterRepo.findAllShiftDefs()).map(d => d.code);
+  const knownCodes = (await rosterRepo.findAllShiftDefs(airlineId)).map(d => d.code);
 
   const result = {};
   for (const userId of staffIds) {
@@ -116,7 +116,7 @@ async function buildPatternByUser(stationId, staff) {
 // real flight-schedule-driven advisory demand for this exact month (falling
 // back cleanly to flat base coverage + Manual Demand when nothing has been
 // imported for it), and the Staff Group lookups rules scoped by group need.
-async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfigOverride, aogBuffer = 0) {
+async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfigOverride, aogBuffer = 0, airlineId) {
   const { year, month } = yearMonth(monthKey);
   const nDays = daysInMonth(monthKey);
 
@@ -131,7 +131,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     workloadConfigService.listUnplannedTasks(stationId),
     workloadConfigService.listManualDemand(stationId, monthKey),
     flightScheduleService.getFlightScheduleForMonth(stationId, year, month),
-    rosterRepo.findAllShiftDefs(),
+    rosterRepo.findAllShiftDefs(airlineId),
     rosterRepo.findStationById(stationId),
   ]);
 
@@ -275,10 +275,10 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const [leaves, complianceSummaries, shiftDefs, tailByUser, patternByUser, workloadContext] = await Promise.all([
     leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
     Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
-    rosterRepo.findAllShiftDefs(),
+    rosterRepo.findAllShiftDefs(actor.airlineId),
     continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
-    usePatterns ? buildPatternByUser(stationId, staff) : Promise.resolve(undefined),
-    buildWorkloadContext(stationId, monthKey, undefined, aogBuffer),
+    usePatterns ? buildPatternByUser(stationId, staff, actor.airlineId) : Promise.resolve(undefined),
+    buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, actor.airlineId),
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);

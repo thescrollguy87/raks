@@ -12,15 +12,15 @@ const { computeManpowerPlan } = require("../utils/manpowerPlanning");
 // shiftDefinitionService.js already covers bulk, this covers the Shift
 // Definitions tab's inline add/edit/delete-a-row flow) ───────────────────────
 async function upsertShiftDefinition(input, actor, req) {
-  const def = await rosterRepo.upsertShiftDef(input);
+  const def = await rosterRepo.upsertShiftDef(actor.airlineId, input);
   await auditTrail.logActivity("Shift definition saved", `${def.code} — ${def.name}`, null, actor, req);
   return def;
 }
 
 async function deactivateShiftDefinition(id, actor, req) {
-  const def = await rosterRepo.findShiftDefById(id);
+  const def = await rosterRepo.findShiftDefById(actor.airlineId, id);
   if (!def) throw ApiError.notFound("Shift definition not found");
-  const updated = await rosterRepo.deactivateShiftDef(id);
+  const updated = await rosterRepo.deactivateShiftDef(actor.airlineId, id);
   await auditTrail.logActivity("Shift definition removed", `${def.code} — ${def.name}`, null, actor, req);
   return updated;
 }
@@ -39,7 +39,7 @@ async function upsertPattern(input, actor, req) {
 async function deletePattern(id, actor, req) {
   const pattern = await planningRepo.findPatternById(id);
   if (!pattern) throw ApiError.notFound("Shift pattern not found");
-  assertOwnStation(actor, pattern.stationId);
+  await assertOwnStation(actor, pattern.stationId);
   const deleted = await planningRepo.deletePattern(id);
   await auditTrail.logActivity("Shift pattern removed", `${pattern.code} — ${pattern.name}`, pattern.stationId, actor, req);
   return deleted;
@@ -70,7 +70,7 @@ async function listAllocations(stationId) {
 async function upsertAllocation(input, actor, req) {
   const target = await userRepo.findStationId(input.userId);
   if (!target) throw ApiError.notFound("Staff member not found");
-  assertOwnStation(actor, target.stationId);
+  await assertOwnStation(actor, target.stationId);
   const alloc = await planningRepo.upsertAllocation({ ...input, actorId: actor.sub });
   await auditTrail.logActivity("Staff shift allocation saved", `userId ${input.userId} -> pattern ${input.patternId || "MANUAL"}`, null, actor, req);
   return alloc;
@@ -90,7 +90,7 @@ async function upsertWorkloadItem(input, actor, req) {
 async function deleteWorkloadItem(id, actor, req) {
   const item = await planningRepo.findWorkloadItemById(id);
   if (!item) throw ApiError.notFound("Workload item not found");
-  assertOwnStation(actor, item.stationId);
+  await assertOwnStation(actor, item.stationId);
   const deleted = await planningRepo.deleteWorkloadItem(id);
   await auditTrail.logActivity("Workload item removed", `${item.section} — ${item.label}`, item.stationId, actor, req);
   return deleted;

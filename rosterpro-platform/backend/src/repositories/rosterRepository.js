@@ -88,12 +88,16 @@ function findStationById(stationId) {
   return prisma.station.findUnique({ where: { id: stationId }, select: { name: true, iataCode: true, icaoCode: true } });
 }
 
-function findShiftDefByCode(code) {
-  return prisma.shiftDefinition.findUnique({ where: { code } });
+function findShiftDefByCode(airlineId, code) {
+  return prisma.shiftDefinition.findUnique({ where: { airlineId_code: { airlineId, code } } });
 }
 
-function findShiftDefById(id) {
-  return prisma.shiftDefinition.findUnique({ where: { id } });
+// Scoped by airlineId too, not just id — an id alone is guessable/enumerable,
+// and this is the one shift-definition lookup callers use to authorize a
+// write (deactivate, single-row fetch), so it must come back null rather
+// than leaking another airline's row.
+function findShiftDefById(airlineId, id) {
+  return prisma.shiftDefinition.findFirst({ where: { id, airlineId } });
 }
 
 // Feeds the daily shift-reminder job: every on-duty (not off/leave) shift
@@ -118,34 +122,38 @@ function findShiftsForDate(dateObj) {
 // sortOrder groups codes the way the Shift Definitions tab expects — all
 // Morning codes, then Afternoon, then Night, then General, then everything
 // else — not alphabetical (which would scatter M1/MS away from M).
-function findAllShiftDefs() {
-  return prisma.shiftDefinition.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
+function findAllShiftDefs(airlineId) {
+  return prisma.shiftDefinition.findMany({ where: { airlineId, isActive: true }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
 }
 
 // Includes inactive codes too — used by the import service to tell
 // "created" from "updated" and to build a before/after audit diff, which
 // needs the row even if it was previously deactivated.
-function findAllShiftDefsIncludingInactive() {
-  return prisma.shiftDefinition.findMany({ orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
+function findAllShiftDefsIncludingInactive(airlineId) {
+  return prisma.shiftDefinition.findMany({ where: { airlineId }, orderBy: [{ sortOrder: "asc" }, { code: "asc" }] });
 }
 
-// Shift definitions are airline-wide reference data (no stationId on the
-// model) — upserted by their unique code, same as prisma/seed.js's own
-// bootstrap of the default M/A/N/G/O/L/SL set.
-function upsertShiftDef({ code, name, startTime, endTime, breakMin, type, color, sortOrder }) {
+// Shift definitions are per-airline reference data — upserted by their
+// (airlineId, code) unique pair, same as prisma/seed.js's own bootstrap of
+// the default M/A/N/G/O/L/SL set for a new tenant.
+function upsertShiftDef(airlineId, { code, name, startTime, endTime, breakMin, type, color, sortOrder }) {
   const data = { name, startTime, endTime, breakMin, type, isActive: true, ...(color ? { color } : {}), ...(sortOrder !== undefined ? { sortOrder } : {}) };
   return prisma.shiftDefinition.upsert({
-    where: { code },
+    where: { airlineId_code: { airlineId, code } },
     update: data,
-    create: { code, color: color || "#AABBCC", sortOrder: sortOrder ?? 0, ...data },
+    create: { airlineId, code, color: color || "#AABBCC", sortOrder: sortOrder ?? 0, ...data },
   });
 }
 
 // Soft-delete only — a code that's already used on real shift assignments
 // must stay resolvable for historical rosters, so this deactivates rather
 // than removing the row (mirrors every other "delete" in this codebase).
-function deactivateShiftDef(id) {
-  return prisma.shiftDefinition.update({ where: { id }, data: { isActive: false } });
+// Scoped by airlineId so a deactivate can only ever touch this airline's
+// own row — the caller (rosterPlanningService.deactivateShiftDefinition)
+// already verified the id belongs to this airline via findShiftDefById,
+// but this keeps the write itself safe even if that check is ever skipped.
+function deactivateShiftDef(airlineId, id) {
+  return prisma.shiftDefinition.updateMany({ where: { id, airlineId }, data: { isActive: false } });
 }
 
 function findAssignment(rosterId, userId, shiftDate) {

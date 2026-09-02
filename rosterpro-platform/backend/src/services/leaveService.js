@@ -21,7 +21,7 @@ async function requestLeave(body, actor, req) {
   if (targetUserId !== actor.sub) {
     const target = await userRepo.findStationId(targetUserId);
     if (!target) throw ApiError.notFound("Staff member not found");
-    assertOwnStation(actor, target.stationId);
+    await assertOwnStation(actor, target.stationId);
     targetStationId = target.stationId;
   }
   const fromDate = toDateOnly(body.fromDate);
@@ -42,7 +42,7 @@ async function requestLeave(body, actor, req) {
 async function decideLeave(leaveId, { decision, reason }, actor, req) {
   const leave = await leaveRepo.findById(leaveId);
   if (!leave) throw ApiError.notFound("Leave request not found");
-  assertOwnStation(actor, leave.user.stationId);
+  await assertOwnStation(actor, leave.user.stationId);
 
   // Station-wide approvers (leave:approve) can decide anyone at their
   // station. A Shift Incharge only has leave:approve_reports — narrower,
@@ -94,7 +94,7 @@ async function cancelLeave(leaveId, actor, req) {
     if (!actor.roles?.some(r => ["SUPER_ADMIN", "AIRLINE_ADMIN", "STATION_MANAGER", "LMM"].includes(r))) {
       throw ApiError.forbidden("You can only cancel your own leave requests");
     }
-    assertOwnStation(actor, leave.user.stationId);
+    await assertOwnStation(actor, leave.user.stationId);
   }
   if (!["PENDING", "APPROVED"].includes(leave.status)) throw ApiError.conflict(`Cannot cancel a ${leave.status.toLowerCase()} leave`);
 

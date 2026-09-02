@@ -1,6 +1,6 @@
 const svc = require("../services/complianceService");
 const asyncHandler = require("../utils/asyncHandler");
-const { isAirlineWide } = require("../utils/stationScope");
+const { resolveStationScope } = require("../utils/stationScope");
 
 // Qualifications
 const createQualification = asyncHandler(async (req, res) => {
@@ -18,12 +18,15 @@ const listQualifications = asyncHandler(async (req, res) => {
   res.json(await svc.listQualificationsForUser(req.params.userId));
 });
 const expiringQualifications = asyncHandler(async (req, res) => {
-  const results = await svc.listExpiringQualifications(parseInt(req.query.days, 10) || undefined);
-  // Airline-wide by design (it's also the daily reminder job's data
-  // source) — scoped down here for a Station Manager, same pattern used
-  // everywhere an internally-reused, unscoped list needs a per-caller filter.
-  const filtered = isAirlineWide(req.user) ? results : results.filter(r => r.user?.stationId === req.user.stationId);
-  res.json(filtered);
+  // listExpiringQualifications is also the daily reminder job's data
+  // source, which genuinely needs every station on the platform — this
+  // HTTP endpoint is the one caller that must come back scoped, resolved
+  // the same way every other station-scoped list endpoint is (a verified
+  // single station, or every station in the caller's own airline, never
+  // "everything").
+  const scope = await resolveStationScope(req.user, req.query.stationId);
+  const results = await svc.listExpiringQualifications(parseInt(req.query.days, 10) || undefined, scope);
+  res.json(results);
 });
 
 // Licenses
@@ -38,9 +41,9 @@ const listLicenses = asyncHandler(async (req, res) => {
   res.json(await svc.listLicensesForUser(req.params.userId));
 });
 const expiringLicenses = asyncHandler(async (req, res) => {
-  const results = await svc.listExpiringLicenses(parseInt(req.query.days, 10) || undefined);
-  const filtered = isAirlineWide(req.user) ? results : results.filter(r => r.user?.stationId === req.user.stationId);
-  res.json(filtered);
+  const scope = await resolveStationScope(req.user, req.query.stationId);
+  const results = await svc.listExpiringLicenses(parseInt(req.query.days, 10) || undefined, scope);
+  res.json(results);
 });
 
 // Training

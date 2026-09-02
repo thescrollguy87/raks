@@ -2,8 +2,10 @@ const { z } = require("zod");
 
 const isoDateTime = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/));
 
+// airlineId is deliberately not accepted here — flightService.createFlight
+// derives it server-side from the target station's real airlineId, never
+// from client input (see the comment there for why).
 const createFlightSchema = z.object({
-  airlineId: z.string().uuid(),
   stationId: z.string().uuid(),
   aircraftId: z.string().uuid().optional(),
   flightNumber: z.string().min(1).max(20),

@@ -14,7 +14,7 @@ function listAdjustments(stationId, monthKey) {
 }
 
 async function createAdjustment(input, actor, req) {
-  assertOwnStation(actor, input.stationId);
+  await assertOwnStation(actor, input.stationId);
   const entry = await repo.createAdjustment({ ...input, actorId: actor.sub });
   await auditTrail.logActivity("Daily operational adjustment logged", `${entry.date.toISOString().slice(0, 10)}: ${entry.description}`, entry.stationId, actor, req);
   return entry;
@@ -23,7 +23,7 @@ async function createAdjustment(input, actor, req) {
 async function deleteAdjustment(id, actor, req) {
   const entry = await repo.findAdjustment(id);
   if (!entry) throw ApiError.notFound("Daily operational adjustment not found");
-  assertOwnStation(actor, entry.stationId);
+  await assertOwnStation(actor, entry.stationId);
   await repo.deleteAdjustment(id);
   await auditTrail.logActivity("Daily operational adjustment removed", `${entry.date.toISOString().slice(0, 10)}: ${entry.description}`, entry.stationId, actor, req);
   return { id };

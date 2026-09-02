@@ -113,6 +113,7 @@ model Airline {
   users       User[]
   aircraft    Aircraft[]
   flights     Flight[]
+  shiftDefinitions ShiftDefinition[]
 
   @@map("airlines")
 }
@@ -360,9 +361,18 @@ model EngineeringDelay {
 
 // ─── Roster, shifts, leave ───────────────────────────────────────────────────
 
+// Per-airline reference data — code is unique WITHIN an airline, not
+// globally. Used to be a single airline-wide-across-ALL-tenants table (no
+// airlineId at all): any authenticated actor with roster:update could
+// silently rename, retime, or deactivate a shift code that every other
+// airline's roster relied on. See the shift_definitions_airline_scoped
+// migration for the backfill of existing rows onto the one airline that
+// existed at the time.
 model ShiftDefinition {
   id        String   @id @default(uuid())
-  code      String   @unique // M, A, N, G, L, ...
+  airlineId String
+  airline   Airline  @relation(fields: [airlineId], references: [id])
+  code      String   // M, A, N, G, L, ...
   name      String
   startTime String?  // "06:30"
   endTime   String?  // "14:00"
@@ -381,6 +391,8 @@ model ShiftDefinition {
 
   assignments ShiftAssignment[]
 
+  @@unique([airlineId, code])
+  @@index([airlineId])
   @@map("shift_definitions")
 }
 

@@ -7,7 +7,12 @@
 //    make those screens spin forever (see DashboardPage.jsx /
 //    RosterPage.jsx — fixed to show a message instead, but there's still
 //    nothing useful to show without at least one real station). Always
-//    runs, and is a no-op the moment any station exists.
+//    runs, and is a no-op the moment ANY station exists anywhere — this
+//    is a whole-platform genesis bootstrap (creates the very first
+//    tenant, once, for a database that has none), not a per-tenant
+//    default: it never fires again once a second airline is added, so it
+//    never attaches anything to a new tenant the way seed-demo.js/
+//    seed-stations.js deliberately must not either.
 //
 // 2. Creates/updates one SUPER_ADMIN login — there's no signup endpoint
 //    (by design — see README) so the very first user has to be created

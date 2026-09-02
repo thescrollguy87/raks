@@ -13,4 +13,14 @@ function listStations({ airlineId, isSuperAdmin }) {
   });
 }
 
-module.exports = { listStations };
+// Lean lookup used purely for tenancy checks (utils/stationScope.js) — an
+// airline-wide actor's claimed stationId must be resolved to its REAL
+// airlineId and compared against the actor's own, never trusted at face
+// value. Deliberately does not filter on deletedAt/isActive: a soft-deleted
+// or deactivated station still belongs to whichever airline it always did,
+// and that's all this check cares about.
+function findStationAirlineId(stationId) {
+  return prisma.station.findUnique({ where: { id: stationId }, select: { airlineId: true } });
+}
+
+module.exports = { listStations, findStationAirlineId };
