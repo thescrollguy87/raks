@@ -4,11 +4,10 @@ import { useState } from "react";
 // toggled a "open" class) — implemented here as simple conditional rendering
 // instead, since React doesn't need the DOM-always-present-but-hidden
 // pattern the vanilla-JS prototype used.
-export default function ShiftEditModal({ cell, shiftDefs, onSave, onDelete, onClose }) {
+export default function ShiftEditModal({ cell, shiftDefs, onSave, onClose }) {
   const [shiftCode, setShiftCode] = useState(cell.currentCode || "O");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
 
   async function handleSave() {
@@ -21,20 +20,6 @@ export default function ShiftEditModal({ cell, shiftDefs, onSave, onDelete, onCl
       setError(err.message || "Failed to save");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleDelete() {
-    if (!confirm(`Clear ${cell.staffName}'s shift on ${cell.dateLabel}? This removes the assignment entirely (different from marking it "O" Off).`)) return;
-    setDeleting(true);
-    setError("");
-    try {
-      await onDelete({ reason: reason || undefined });
-      onClose();
-    } catch (err) {
-      setError(err.message || "Failed to clear shift");
-    } finally {
-      setDeleting(false);
     }
   }
 
@@ -66,18 +51,11 @@ export default function ShiftEditModal({ cell, shiftDefs, onSave, onDelete, onCl
 
         {error && <div className="l-err" style={{ display: "block", marginBottom: 12 }}>{error}</div>}
 
-        <div style={{ display: "flex", gap: 7, justifyContent: "space-between" }}>
-          {cell.hasAssignment ? (
-            <button className="btn btn-ghost" style={{ color: "var(--rp-red)" }} disabled={deleting || saving} onClick={handleDelete}>
-              {deleting ? "Clearing…" : "🗑 Clear Shift"}
-            </button>
-          ) : <span />}
-          <div style={{ display: "flex", gap: 7 }}>
-            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn btn-primary" disabled={saving || deleting} onClick={handleSave}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
+        <div style={{ display: "flex", gap: 7, justifyContent: "flex-end" }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" disabled={saving} onClick={handleSave}>
+            {saving ? "Saving…" : "Save"}
+          </button>
         </div>
       </div>
     </div>

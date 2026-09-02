@@ -16,14 +16,6 @@ const upsertShiftSchema = z.object({
   reason: z.string().max(500).optional(), // shown in the audit trail entry for this change
 });
 
-// Clears a cell back to "nothing assigned" — distinct from upsertShiftSchema
-// with shiftCode "O" (an explicit, intentional Off-day assignment).
-const deleteShiftSchema = z.object({
-  userId: z.string().uuid(),
-  shiftDate: isoDate,
-  reason: z.string().max(500).optional(),
-});
-
 // Bulk variant — e.g. applying a generated roster or a pattern across many
 // days/staff in one call instead of one HTTP round-trip per cell.
 const bulkUpsertShiftSchema = z.object({
@@ -113,7 +105,7 @@ const manpowerPlanQuerySchema = z.object({
 });
 
 module.exports = {
-  createRosterSchema, upsertShiftSchema, deleteShiftSchema, bulkUpsertShiftSchema,
+  createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
   publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
   upsertShiftDefSchema,
   upsertShiftPatternSchema, patternQuerySchema,

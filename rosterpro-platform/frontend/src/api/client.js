@@ -114,7 +114,7 @@ export const api = {
   post: (path, body) => request(path, { method: "POST", body }),
   put: (path, body, query) => request(path, { method: "PUT", body, query }),
   patch: (path, body, query) => request(path, { method: "PATCH", body, query }),
-  delete: (path, query, body) => request(path, { method: "DELETE", query, body }),
+  delete: (path, query) => request(path, { method: "DELETE", query }),
   // Multipart file upload (roster import) — separate from the JSON-only
   // path above since FormData must NOT get a manually-set Content-Type
   // (the browser sets its own boundary) or JSON.stringify'd.

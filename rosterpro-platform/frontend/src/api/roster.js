@@ -12,10 +12,6 @@ export function upsertShift(stationId, monthKey, { userId, shiftDate, shiftCode,
   return api.patch("/api/roster/shift", { userId, shiftDate, shiftCode, note, reason }, { stationId, monthKey });
 }
 
-export function deleteShift(stationId, monthKey, { userId, shiftDate, reason }) {
-  return api.delete("/api/roster/shift", { stationId, monthKey }, { userId, shiftDate, reason });
-}
-
 export function bulkUpsertShifts(stationId, monthKey, assignments) {
   return api.post(`/api/roster/shift/bulk?stationId=${stationId}&monthKey=${monthKey}`, { assignments });
 }

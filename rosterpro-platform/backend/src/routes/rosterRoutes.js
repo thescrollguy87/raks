@@ -6,7 +6,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate, validateQuery } = require("../middleware/validate");
 const { requireOwnStation } = require("../utils/stationScope");
 const {
-  upsertShiftSchema, deleteShiftSchema, bulkUpsertShiftSchema, publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
+  upsertShiftSchema, bulkUpsertShiftSchema, publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
   upsertShiftDefSchema, upsertShiftPatternSchema, patternQuerySchema, upsertAllocationSchema, upsertWorkloadItemSchema, manpowerPlanQuerySchema,
 } = require("../validators/rosterValidators");
 
@@ -48,8 +48,6 @@ router.get("/manpower-plan", requirePermission("roster", "read"), validateQuery(
 router.get("/", requirePermission("roster", "read"), validateQuery(rosterQuerySchema), requireOwnStation("query"), ctrl.getGrid);
 
 router.patch("/shift", requirePermission("shift", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), validate(upsertShiftSchema), ctrl.upsertShift);
-
-router.delete("/shift", requirePermission("shift", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), validate(deleteShiftSchema), ctrl.deleteShift);
 
 router.post("/shift/bulk", requirePermission("roster", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), validate(bulkUpsertShiftSchema), ctrl.bulkUpsertShifts);
 

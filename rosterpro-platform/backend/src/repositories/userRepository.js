@@ -151,29 +151,27 @@ async function addRole(userId, roleName) {
 }
 
 // Real, irreversible delete — distinct from setActive(false), which is the
-// reversible "remove from future scheduling but keep history" action. Safe
-// because every dependent table that's meaningless without the user
+// reversible "remove from future scheduling but keep history" action. Only
+// safe because every dependent table that's meaningless without the user
 // (qualifications, licenses, trainings, authorizations, leaves, shift
-// assignments, notifications, roles, refresh tokens, shift pattern
-// assignment, staff group memberships) cascades, and tables that represent
-// someone else's/shared history (tool issues, activity log, departure
-// manpower records, audit findings, CAPAs) just detach (SetNull) rather
-// than losing the record itself. See the user_delete_cascades and
-// user_hard_delete_cascades migrations for the full mapping.
+// assignments, notifications, roles, refresh tokens) cascades, and tables
+// that represent someone else's/shared history (tool issues, activity log)
+// just detach (SetNull) rather than losing the record itself. See the
+// user_delete_cascades migration for the full mapping.
 function hardDelete(id) {
   return prisma.user.delete({ where: { id } });
 }
 
-// None of these actually block a hard delete at the DB level anymore — see
-// the user_hard_delete_cascades migration: a Shift Pattern assignment and
-// Rule Builder staff group memberships are deleted along with the user
-// (meaningless without them), a departure's real releaser/support history
-// and any quality audit finding/CAPA they're linked to are preserved but
-// detached (FK set to null) rather than lost. This still runs the same
-// checks up front, purely so deleteStaff can show the caller an itemized
-// "here's what will happen" warning before a genuinely irreversible delete
-// — not to decide whether it's allowed.
-async function findDeleteImpact(userId) {
+// Every relation to User deliberately left NOT cascading (unlike the ones
+// listed above) because the record is meaningful even after the person is
+// gone — a Shift Pattern assignment, a Rule Builder staff group
+// membership, a departure's real releaser/support history, a quality
+// audit finding they raised, or a CAPA they own. A hard delete correctly
+// fails against any of these (Postgres FK violation), but that failure on
+// its own doesn't tell the caller WHICH one — this runs the same checks
+// up front so deleteStaff can name them specifically instead of just
+// "some historical record exists somewhere."
+async function findDeleteBlockers(userId) {
   const [pattern, staffGroupCount, releaserCount, supportCount, auditFindingCount, capaCount] = await Promise.all([
     prisma.staffShiftAllocation.findUnique({ where: { userId } }),
     prisma.workloadRuleStaffGroupMember.count({ where: { userId } }),
@@ -182,14 +180,14 @@ async function findDeleteImpact(userId) {
     prisma.auditFinding.count({ where: { raisedById: userId } }),
     prisma.capa.count({ where: { ownerId: userId } }),
   ]);
-  const impact = [];
-  if (pattern) impact.push("their Shift Pattern assignment will be removed");
-  if (staffGroupCount) impact.push(`they'll be removed from ${staffGroupCount} Rule Builder staff group${staffGroupCount === 1 ? "" : "s"}`);
+  const blockers = [];
+  if (pattern) blockers.push("a Shift Pattern assignment");
+  if (staffGroupCount) blockers.push(`${staffGroupCount} Rule Builder staff group membership${staffGroupCount === 1 ? "" : "s"}`);
   const departureCount = releaserCount + supportCount;
-  if (departureCount) impact.push(`${departureCount} departure manpower record${departureCount === 1 ? "" : "s"} will keep their release/support history but no longer show who it was`);
-  if (auditFindingCount) impact.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised will be kept but no longer show who raised it`);
-  if (capaCount) impact.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own will be kept but no longer show an owner`);
-  return impact;
+  if (departureCount) blockers.push(`${departureCount} departure manpower assignment${departureCount === 1 ? "" : "s"}`);
+  if (auditFindingCount) blockers.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised`);
+  if (capaCount) blockers.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own`);
+  return blockers;
 }
 
 // Lean, exhaustive (non-paginated) roster of one station's active staff —
@@ -212,5 +210,5 @@ module.exports = {
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,
   flattenRolesAndPermissions, findContactsByRoleAtStation,
-  create, update, setActive, setRoles, addRole, hardDelete, findDeleteImpact,
+  create, update, setActive, setRoles, addRole, hardDelete, findDeleteBlockers,
 };

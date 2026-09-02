@@ -156,14 +156,10 @@ function findAssignment(rosterId, userId, shiftDate) {
 
 // Upsert keyed on the (rosterId, userId, shiftDate) unique constraint —
 // mirrors the "one cell in the roster grid" concept from the prototype.
-// Explicitly resets deletedAt: a cell cleared via deleteAssignment keeps
-// its row (soft-deleted) rather than a new one being created next time it's
-// upsertShift'd, since the unique constraint would collide with it — so
-// this must revive it, or the new code would silently never show up.
 function upsertAssignment({ rosterId, userId, shiftDate, shiftDefId, note, actorId }) {
   return prisma.shiftAssignment.upsert({
     where: { rosterId_userId_shiftDate: { rosterId, userId, shiftDate } },
-    update: { shiftDefId, note: note || null, updatedById: actorId, version: { increment: 1 }, deletedAt: null },
+    update: { shiftDefId, note: note || null, updatedById: actorId, version: { increment: 1 } },
     create: { rosterId, userId, shiftDate, shiftDefId, note: note || null, createdById: actorId, updatedById: actorId },
   });
 }
@@ -183,17 +179,6 @@ function findAssignmentsByStationDateShift(stationId, shiftDate, shiftCode) {
   });
 }
 
-// Soft-deletes the one cell, if any — distinct from upsertAssignment with
-// code "O" (which is an explicit, intentional Off-day assignment). This
-// clears the cell back to "nothing assigned here", the same state as a day
-// nobody ever touched. A no-op (0 rows) when there's nothing to clear.
-function deleteAssignment(rosterId, userId, shiftDate, actorId) {
-  return prisma.shiftAssignment.updateMany({
-    where: { rosterId, userId, shiftDate, deletedAt: null },
-    data: { deletedAt: new Date(), updatedById: actorId, version: { increment: 1 } },
-  });
-}
-
 function bulkUpsertAssignments(rows) {
   // Prisma has no native bulk-upsert, so this runs as one transaction of
   // individual upserts — still a single round-trip commit, and small enough
@@ -210,5 +195,5 @@ module.exports = {
   listRostersForStation,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
   findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,
-  findAssignment, upsertAssignment, deleteAssignment, bulkUpsertAssignments, findAssignmentsByStationDateShift,
+  findAssignment, upsertAssignment, bulkUpsertAssignments, findAssignmentsByStationDateShift,
 };
