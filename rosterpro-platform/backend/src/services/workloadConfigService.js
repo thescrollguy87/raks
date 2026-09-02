@@ -80,36 +80,37 @@ const UNPLANNED_TASK_DEFAULTS = [
   "Engine Change", "Water Wash", "Escape Slide Replacement", "AOG Rectification",
 ];
 
-// KNOWN ISSUE (flagged, not fixed here — see the multi-tenancy audit's
-// final report): this silently CREATES 7 real PlannedTaskMaster rows in
-// the database the first time a station with none yet has this endpoint
+// Synthesized in memory, never persisted, until a planner actually edits
+// one — same rule getWorkloadConfig/listMandatoryCoverageRules already
+// follow below. This used to CREATE 7 real PlannedTaskMaster rows in the
+// database the first time a station with none yet had this endpoint
 // called — for a brand-new airline's very first station, a mere GET
-// request attaches a starter task list nobody asked for, which is exactly
-// the "shared default task master silently attached to every new
-// airline" pattern the rest of this audit eliminated everywhere else.
-// It's lower severity than the access-control gaps fixed elsewhere (the
-// rows are generic, all-zero placeholders — never copied from another
-// airline's real configured data, and they don't expose anyone's
-// information) but it's still the wrong default. Not changed in this pass
-// because the obvious fix — synthesizing these in memory instead of
-// persisting them, the same way getWorkloadConfig/listMandatoryCoverageRules
-// already do below — breaks AutoRosterPage.jsx's edit flow: it matches
-// rows by `x.id === t.id` and multiple synthesized rows sharing id: null
-// would collide (editing one would edit all of them). Fixing this
-// properly needs a coordinated frontend change (a stable per-row key that
-// isn't the DB id) alongside the backend one.
-async function listPlannedTasks(stationId) {
-  let tasks = await repo.listPlannedTasks(stationId);
-  if (tasks.length === 0) {
-    for (let i = 0; i < PLANNED_TASK_DEFAULTS.length; i++) {
-      await repo.upsertPlannedTask({
-        stationId, name: PLANNED_TASK_DEFAULTS[i], frequency: 0, frequencyUnit: "per_month",
-        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "N", sortOrder: i,
-      });
-    }
-    tasks = await repo.listPlannedTasks(stationId);
-  }
-  return tasks;
+// request attached a starter task list nobody asked for. id: null is
+// deliberate: upsertPlannedTask treats a falsy id as "create," so editing
+// one of these placeholder rows creates a real row at that point, exactly
+// like starting from a blank one. Each row also carries a stable
+// clientKey (unrelated to the DB id, which multiple unsaved rows all
+// share as null) — AutoRosterPage.jsx's edit/delete flow keys off that
+// instead of id, so several never-saved placeholder rows in the same
+// table stay independently editable.
+//
+// Placeholders are merged in one at a time by name, not all-or-nothing —
+// saving one (e.g. filling in "Layover Inspection"'s frequency) must not
+// make the other six vanish from view on the next reload; only a default
+// whose name doesn't already exist among the real saved rows still gets
+// synthesized.
+function listPlannedTasks(stationId) {
+  return repo.listPlannedTasks(stationId).then(tasks => {
+    const existingNames = new Set(tasks.map(t => t.name));
+    const placeholders = PLANNED_TASK_DEFAULTS
+      .filter(name => !existingNames.has(name))
+      .map((name, i) => ({
+        id: null, clientKey: `default-${name}`, stationId, name, frequency: 0, frequencyUnit: "per_month",
+        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "N", nightApplicable: false, remarks: null,
+        sortOrder: tasks.length + i,
+      }));
+    return [...tasks, ...placeholders];
+  });
 }
 
 async function upsertPlannedTask(input, actor, req) {
@@ -128,21 +129,20 @@ async function deletePlannedTask(id, actor, req) {
   return { id };
 }
 
-// Same known issue as listPlannedTasks above (silently persists a starter
-// template on first read) and the same reason it's flagged rather than
-// changed here.
-async function listUnplannedTasks(stationId) {
-  let tasks = await repo.listUnplannedTasks(stationId);
-  if (tasks.length === 0) {
-    for (let i = 0; i < UNPLANNED_TASK_DEFAULTS.length; i++) {
-      await repo.upsertUnplannedTask({
-        stationId, name: UNPLANNED_TASK_DEFAULTS[i], avgFreqPerMonth: 0,
-        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any", sortOrder: i,
-      });
-    }
-    tasks = await repo.listUnplannedTasks(stationId);
-  }
-  return tasks;
+// Same "synthesized, never silently persisted, merged in one at a time"
+// rule as listPlannedTasks above, and for the same reasons.
+function listUnplannedTasks(stationId) {
+  return repo.listUnplannedTasks(stationId).then(tasks => {
+    const existingNames = new Set(tasks.map(t => t.name));
+    const placeholders = UNPLANNED_TASK_DEFAULTS
+      .filter(name => !existingNames.has(name))
+      .map((name, i) => ({
+        id: null, clientKey: `default-${name}`, stationId, name, avgFreqPerMonth: 0,
+        avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any", nightApplicable: false, remarks: null,
+        sortOrder: tasks.length + i,
+      }));
+    return [...tasks, ...placeholders];
+  });
 }
 
 async function upsertUnplannedTask(input, actor, req) {

@@ -524,6 +524,14 @@ function FlightScheduleTab({ stationId }) {
 const CATEGORIES = ["B1", "B2", "CM"];
 const PREFERRED_SHIFT_OPTIONS = [{ value: "Any", label: "Any (split evenly)" }, { value: "M", label: "Morning" }, { value: "A", label: "Afternoon" }, { value: "N", label: "Night" }];
 
+// Planned/Unplanned Task Master rows use this instead of raw `id` for
+// React keys and edit/delete matching — a station with no saved rows yet
+// gets back synthesized placeholder defaults that all share id: null (see
+// workloadConfigService.listPlannedTasks/listUnplannedTasks), so matching
+// by id alone would make editing one placeholder edit all of them.
+// clientKey is unique per row precisely for the case id isn't.
+const rowKey = (t) => t.id || t.clientKey;
+
 function WorkloadConfigTab({ stationId }) {
   const [config, setConfig] = useState(null);
   const [mandatory, setMandatory] = useState(null);
@@ -596,9 +604,14 @@ function WorkloadConfigTab({ stationId }) {
     setBusy(true); setError("");
     try { await workloadConfigApi.upsertPlannedTask({ stationId, name: "New Task", frequency: 0, frequencyUnit: "per_month", avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any" }); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
-  async function removePlannedTask(id) {
+  // A never-saved default row (id: null — see workloadConfigService's
+  // listPlannedTasks) has nothing to delete on the server; just drop it
+  // from view. rowKey lets it be told apart from every other unsaved
+  // default row sharing the same null id.
+  async function removePlannedTask(t) {
+    if (!t.id) { setPlannedTasks(l => l.filter(x => rowKey(x) !== rowKey(t))); return; }
     setBusy(true); setError("");
-    try { await workloadConfigApi.deletePlannedTask(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+    try { await workloadConfigApi.deletePlannedTask(t.id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
   async function saveUnplannedTask(t) {
@@ -617,9 +630,11 @@ function WorkloadConfigTab({ stationId }) {
     setBusy(true); setError("");
     try { await workloadConfigApi.upsertUnplannedTask({ stationId, name: "New Task", avgFreqPerMonth: 0, avgDurationMin: 0, reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, preferredShift: "Any" }); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
-  async function removeUnplannedTask(id) {
+  // Same "nothing to delete server-side yet" case as removePlannedTask.
+  async function removeUnplannedTask(t) {
+    if (!t.id) { setUnplannedTasks(l => l.filter(x => rowKey(x) !== rowKey(t))); return; }
     setBusy(true); setError("");
-    try { await workloadConfigApi.deleteUnplannedTask(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+    try { await workloadConfigApi.deleteUnplannedTask(t.id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
   const [demandForm, setDemandForm] = useState({ date: "", timeStart: "", timeEnd: "", reqB1: 0, reqB2: 0, reqCM: 0, reqNCS: 0, remarks: "" });
@@ -754,20 +769,20 @@ function WorkloadConfigTab({ stationId }) {
             <span>Task</span><span>Freq</span><span>Unit</span><span>Duration (min)</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span>Preferred Shift</span><span></span>
           </div>
           {plannedTasks.map(t => (
-              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 90px 70px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
-                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
-                <input className="fi" type="number" min="0" title="Frequency" value={t.frequency} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, frequency: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
-                <select className="fi" value={t.frequencyUnit} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, frequencyUnit: e.target.value } : x))); savePlannedTask({ ...t, frequencyUnit: e.target.value }); }} disabled={busy}>
+              <div key={rowKey(t)} style={{ display: "grid", gridTemplateColumns: "1.4fr 70px 90px 70px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
+                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, name: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Frequency" value={t.frequency} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, frequency: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
+                <select className="fi" value={t.frequencyUnit} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, frequencyUnit: e.target.value } : x))); savePlannedTask({ ...t, frequencyUnit: e.target.value }); }} disabled={busy}>
                   <option value="per_month">/month</option><option value="per_week">/week</option><option value="per_operating_day">/op-day</option>
                 </select>
-                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
                 {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
-                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, [f]: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, [f]: e.target.value } : x)))} onBlur={() => savePlannedTask(plannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
                 ))}
-                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (x.id === t.id ? { ...x, preferredShift: e.target.value } : x))); savePlannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
+                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setPlannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, preferredShift: e.target.value } : x))); savePlannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
                   {PREFERRED_SHIFT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <button className="wl-del" onClick={() => removePlannedTask(t.id)} disabled={busy}>✕</button>
+                <button className="wl-del" onClick={() => removePlannedTask(t)} disabled={busy}>✕</button>
               </div>
             ))}
           </div>
@@ -781,17 +796,17 @@ function WorkloadConfigTab({ stationId }) {
               <span>Task</span><span>Freq/Month</span><span>Duration (min)</span><span>B1</span><span>B2</span><span>CM</span><span>NCS</span><span>Preferred Shift</span><span></span>
             </div>
             {unplannedTasks.map(t => (
-              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.4fr 90px 90px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
-                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, name: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
-                <input className="fi" type="number" min="0" title="Avg freq/month" value={t.avgFreqPerMonth} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgFreqPerMonth: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
-                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+              <div key={rowKey(t)} style={{ display: "grid", gridTemplateColumns: "1.4fr 90px 90px 40px 40px 40px 40px 90px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
+                <input className="fi" value={t.name} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, name: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Avg freq/month" value={t.avgFreqPerMonth} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, avgFreqPerMonth: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
+                <input className="fi" type="number" min="0" title="Avg duration (min)" value={t.avgDurationMin} style={{ fontSize: 9 }} onChange={e => setUnplannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, avgDurationMin: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
                 {["reqB1", "reqB2", "reqCM", "reqNCS"].map(f => (
-                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, [f]: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => x.id === t.id))} disabled={busy} />
+                  <input key={f} className="fi" type="number" min="0" title={f} value={t[f]} style={{ fontSize: 9, textAlign: "center" }} onChange={e => setUnplannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, [f]: e.target.value } : x)))} onBlur={() => saveUnplannedTask(unplannedTasks.find(x => rowKey(x) === rowKey(t)))} disabled={busy} />
                 ))}
-                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setUnplannedTasks(l => l.map(x => (x.id === t.id ? { ...x, preferredShift: e.target.value } : x))); saveUnplannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
+                <select className="fi" value={t.preferredShift || "Any"} style={{ fontSize: 9 }} onChange={e => { setUnplannedTasks(l => l.map(x => (rowKey(x) === rowKey(t) ? { ...x, preferredShift: e.target.value } : x))); saveUnplannedTask({ ...t, preferredShift: e.target.value }); }} disabled={busy}>
                   {PREFERRED_SHIFT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
-                <button className="wl-del" onClick={() => removeUnplannedTask(t.id)} disabled={busy}>✕</button>
+                <button className="wl-del" onClick={() => removeUnplannedTask(t)} disabled={busy}>✕</button>
               </div>
             ))}
           </div>
