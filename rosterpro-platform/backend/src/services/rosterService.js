@@ -138,6 +138,31 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
   return { assignment: updated, changed, shiftCode: shiftDef.code, previousShiftDefId: before?.shiftDefId || null };
 }
 
+// Clears one cell back to "nothing assigned" — distinct from upsertShift
+// with code "O", which is an explicit Off-day assignment. Same publish
+// guard and notify-on-change behavior as a normal edit.
+async function deleteShift({ stationId, monthKey, userId, shiftDate, reason }, actor, req) {
+  const roster = await getOrCreateRoster(stationId, monthKey, actor);
+  if (roster.isPublished) {
+    throw ApiError.forbidden("Roster is published — republish is required after further edits, or contact an admin to unpublish");
+  }
+
+  const dateObj = new Date(shiftDate + "T00:00:00.000Z");
+  const before = await rosterRepo.findAssignment(roster.id, userId, dateObj);
+  if (!before || before.deletedAt) return { deleted: false };
+
+  await rosterRepo.deleteAssignment(roster.id, userId, dateObj, actor.sub);
+  await auditTrail.recordUpdate(
+    "ShiftAssignment", before.id, stationId,
+    { shiftDefId: before.shiftDefId },
+    { shiftDefId: null },
+    actor, req, reason || "Shift cleared"
+  );
+  notifyShiftChangeAsync(userId, before.shiftDefId, "—", shiftDate, stationId, actor, req);
+
+  return { deleted: true };
+}
+
 async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req) {
   const roster = await getOrCreateRoster(stationId, monthKey, actor);
   if (roster.isPublished) {
@@ -174,4 +199,4 @@ function listRostersForStation(stationId) {
   return rosterRepo.listRostersForStation(stationId);
 }
 
-module.exports = { getRosterGrid, publishRoster, unpublishRoster, upsertShift, bulkUpsertShifts, listShiftDefinitions, listRostersForStation };
+module.exports = { getRosterGrid, publishRoster, unpublishRoster, upsertShift, deleteShift, bulkUpsertShifts, listShiftDefinitions, listRostersForStation };

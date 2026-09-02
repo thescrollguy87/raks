@@ -416,7 +416,7 @@ model ShiftPattern {
 model StaffShiftAllocation {
   id             String   @id @default(uuid())
   userId         String   @unique
-  user           User     @relation(fields: [userId], references: [id])
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   patternId      String?
   pattern        ShiftPattern? @relation(fields: [patternId], references: [id])
   cycleStartDay  Int      @default(0) // offset into the pattern's cycle staff member starts on
@@ -546,11 +546,11 @@ model DepartureManpowerAssignment {
   flightRef String   // denormalized display label, stable even if the source import is later replaced
 
   releaserUserId   String?
-  releaser         User?   @relation("DepartureReleaser", fields: [releaserUserId], references: [id])
+  releaser         User?   @relation("DepartureReleaser", fields: [releaserUserId], references: [id], onDelete: SetNull)
   releaserCategory String? // "B1" | "CM"
 
   supportUserId String?
-  support       User?   @relation("DepartureSupport", fields: [supportUserId], references: [id])
+  support       User?   @relation("DepartureSupport", fields: [supportUserId], references: [id], onDelete: SetNull)
 
   createdById String?
   updatedById String?
@@ -685,7 +685,7 @@ model WorkloadRuleStaffGroupMember {
   staffGroupId String
   staffGroup   StaffGroup @relation(fields: [staffGroupId], references: [id], onDelete: Cascade)
   userId       String
-  user         User       @relation(fields: [userId], references: [id])
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([staffGroupId, userId])
   @@map("staff_group_members")
@@ -1002,8 +1002,8 @@ model AuditFinding {
   id           String   @id @default(uuid())
   stationId    String
   station      Station  @relation(fields: [stationId], references: [id])
-  raisedById   String
-  raisedBy     User     @relation("FindingRaisedBy", fields: [raisedById], references: [id])
+  raisedById   String?
+  raisedBy     User?    @relation("FindingRaisedBy", fields: [raisedById], references: [id], onDelete: SetNull)
   auditRef     String?
   category     String   // e.g. "Documentation", "Tooling", "Human Factors"
   severity     String   // minor | major | critical
@@ -1028,8 +1028,8 @@ model Capa {
   id            String   @id @default(uuid())
   findingId     String
   finding       AuditFinding @relation(fields: [findingId], references: [id])
-  ownerId       String
-  owner         User     @relation("CapaOwner", fields: [ownerId], references: [id])
+  ownerId       String?
+  owner         User?    @relation("CapaOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   correctiveAction String
   rootCause     String?
   preventiveAction String?

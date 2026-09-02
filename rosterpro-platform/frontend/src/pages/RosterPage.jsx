@@ -4,8 +4,10 @@ import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import * as rosterApi from "../api/roster.js";
+import * as ruleBuilderApi from "../api/ruleBuilder.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
+import GroupsManagerModal from "../components/roster/GroupsManagerModal.jsx";
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
@@ -66,6 +68,19 @@ export default function RosterPage() {
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef(null);
 
+  // Optional Staff Groups filter — shares the same StaffGroup data as
+  // Auto-Roster Generator's Rule Builder tab (see GroupsManagerModal).
+  const [groups, setGroups] = useState([]);
+  const [groupFilter, setGroupFilter] = useState("ALL");
+  const [showGroupsManager, setShowGroupsManager] = useState(false);
+
+  // "Rearrange staff" — swap which staff member has which shift between
+  // two grid cells. swapSource holds the first cell picked; picking a
+  // second cell performs the swap and clears both.
+  const [swapMode, setSwapMode] = useState(false);
+  const [swapSource, setSwapSource] = useState(null);
+  const [swapping, setSwapping] = useState(false);
+
   const canEdit = hasPermission("shift", "update");
   const canPublish = hasPermission("roster", "publish");
   const canUnpublish = hasPermission("roster", "unpublish");
@@ -92,6 +107,11 @@ export default function RosterPage() {
   }, [monthKey, stationId]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!stationId) return;
+    ruleBuilderApi.listStaffGroups(stationId).then(setGroups).catch(() => {});
+  }, [stationId]);
 
   async function handleGenerate() {
     if (!confirm(`Generate the ${monthKey} roster? This assigns shifts for every active staff member — existing manual edits for this month will be overwritten.`)) return;
@@ -189,16 +209,23 @@ export default function RosterPage() {
     }
   }
 
-  function openCell(s, day) {
-    if (!canEdit) return;
+  function resolveCell(s, day) {
     const dateObj = dateAt(monthKey, day);
     const dateStr = dateObj.toISOString().slice(0, 10);
     const assignment = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
-    setEditingCell({
+    return {
       userId: s.id, staffName: s.fullName.split("(")[0].trim(),
       dateStr, dateLabel: `${dateStr} (Day ${day})`,
+      hasAssignment: !!assignment,
       currentCode: assignment?.shiftDef.code || "O",
-    });
+    };
+  }
+
+  function openCell(s, day) {
+    if (!canEdit) return;
+    const cell = resolveCell(s, day);
+    if (swapMode) { pickSwapCell(cell); return; }
+    setEditingCell(cell);
   }
 
   async function saveCell({ shiftCode, reason }) {
@@ -208,7 +235,41 @@ export default function RosterPage() {
     await load();
   }
 
-  const visibleStaff = catFilter === "ALL" ? staff : staff.filter(s => (s.category || "NCS") === catFilter);
+  async function deleteCell({ reason }) {
+    await rosterApi.deleteShift(stationId, monthKey, {
+      userId: editingCell.userId, shiftDate: editingCell.dateStr, reason,
+    });
+    await load();
+  }
+
+  // Applies one side of a swap: writes the given code, or clears the cell
+  // entirely if the other side had nothing assigned.
+  async function applyCellState(userId, shiftDate, code) {
+    if (code) await rosterApi.upsertShift(stationId, monthKey, { userId, shiftDate, shiftCode: code });
+    else await rosterApi.deleteShift(stationId, monthKey, { userId, shiftDate });
+  }
+
+  function pickSwapCell(cell) {
+    if (!swapSource) { setSwapSource(cell); return; }
+    if (swapSource.userId === cell.userId && swapSource.dateStr === cell.dateStr) { setSwapSource(null); return; }
+    const sourceCode = swapSource.hasAssignment ? swapSource.currentCode : null;
+    const destCode = cell.hasAssignment ? cell.currentCode : null;
+    if (!confirm(
+      `Swap shifts?\n\n${swapSource.staffName} (${swapSource.dateLabel}): ${swapSource.hasAssignment ? swapSource.currentCode : "— none —"} → ${destCode || "— none —"}\n${cell.staffName} (${cell.dateLabel}): ${cell.hasAssignment ? cell.currentCode : "— none —"} → ${sourceCode || "— none —"}`
+    )) { setSwapSource(null); return; }
+    setSwapping(true);
+    Promise.all([
+      applyCellState(cell.userId, cell.dateStr, sourceCode),
+      applyCellState(swapSource.userId, swapSource.dateStr, destCode),
+    ])
+      .then(load)
+      .catch(err => alert(`Swap failed: ${err.message}`))
+      .finally(() => { setSwapping(false); setSwapSource(null); });
+  }
+
+  const visibleStaff = staff
+    .filter(s => catFilter === "ALL" || (s.category || "NCS") === catFilter)
+    .filter(s => groupFilter === "ALL" || groups.find(g => g.id === groupFilter)?.members.some(m => m.userId === s.id));
   const byCategory = CATEGORIES.map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
     .filter(g => g.staff.length > 0);
 
@@ -241,7 +302,28 @@ export default function RosterPage() {
           <option value="ALL">All Categories</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
         </select>
+        <select className="fi" style={{ width: 160, fontSize: 10 }} value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)}>
+          <option value="ALL">All Groups</option>
+          {groups.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+        </select>
+        <button className="btn btn-ghost btn-sm" onClick={() => setShowGroupsManager(true)}>👥 Manage Groups</button>
+        {canEdit && roster && !roster.isPublished && (
+          <button
+            className="btn btn-sm" onClick={() => { setSwapMode(m => !m); setSwapSource(null); }}
+            style={swapMode ? { background: "var(--sky)", color: "var(--navy)" } : {}}
+          >
+            🔀 {swapMode ? "Cancel Rearrange" : "Rearrange Staff"}
+          </button>
+        )}
       </div>
+
+      {swapMode && (
+        <div className="ab info" style={{ marginBottom: 9 }}>
+          {swapping ? "Swapping…" : swapSource
+            ? `Selected ${swapSource.staffName} — ${swapSource.dateLabel} (${swapSource.hasAssignment ? swapSource.currentCode : "none"}). Click another shift to swap with it, or click it again to cancel.`
+            : "Click a shift to pick it, then click another to swap the two staff members' shifts."}
+        </div>
+      )}
 
       <div className="roster-wrap">
         <table className="rt">
@@ -260,7 +342,7 @@ export default function RosterPage() {
             {byCategory.map(group => (
               <RosterCategoryGroup
                 key={group.cat} group={group} nDays={nDays} monthKey={monthKey}
-                shiftDefByCode={shiftDefByCode} onCellClick={openCell}
+                shiftDefByCode={shiftDefByCode} onCellClick={openCell} swapSource={swapSource}
               />
             ))}
             <CoverageRows staff={visibleStaff} nDays={nDays} monthKey={monthKey} />
@@ -269,7 +351,13 @@ export default function RosterPage() {
       </div>
 
       {editingCell && (
-        <ShiftEditModal cell={editingCell} shiftDefs={shiftDefs} onSave={saveCell} onClose={() => setEditingCell(null)} />
+        <ShiftEditModal cell={editingCell} shiftDefs={shiftDefs} onSave={saveCell} onDelete={deleteCell} onClose={() => setEditingCell(null)} />
+      )}
+      {showGroupsManager && (
+        <GroupsManagerModal
+          stationId={stationId} staff={staff} onClose={() => setShowGroupsManager(false)}
+          onChanged={() => ruleBuilderApi.listStaffGroups(stationId).then(setGroups).catch(() => {})}
+        />
       )}
     </div>
   );
@@ -277,7 +365,7 @@ export default function RosterPage() {
 
 const navBtnStyle = { width: 24, height: 24, borderRadius: 5, background: "var(--glass)", border: "1px solid var(--border)", color: "var(--white)" };
 
-function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellClick }) {
+function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellClick, swapSource }) {
   return (
     <>
       <tr>
@@ -311,12 +399,17 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
             {codesByDay.map((code, i) => {
               const day = i + 1;
               const def = shiftDefByCode[code];
+              const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
+              const isSwapSource = swapSource && swapSource.userId === s.id && swapSource.dateStr === dateStr;
               return (
                 <td key={i}>
                   <div
                     className="sp" onClick={() => onCellClick(s, day)}
                     title={def ? `${def.name}${def.startTime ? `: ${def.startTime}–${def.endTime}` : ""}` : code}
-                    style={{ background: def?.bg || "rgba(180,180,180,.1)", color: def?.color || "#AABBCC" }}
+                    style={{
+                      background: def?.bg || "rgba(180,180,180,.1)", color: def?.color || "#AABBCC",
+                      ...(isSwapSource ? { outline: "2px solid var(--sky)", outlineOffset: -2 } : {}),
+                    }}
                   >
                     <span className="sc-code">{code}</span>
                     {def?.startTime && <span className="sc-time">{def.startTime}–{def.endTime}</span>}

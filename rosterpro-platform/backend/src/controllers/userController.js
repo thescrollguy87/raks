@@ -56,7 +56,8 @@ const assignRoles = asyncHandler(async (req, res) => {
 });
 
 const remove = asyncHandler(async (req, res) => {
-  const result = await userService.deleteStaff(req.params.id, req.user, req);
+  const confirm = req.query.confirm === "true" || req.query.confirm === "1";
+  const result = await userService.deleteStaff(req.params.id, confirm, req.user, req);
   res.json(result);
 });
 

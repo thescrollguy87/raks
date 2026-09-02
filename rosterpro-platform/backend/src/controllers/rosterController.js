@@ -24,6 +24,12 @@ const upsertShift = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+const deleteShift = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const result = await rosterService.deleteShift({ stationId, monthKey, ...req.body }, req.user, req);
+  res.json(result);
+});
+
 const bulkUpsertShifts = asyncHandler(async (req, res) => {
   const { stationId, monthKey } = req.query;
   const result = await rosterService.bulkUpsertShifts({ stationId, monthKey, ...req.body }, req.user, req);
@@ -135,7 +141,7 @@ const manpowerPlan = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
+  getGrid, upsertShift, deleteShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
   shiftDefinitionsTemplate, shiftDefinitionsExport, importShiftDefinitions,
   upsertShiftDefinition, deactivateShiftDefinition,
   listPatterns, upsertPattern, deletePattern,

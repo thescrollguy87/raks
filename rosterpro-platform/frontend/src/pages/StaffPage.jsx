@@ -119,12 +119,28 @@ export default function StaffPage() {
     }
   }
 
+  // Two-step: first attempt (no confirm) either deletes outright (nothing
+  // else references this person) or the backend bounces it with a 409
+  // naming exactly what else will be affected — that message becomes the
+  // warning in a second confirm dialog, and only accepting THAT resubmits
+  // with confirm=true to actually perform the permanent delete.
   async function handleDelete(s) {
     if (!confirm(`PERMANENTLY delete ${s.fullName}?\n\nThis cannot be undone — their qualification, license, training, leave, and shift history will be removed. If you just want to stop scheduling them but keep their history, use "Deactivate" instead.`)) return;
     try {
       await staffApi.deleteStaff(s.id);
       load();
     } catch (err) {
+      if (err.status === 409) {
+        if (confirm(`${err.message}\n\nDelete anyway?`)) {
+          try {
+            await staffApi.deleteStaff(s.id, true);
+            load();
+          } catch (err2) {
+            alert(`Failed: ${err2.message}`);
+          }
+        }
+        return;
+      }
       alert(`Failed: ${err.message}`);
     }
   }
