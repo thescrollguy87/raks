@@ -11,6 +11,7 @@ import QualificationsPage from "./pages/QualificationsPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
 import ChangeHistoryPage from "./pages/ChangeHistoryPage.jsx";
 import FlightsPage from "./pages/FlightsPage.jsx";
+import FlightSchedulePage from "./pages/FlightSchedulePage.jsx";
 import CoveragePage from "./pages/CoveragePage.jsx";
 import PastRostersPage from "./pages/PastRostersPage.jsx";
 import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
@@ -49,6 +50,10 @@ export default function App() {
         <Route
           path="/flights"
           element={<ProtectedRoute permission={["flight", "read"]}><FlightsPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/flight-schedule"
+          element={<ProtectedRoute permission={["roster", "update"]}><FlightSchedulePage /></ProtectedRoute>}
         />
         <Route
           path="/coverage"

@@ -5,10 +5,10 @@ import * as rosterApi from "../api/roster.js";
 import * as planningApi from "../api/rosterPlanning.js";
 import * as staffApi from "../api/staff.js";
 import * as leaveApi from "../api/leave.js";
-import * as flightScheduleApi from "../api/flightSchedule.js";
 import * as workloadConfigApi from "../api/workloadConfig.js";
 import * as ruleBuilderApi from "../api/ruleBuilder.js";
 import * as dailyOpsApi from "../api/dailyOps.js";
+import FlightScheduleManager from "../components/flights/FlightScheduleManager.jsx";
 
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
@@ -511,114 +511,13 @@ function HowToUseTab({ children }) {
   );
 }
 
-const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const MONTH_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
-
 // ═══ TAB: FLIGHT SCHEDULE ═════════════════════════════════════════════════════
 function FlightScheduleTab({ stationId }) {
-  const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
-  const [schedule, setSchedule] = useState(null);
-  const [file, setFile] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [importResult, setImportResult] = useState(null);
-  const [expandedDay, setExpandedDay] = useState(null);
-
-  const [year, month] = monthKey.split("-").map(Number);
-  const monthLabel = `${MONTH_LONG[month - 1]} ${year}`;
-
-  const load = useCallback(() => {
-    if (!stationId) return;
-    flightScheduleApi.getFlightSchedule(stationId, year, month).then(setSchedule).catch(err => setError(err.message));
-  }, [stationId, year, month]);
-  useEffect(load, [load]);
-  useEffect(() => setExpandedDay(null), [monthKey]);
-
-  async function doImport() {
-    if (!file) { setError("Choose a Turn Report / Charter Excel file (.xlsx) first"); return; }
-    setBusy(true);
-    setError("");
-    setImportResult(null);
-    try {
-      const result = await flightScheduleApi.importFlightSchedule(stationId, year, month, file);
-      setImportResult(result);
-      setFile(null);
-      load();
-    } catch (err) { setError(err.message); } finally { setBusy(false); }
-  }
-
-  return (
-    <div>
-      <HowToUseTab>
-        Import your Turn Report Excel exactly as exported — no reformatting needed. The importer reads the "Inbound/Outbound" turn sheet and, if present, a "Charter Flights" sheet and expands each row's Effective Date / Discontinue Date / Days of Week into the actual calendar dates it operates within your selected target month.
-      </HowToUseTab>
-
-      <div className="card">
-        <div className="card-title">✈ Flight Schedule Import (Turn Report)</div>
-        <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-          Upload the monthly Turn Report Excel export (Inbound/Outbound sheet, plus an optional Charter Flights sheet). Re-importing the same month replaces its previous data.
-        </div>
-        {error && <div className="ab red">{error}</div>}
-        <div className="fg2" style={{ marginBottom: 10 }}>
-          <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setImportResult(null); }} /></div>
-        </div>
-        <button className="btn btn-primary btn-sm" onClick={doImport} disabled={busy}>{busy ? "Importing…" : "⬆ Import Turn Report"}</button>
-        <input className="fi" type="file" accept=".xlsx" style={{ marginTop: 8 }} onChange={e => setFile(e.target.files?.[0] || null)} />
-        {importResult && <div className="ab green" style={{ marginTop: 10 }}>✅ Imported: {importResult.turnRowCount} turn-report row(s), {importResult.charterRowCount} charter row(s)</div>}
-      </div>
-
-      {schedule?.imported && (
-        <div className="card">
-          <div className="card-title">📊 Flight Workload — Derived From Import</div>
-          <div className="manpower-grid">
-            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Operating Days</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.operatingDays}<span style={{ fontSize: 12, color: "var(--text-dim)" }}> / {schedule.summary.daysInMonth}</span></div></div>
-            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Total Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.totalMovements}</div></div>
-            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Avg Daily Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.avgDailyMovements}</div></div>
-            <div className="mp-card"><div className="mp-shift" style={{ fontSize: 10, color: "var(--text-dim)" }}>Peak Daily Movements</div><div className="mp-total" style={{ fontSize: 20, fontWeight: 800 }}>{schedule.summary.peakDailyMovements}</div><div className="mp-breakdown" style={{ fontSize: 9, color: "var(--text-dim)" }}>{schedule.summary.peakDate || ""}</div></div>
-          </div>
-          <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 8 }}>
-            Source: {schedule.summary.turnRowCount} turn-report row(s), {schedule.summary.charterRowCount} charter row(s) — expanded against Effective/Discontinue dates and Days of the Week for the selected month. "Movements" = one takeoff or landing (a turn-report row contributes up to 2 per operating day: inbound arrival + outbound departure).
-          </div>
-        </div>
-      )}
-
-      <div className="card">
-        <div className="card-title">🛫 Full Daily Flight Schedule — {monthLabel}</div>
-        {!schedule ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Loading…</div> : !schedule.imported ? (
-          <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No flight schedule imported for this month yet.</div>
-        ) : (
-          <>
-            <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>Click any day to expand its full flight list. Every day of the month is listed, including days with zero flights.</div>
-            <div className="wl-scroll" style={{ maxHeight: 560 }}>
-              {Array.from({ length: schedule.daysInMonth }, (_, i) => i + 1).map(d => {
-                const weekday = WEEKDAY_SHORT[new Date(year, month - 1, d).getDay()];
-                const flights = schedule.byDay[d] || [];
-                const isOpen = expandedDay === d;
-                return (
-                  <div key={d} style={{ borderBottom: "1px solid var(--border)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 4px", cursor: "pointer" }} onClick={() => setExpandedDay(isOpen ? null : d)}>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: "var(--cyan)" }}>{isOpen ? "▼" : "▶"} Day {d} ({weekday})</span>
-                      <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{flights.length} flight(s)</span>
-                    </div>
-                    {isOpen && (
-                      <div style={{ paddingLeft: 16, paddingBottom: 6 }}>
-                        {flights.length === 0 ? <div style={{ fontSize: 9, color: "var(--text-dim)" }}>No flights this day.</div> : flights.map((f, i) => (
-                          <div key={i} style={{ fontSize: 9, color: "var(--text-dim)", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
-                            <span>{f.type === "Turn" ? "🔄" : "🛩"} {f.flightRef} <span style={{ color: "var(--text-dim)" }}>{f.route}</span></span>
-                            <span>{f.arr !== "-" ? `Arr ${f.arr}` : ""} {f.dep !== "-" ? `Dep ${f.dep}` : ""} {f.ground !== "-" ? `GT ${f.ground}` : ""}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
+  // Same shared import + daily-schedule component the standalone Flight
+  // Schedule page (left sidebar) uses — one implementation, not two copies
+  // that can drift apart. The day-wise Manpower Allocation panel lives only
+  // on the standalone page (this tab stays focused on import + schedule).
+  return <FlightScheduleManager stationId={stationId} />;
 }
 
 // ═══ TAB: WORKLOAD CONFIG ═════════════════════════════════════════════════════

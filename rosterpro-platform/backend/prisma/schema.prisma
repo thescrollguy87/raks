@@ -151,6 +151,7 @@ model Station {
   staffGroups     StaffGroup[]
   workloadRules   WorkloadRule[]
   dailyOperationalAdjustments DailyOperationalAdjustment[]
+  departureManpowerAssignments DepartureManpowerAssignment[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -215,6 +216,8 @@ model User {
   activityLogs      ActivityLog[]
   shiftAllocation   StaffShiftAllocation?
   staffGroupMemberships WorkloadRuleStaffGroupMember[]
+  departureReleaserAssignments DepartureManpowerAssignment[] @relation("DepartureReleaser")
+  departureSupportAssignments  DepartureManpowerAssignment[] @relation("DepartureSupport")
 
   @@index([airlineId])
   @@index([stationId])
@@ -521,6 +524,41 @@ model CharterRecord {
   serviceType     String?
 
   @@map("charter_records")
+}
+
+// One departure's actual per-flight manpower — separate from the monthly
+// shift roster (which assigns staff to M/A/N duty codes, not to specific
+// flights). eventType+eventId points at the originating TurnRecord or
+// CharterRecord row (not a hard FK — a re-import replaces those rows
+// wholesale, and losing an assignment's history to that would be worse
+// than a dangling reference), with date making it specific to one real
+// calendar occurrence of a row that otherwise repeats across the month.
+// releaserCategory is "B1" or "CM" — either one legitimately gives a
+// departure (see workloadEngine.js's clash-driven demand: a clash needs
+// NCS >= clash count and (B1+CM combined) >= clash count, never B1 only).
+model DepartureManpowerAssignment {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  date      DateTime @db.Date
+  eventType String   // "turn" | "charter"
+  eventId   String   // TurnRecord.id or CharterRecord.id
+  flightRef String   // denormalized display label, stable even if the source import is later replaced
+
+  releaserUserId   String?
+  releaser         User?   @relation("DepartureReleaser", fields: [releaserUserId], references: [id])
+  releaserCategory String? // "B1" | "CM"
+
+  supportUserId String?
+  support       User?   @relation("DepartureSupport", fields: [supportUserId], references: [id])
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([stationId, date, eventType, eventId])
+  @@map("departure_manpower_assignments")
 }
 
 // ─── Workload Config (standard durations, ratios, mandatory coverage) ───────

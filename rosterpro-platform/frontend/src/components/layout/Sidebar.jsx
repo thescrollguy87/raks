@@ -17,6 +17,7 @@ const NAV_SECTIONS = [
   ]},
   { label: "Operations", items: [
     { to: "/flights", icon: "✈️", label: "Flights", permission: ["flight", "read"] },
+    { to: "/flight-schedule", icon: "🛫", label: "Flight Schedule", permission: ["roster", "update"] },
   ]},
   { label: "Records", items: [
     { to: "/staff", icon: "🧑‍🔧", label: "Staff Registry", permission: ["staff", "read"] },

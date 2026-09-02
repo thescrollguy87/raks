@@ -14,6 +14,7 @@ const flightScheduleRoutes = require("./flightScheduleRoutes");
 const workloadConfigRoutes = require("./workloadConfigRoutes");
 const ruleBuilderRoutes = require("./ruleBuilderRoutes");
 const dailyOpsRoutes = require("./dailyOpsRoutes");
+const departureAllocationRoutes = require("./departureAllocationRoutes");
 
 const router = express.Router();
 
@@ -33,5 +34,6 @@ router.use("/flight-schedule", flightScheduleRoutes); // Auto-Roster Generator: 
 router.use("/workload-config", workloadConfigRoutes); // Auto-Roster Generator: Workload Config tab
 router.use("/rule-builder", ruleBuilderRoutes); // Auto-Roster Generator: Rule Builder tab (staff groups + rules)
 router.use("/daily-ops", dailyOpsRoutes); // Auto-Roster Generator: Daily Operational Adjustment tab
+router.use("/departure-allocation", departureAllocationRoutes); // Flight Schedule page: day-wise per-departure manpower (releaser + support)
 
 module.exports = router;
