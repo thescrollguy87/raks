@@ -126,7 +126,16 @@ async function resolveDeparturePools(stationId, departures, dayDate) {
 // database, plus each departure's real roster-eligible pool (so the
 // frontend's manual-override dropdowns only ever offer staff genuinely on
 // duty at that moment — the same constraint auto-allocate itself uses).
-async function getDayAllocation(stationId, year, month, day, actor) {
+//
+// reasonOverrides (optional): { [key]: { releaserUnfilledReason,
+// supportUnfilledReason } } — the EXACT reasons autoAllocateDay's engine
+// run just computed, for departures reported by this same call. Without
+// an override, an unfilled slot's reason is inferred from pool size alone
+// (empty pool -> "no_one_rostered", non-empty pool -> "all_busy_with_clash"
+// as the best available explanation) — a reasonable approximation for a
+// plain page load where no allocation was just attempted, but not as
+// precise as the real clash computation.
+async function getDayAllocation(stationId, year, month, day, actor, reasonOverrides = {}) {
   assertOwnStation(actor, stationId);
   const date = new Date(Date.UTC(year, month - 1, day));
   const [departures, existingRows] = await Promise.all([
@@ -140,14 +149,20 @@ async function getDayAllocation(stationId, year, month, day, actor) {
 
   return resolved.map(dep => {
     const existing = existingByKey[dep.key];
+    const eligibleReleasers = [...dep.pools.B1, ...dep.pools.CM];
+    const override = reasonOverrides[dep.key];
+    const releaserUnfilledReason = existing?.releaser ? null
+      : (override ? override.releaserUnfilledReason : (eligibleReleasers.length === 0 ? "no_one_rostered" : "all_busy_with_clash"));
+    const supportUnfilledReason = existing?.support ? null
+      : (override ? override.supportUnfilledReason : (dep.pools.NCS.length === 0 ? "no_one_rostered" : "all_busy_with_clash"));
     return {
       key: dep.key, eventType: dep.eventType, eventId: dep.eventId, flightRef: dep.flightRef, route: dep.route,
       depTime: minutesToHHMM(dep.depMin),
       shiftCode: dep.shiftCode, rosterDate: dep.rosterDate ? dep.rosterDate.toISOString().slice(0, 10) : null,
       releaser: existing?.releaser ? { id: existing.releaser.id, fullName: existing.releaser.fullName, category: existing.releaserCategory } : null,
       support: existing?.support ? { id: existing.support.id, fullName: existing.support.fullName } : null,
-      eligibleReleasers: [...dep.pools.B1, ...dep.pools.CM],
-      eligibleSupport: dep.pools.NCS,
+      eligibleReleasers, eligibleSupport: dep.pools.NCS,
+      releaserUnfilledReason, supportUnfilledReason,
     };
   });
 }
@@ -196,7 +211,14 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
     stationId, actor, req,
   );
 
-  return getDayAllocation(stationId, year, month, day, actor);
+  // Carries the engine's own precise reasons through to the response this
+  // call returns, rather than getDayAllocation's own pool-size heuristic —
+  // exact for the run that just happened.
+  const reasonOverrides = {};
+  allocations.forEach(a => {
+    reasonOverrides[a.key] = { releaserUnfilledReason: a.releaserUnfilledReason, supportUnfilledReason: a.supportUnfilledReason };
+  });
+  return getDayAllocation(stationId, year, month, day, actor, reasonOverrides);
 }
 
 // Manual override for exactly one departure — set releaserUserId/

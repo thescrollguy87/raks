@@ -57,19 +57,25 @@ function makeBusyTracker() {
 // requested window — spreads assignments across the whole pool over the
 // day instead of always handing every free slot to the first name in the
 // list, while still skipping straight to the next eligible name when the
-// front of the pool is currently clash-busy.
+// front of the pool is currently clash-busy. On failure, returns a reason
+// distinguishing "nobody at all is rostered on this shift" from "everyone
+// in this shift's crew is already committed to another clashing departure"
+// — the same blank dropdown looks identical in the UI otherwise, leaving a
+// planner unable to tell a genuine staffing gap from "just add more people
+// to this shift's roster" without redoing the clash math by hand.
 function makeRotator(pool, busyTracker) {
   let cursor = 0;
   return function pickNext(start, end) {
+    if (pool.length === 0) return { id: null, reason: "no_one_rostered" };
     for (let k = 0; k < pool.length; k++) {
       const idx = (cursor + k) % pool.length;
       const id = pool[idx];
       if (!busyTracker.isBusy(id, start, end)) {
         cursor = idx + 1;
-        return id;
+        return { id, reason: null };
       }
     }
-    return null;
+    return { id: null, reason: "all_busy_with_clash" };
   };
 }
 
@@ -111,23 +117,30 @@ function allocateDepartureManpower(departures, clashProximityMinutes, existingAs
 
     let releaserUserId = existing?.releaserUserId || null;
     let releaserCategory = existing?.releaserCategory || (releaserUserId ? releaserCategoryById[releaserUserId] : null);
+    let releaserUnfilledReason = null;
     if (!releaserUserId) {
       releaserRotators[dep.poolKey] ??= makeRotator(releaserPool, busy);
-      releaserUserId = releaserRotators[dep.poolKey](start, end);
+      const picked = releaserRotators[dep.poolKey](start, end);
+      releaserUserId = picked.id;
       releaserCategory = releaserUserId ? releaserCategoryById[releaserUserId] : null;
+      releaserUnfilledReason = picked.reason;
     }
     if (releaserUserId) busy.markBusy(releaserUserId, start, end);
 
     let supportUserId = existing?.supportUserId || null;
+    let supportUnfilledReason = null;
     if (!supportUserId) {
       supportRotators[dep.poolKey] ??= makeRotator(supportPool, busy);
-      supportUserId = supportRotators[dep.poolKey](start, end);
+      const picked = supportRotators[dep.poolKey](start, end);
+      supportUserId = picked.id;
+      supportUnfilledReason = picked.reason;
     }
     if (supportUserId) busy.markBusy(supportUserId, start, end);
 
     return {
       key: dep.key, depMin: dep.depMin, releaserUserId, releaserCategory, supportUserId,
       unfilled: !releaserUserId || !supportUserId,
+      releaserUnfilledReason, supportUnfilledReason,
     };
   });
 }

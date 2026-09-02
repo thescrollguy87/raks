@@ -84,22 +84,30 @@ describe("allocateDepartureManpower — draws only from the caller-resolved rost
     expect(result[0].supportUserId).not.toBe(result[1].supportUserId);
   });
 
-  it("reports unfilled when the resolved crew's pool is exhausted for a clash", () => {
+  it("reports unfilled when the resolved crew's pool is exhausted for a clash, with reason all_busy_with_clash", () => {
+    // Reproduces the exact real-world case: two 04:50 departures consume
+    // both available B1/CM, and a 05:45 departure 55 minutes later still
+    // falls inside the clash window and finds nobody left.
     const departures = [
-      { key: "d1", depMin: 540, poolKey: "M:2026-09-03", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2"] },
-      { key: "d2", depMin: 550, poolKey: "M:2026-09-03", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2"] },
-      { key: "d3", depMin: 560, poolKey: "M:2026-09-03", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2"] }, // all mutually clashing, only 2 releasers total
+      { key: "d1", depMin: 290, poolKey: "N:2026-09-02", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2", "ncs-3"] },
+      { key: "d2", depMin: 290, poolKey: "N:2026-09-02", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2", "ncs-3"] },
+      { key: "d3", depMin: 345, poolKey: "N:2026-09-02", releaserB1: ["b1-1"], releaserCM: ["cm-1"], supportNCS: ["ncs-1", "ncs-2", "ncs-3"] },
     ];
     const result = allocateDepartureManpower(departures, 60);
     expect(result.filter(r => !r.unfilled)).toHaveLength(2);
-    expect(result.find(r => r.unfilled).releaserUserId).toBeNull();
+    const failed = result.find(r => r.unfilled);
+    expect(failed.releaserUserId).toBeNull();
+    expect(failed.releaserUnfilledReason).toBe("all_busy_with_clash");
+    expect(failed.supportUnfilledReason).toBeNull(); // 3 NCS were available — support WAS filled
   });
 
-  it("an empty roster-shift pool (nobody rostered on that shift) leaves the departure unfilled rather than borrowing from elsewhere", () => {
+  it("an empty roster-shift pool (nobody rostered on that shift) leaves the departure unfilled with reason no_one_rostered", () => {
     const departures = [{ key: "d1", depMin: 300, poolKey: "N:2026-09-02", releaserB1: [], releaserCM: [], supportNCS: [] }];
     const result = allocateDepartureManpower(departures, 60);
     expect(result[0].releaserUserId).toBeNull();
+    expect(result[0].releaserUnfilledReason).toBe("no_one_rostered");
     expect(result[0].supportUserId).toBeNull();
+    expect(result[0].supportUnfilledReason).toBe("no_one_rostered");
     expect(result[0].unfilled).toBe(true);
   });
 

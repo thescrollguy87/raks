@@ -5,6 +5,10 @@ import * as departureAllocationApi from "../api/departureAllocation.js";
 import FlightScheduleManager from "../components/flights/FlightScheduleManager.jsx";
 
 const SHIFT_LABEL = { M: "Morning", A: "Afternoon", N: "Night" };
+const UNFILLED_REASON_LABEL = {
+  no_one_rostered: "nobody on this shift's roster in that category",
+  all_busy_with_clash: "everyone eligible is already committed to another departure clashing within the configured window",
+};
 
 // One departure row: shows the current releaser (B1 or CM — either
 // qualifies to give a departure) + support (NCS), each editable via a
@@ -60,7 +64,12 @@ function DepartureRow({ dep, year, month, day, onChanged, busy, setBusy }) {
         <option value="">— Support (NCS) unassigned —</option>
         {supportOptions.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
-      {(!dep.releaser || !dep.support) && <span style={{ color: "var(--amber)" }}>⚠ incomplete</span>}
+      {!dep.releaser && (
+        <span style={{ color: "var(--amber)" }}>⚠ no releaser — {UNFILLED_REASON_LABEL[dep.releaserUnfilledReason] || "unfilled"}</span>
+      )}
+      {!dep.support && (
+        <span style={{ color: "var(--amber)" }}>⚠ no support — {UNFILLED_REASON_LABEL[dep.supportUnfilledReason] || "unfilled"}</span>
+      )}
     </div>
   );
 }
