@@ -1,9 +1,5 @@
 const { z } = require("zod");
 
-const staffQuerySchema = z.object({
-  stationId: z.string().uuid(),
-});
-
 const dayQuerySchema = z.object({
   stationId: z.string().uuid(),
   year: z.coerce.number().int().min(2000).max(2100),
@@ -24,4 +20,4 @@ const manualAssignSchema = z.object({
   supportUserId: z.string().uuid().nullable().optional(),
 });
 
-module.exports = { staffQuerySchema, dayQuerySchema, manualAssignSchema };
+module.exports = { dayQuerySchema, manualAssignSchema };

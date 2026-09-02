@@ -4,13 +4,23 @@ import { useStation } from "../store/StationContext.jsx";
 import * as departureAllocationApi from "../api/departureAllocation.js";
 import FlightScheduleManager from "../components/flights/FlightScheduleManager.jsx";
 
+const SHIFT_LABEL = { M: "Morning", A: "Afternoon", N: "Night" };
+
 // One departure row: shows the current releaser (B1 or CM — either
 // qualifies to give a departure) + support (NCS), each editable via a
 // dropdown that calls the manual-assign endpoint directly on change —
 // auto-allocate fills the day in one click, but every slot stays a plain
-// dropdown a planner can override by hand at any time.
-function DepartureRow({ dep, year, month, day, staffByCategory, onChanged, busy, setBusy }) {
-  const releaserOptions = [...staffByCategory.B1, ...staffByCategory.CM];
+// dropdown a planner can override by hand at any time. Options are
+// EXACTLY who the backend resolved as on the real shift roster covering
+// this departure's time (dep.eligibleReleasers/eligibleSupport) — never
+// the whole station's staff list — with the currently-assigned person
+// always kept visible even if a later roster change dropped them from
+// that pool, so the dropdown never silently blanks out a real pick.
+function DepartureRow({ dep, year, month, day, onChanged, busy, setBusy }) {
+  const releaserOptions = dep.releaser && !dep.eligibleReleasers.some(s => s.id === dep.releaser.id)
+    ? [...dep.eligibleReleasers, { ...dep.releaser }] : dep.eligibleReleasers;
+  const supportOptions = dep.support && !dep.eligibleSupport.some(s => s.id === dep.support.id)
+    ? [...dep.eligibleSupport, { ...dep.support }] : dep.eligibleSupport;
   const releaserValue = dep.releaser ? `${dep.releaser.category}:${dep.releaser.id}` : "";
 
   async function setReleaser(value) {
@@ -36,16 +46,19 @@ function DepartureRow({ dep, year, month, day, staffByCategory, onChanged, busy,
     } catch (err) { alert(`Failed: ${err.message}`); } finally { setBusy(false); }
   }
 
+  const shiftLabel = dep.shiftCode ? `${SHIFT_LABEL[dep.shiftCode] || dep.shiftCode} crew · ${dep.rosterDate}` : "no shift covers this time";
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", flexWrap: "wrap", fontSize: 9 }}>
       <span style={{ minWidth: 140, color: "var(--text-dim)" }}>{dep.eventType === "turn" ? "🔄" : "🛩"} {dep.flightRef} <span style={{ color: "var(--cyan)" }}>Dep {dep.depTime}</span></span>
+      <span style={{ color: "var(--text-dim)", fontStyle: "italic" }} title="Only staff on this shift's real roster are offered below">from {shiftLabel}</span>
       <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 130 }} value={releaserValue} disabled={busy} onChange={e => setReleaser(e.target.value)}>
         <option value="">— Releaser (B1/CM) unassigned —</option>
         {releaserOptions.map(s => <option key={s.id} value={`${s.category}:${s.id}`}>{s.category} · {s.fullName}</option>)}
       </select>
       <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 130 }} value={dep.support?.id || ""} disabled={busy} onChange={e => setSupport(e.target.value)}>
         <option value="">— Support (NCS) unassigned —</option>
-        {staffByCategory.NCS.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+        {supportOptions.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
       </select>
       {(!dep.releaser || !dep.support) && <span style={{ color: "var(--amber)" }}>⚠ incomplete</span>}
     </div>
@@ -53,9 +66,10 @@ function DepartureRow({ dep, year, month, day, staffByCategory, onChanged, busy,
 }
 
 // Rendered inline under an expanded day (via FlightScheduleManager's
-// renderDayExtra hook) — fetches that one day's allocation, offers
-// Auto-Allocate, and lets every slot be changed by hand.
-function DayManpowerAllocation({ stationId, year, month, day, staffByCategory }) {
+// renderDayExtra hook) — fetches that one day's allocation (each
+// departure already carrying its own roster-resolved eligible pool),
+// offers Auto-Allocate, and lets every slot be changed by hand.
+function DayManpowerAllocation({ stationId, year, month, day }) {
   const [departures, setDepartures] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -84,6 +98,9 @@ function DayManpowerAllocation({ stationId, year, month, day, staffByCategory })
           {busy ? "Allocating…" : "🤖 Auto-Allocate This Day"}
         </button>
       </div>
+      <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 6 }}>
+        Drawn only from who is actually on the real shift roster at each departure's time — an early-morning departure pulls from the previous night's crew (still on duty till that shift's end time), not the day's own Morning crew.
+      </div>
       {error && <div className="ab red" style={{ fontSize: 9 }}>{error}</div>}
       {!departures ? (
         <div style={{ fontSize: 9, color: "var(--text-dim)" }}>Loading…</div>
@@ -91,7 +108,7 @@ function DayManpowerAllocation({ stationId, year, month, day, staffByCategory })
         <div style={{ fontSize: 9, color: "var(--text-dim)" }}>No departures this day — nothing to allocate.</div>
       ) : (
         departures.map(dep => (
-          <DepartureRow key={dep.key} dep={dep} year={year} month={month} day={day} staffByCategory={staffByCategory} onChanged={load} busy={busy} setBusy={setBusy} />
+          <DepartureRow key={dep.key} dep={dep} year={year} month={month} day={day} onChanged={load} busy={busy} setBusy={setBusy} />
         ))
       )}
     </div>
@@ -102,18 +119,8 @@ export default function FlightSchedulePage() {
   const { stationId, currentStation } = useStation();
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   const [expandedDay, setExpandedDay] = useState(null);
-  const [staffByCategory, setStaffByCategory] = useState({ B1: [], CM: [], NCS: [] });
 
   usePageHeader({ title: "Flight Schedule", subtitle: currentStation ? `${currentStation.name} · Turn Report import & departure manpower` : "" });
-
-  useEffect(() => {
-    if (!stationId) return;
-    departureAllocationApi.listEligibleStaff(stationId).then(staff => {
-      const byCat = { B1: [], CM: [], NCS: [] };
-      staff.forEach(s => { if (byCat[s.category]) byCat[s.category].push(s); });
-      setStaffByCategory(byCat);
-    }).catch(() => {});
-  }, [stationId]);
 
   const [year, month] = monthKey.split("-").map(Number);
 
@@ -125,7 +132,7 @@ export default function FlightSchedulePage() {
       expandedDay={expandedDay}
       onDayClick={setExpandedDay}
       renderDayExtra={(d) => (
-        <DayManpowerAllocation stationId={stationId} year={year} month={month} day={d} staffByCategory={staffByCategory} />
+        <DayManpowerAllocation stationId={stationId} year={year} month={month} day={d} />
       )}
     />
   );

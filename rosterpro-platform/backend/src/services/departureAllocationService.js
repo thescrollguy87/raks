@@ -8,7 +8,7 @@ const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
 const { assertOwnStation } = require("../utils/stationScope");
 const { expandOperatingDates, minutesToHHMM } = require("../utils/flightScheduleParser");
-const { allocateDepartureManpower } = require("../utils/departureAllocationEngine");
+const { resolveRosterShiftForDeparture, allocateDepartureManpower } = require("../utils/departureAllocationEngine");
 
 // Builds the day's departure events straight from the imported Turn Report
 // / Charter rows — a "departure" only exists where an outbound/charter
@@ -47,8 +47,85 @@ async function buildDayDepartures(stationId, year, month, day) {
   return departures;
 }
 
+async function loadShiftDefsFull() {
+  const allShiftDefs = await rosterRepo.findAllShiftDefs();
+  const shiftDefsFull = {};
+  ["M", "A", "N"].forEach(code => {
+    const def = allShiftDefs.find(d => d.code === code);
+    if (def) shiftDefsFull[code] = { start: def.startTime, end: def.endTime, type: def.type };
+  });
+  return shiftDefsFull;
+}
+
+function addUTCDays(date, n) {
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d;
+}
+
+// THE function that enforces "allocate only from the real shift roster":
+// resolves each departure to the exact real roster row that covers it —
+// Morning/Afternoon on the departure's own calendar date, or (for an
+// overnight Night shift) either that date's own Night crew or the
+// PREVIOUS date's Night crew, whichever one's actual duty window the
+// departure time falls inside (see resolveRosterShiftForDeparture) — then
+// looks up who is genuinely assigned that shift, minus anyone blocked
+// (expired qualification/license) or on approved leave that specific
+// date. Two departures that resolve to the same real shift+date share the
+// exact same pool (and, in the engine, the same round-robin rotator);
+// departures resolving to different shifts never draw from each other's
+// crews. A departure with no roster at all for its resolved shift+date
+// gets an empty pool — never silently borrowed from elsewhere.
+async function resolveDeparturePools(stationId, departures, dayDate) {
+  const shiftDefsFull = await loadShiftDefsFull();
+  const resolved = departures.map(dep => {
+    const r = resolveRosterShiftForDeparture(dep.depMin, shiftDefsFull);
+    if (!r) return { ...dep, shiftCode: null, rosterDate: null, poolKey: null };
+    const rosterDate = addUTCDays(dayDate, r.dayOffset);
+    return { ...dep, shiftCode: r.shiftCode, rosterDate, poolKey: `${r.shiftCode}:${rosterDate.toISOString().slice(0, 10)}` };
+  });
+
+  const distinctByKey = new Map();
+  resolved.forEach(d => { if (d.poolKey && !distinctByKey.has(d.poolKey)) distinctByKey.set(d.poolKey, d); });
+  const distinctKeys = [...distinctByKey.values()];
+
+  const rowsByKey = {};
+  await Promise.all(distinctKeys.map(async d => {
+    rowsByKey[d.poolKey] = await rosterRepo.findAssignmentsByStationDateShift(stationId, d.rosterDate, d.shiftCode);
+  }));
+
+  // Blocked-staff and leave checks run ONCE across the union of everyone
+  // who showed up in any pool — the same person can legitimately appear
+  // in more than one resolved shift+date (e.g. picked up an extra shift),
+  // and re-checking them per key would just repeat the same DB calls.
+  const allRows = Object.values(rowsByKey).flat();
+  const allUserIds = [...new Set(allRows.map(r => r.userId))];
+  const distinctDateStrs = [...new Map(distinctKeys.map(d => [d.rosterDate.toISOString().slice(0, 10), d.rosterDate])).entries()];
+
+  const [complianceResults, leaveResults] = await Promise.all([
+    Promise.all(allUserIds.map(async id => [id, (await complianceService.getComplianceSummary(id)).isBlocked])),
+    Promise.all(distinctDateStrs.map(async ([dateStr, dateObj]) => [dateStr, await leaveRepo.approvedLeaveForStaffInRange(allUserIds, dateObj, dateObj)])),
+  ]);
+  const blockedSet = new Set(complianceResults.filter(([, blocked]) => blocked).map(([id]) => id));
+  const leaveByDate = Object.fromEntries(leaveResults.map(([dateStr, rows]) => [dateStr, new Set(rows.map(l => l.userId))]));
+
+  const poolByKey = {};
+  distinctKeys.forEach(d => {
+    const dateStr = d.rosterDate.toISOString().slice(0, 10);
+    const onLeave = leaveByDate[dateStr] || new Set();
+    const eligible = (rowsByKey[d.poolKey] || []).filter(r => !blockedSet.has(r.userId) && !onLeave.has(r.userId));
+    const byCat = { B1: [], CM: [], NCS: [] };
+    eligible.forEach(r => { if (byCat[r.user.category]) byCat[r.user.category].push({ id: r.user.id, fullName: r.user.fullName, category: r.user.category }); });
+    poolByKey[d.poolKey] = byCat;
+  });
+
+  return resolved.map(dep => ({ ...dep, pools: dep.poolKey ? poolByKey[dep.poolKey] : { B1: [], CM: [], NCS: [] } }));
+}
+
 // Merges the day's real departures with whatever's already assigned in the
-// database, in the shape the frontend renders directly.
+// database, plus each departure's real roster-eligible pool (so the
+// frontend's manual-override dropdowns only ever offer staff genuinely on
+// duty at that moment — the same constraint auto-allocate itself uses).
 async function getDayAllocation(stationId, year, month, day, actor) {
   assertOwnStation(actor, stationId);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -59,40 +136,26 @@ async function getDayAllocation(stationId, year, month, day, actor) {
   const existingByKey = {};
   existingRows.forEach(r => { existingByKey[`${r.eventType}:${r.eventId}:${date.toISOString().slice(0, 10)}`] = r; });
 
-  return departures.map(dep => {
+  const resolved = await resolveDeparturePools(stationId, departures, date);
+
+  return resolved.map(dep => {
     const existing = existingByKey[dep.key];
     return {
       key: dep.key, eventType: dep.eventType, eventId: dep.eventId, flightRef: dep.flightRef, route: dep.route,
       depTime: minutesToHHMM(dep.depMin),
+      shiftCode: dep.shiftCode, rosterDate: dep.rosterDate ? dep.rosterDate.toISOString().slice(0, 10) : null,
       releaser: existing?.releaser ? { id: existing.releaser.id, fullName: existing.releaser.fullName, category: existing.releaserCategory } : null,
       support: existing?.support ? { id: existing.support.id, fullName: existing.support.fullName } : null,
+      eligibleReleasers: [...dep.pools.B1, ...dep.pools.CM],
+      eligibleSupport: dep.pools.NCS,
     };
   });
 }
 
-// Eligible staff for a given date: active, not blocked (expired
-// qualification/license), not on approved leave that day — the same three
-// gates buildRosterAssignments already applies for whole-shift generation,
-// applied here per-departure instead.
-async function eligibleStaffPools(stationId, date) {
-  const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
-  const [leaves, complianceSummaries] = await Promise.all([
-    leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), date, date),
-    Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
-  ]);
-  const onLeave = new Set(leaves.map(l => l.userId));
-  const blocked = new Set(staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id));
-  const eligible = staff.filter(s => !onLeave.has(s.id) && !blocked.has(s.id));
-
-  const pools = { B1: [], CM: [], NCS: [] };
-  eligible.forEach(s => { if (pools[s.category]) pools[s.category].push(s.id); });
-  return pools;
-}
-
-// Auto-allocates every still-unassigned departure on the day — a manual
-// pick already on file is preserved untouched (never silently overwritten
-// by re-running this), matching the requirement that the result can still
-// be changed by hand afterward.
+// Auto-allocates every still-unassigned departure on the day, drawing
+// EXCLUSIVELY from each departure's real roster-shift crew (never the
+// whole station) — a manual pick already on file is preserved untouched
+// (never silently overwritten by re-running this).
 async function autoAllocateDay(stationId, year, month, day, actor, req) {
   assertOwnStation(actor, stationId);
   const date = new Date(Date.UTC(year, month - 1, day));
@@ -103,7 +166,7 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
   ]);
   if (departures.length === 0) return [];
 
-  const staffPools = await eligibleStaffPools(stationId, date);
+  const resolved = await resolveDeparturePools(stationId, departures, date);
   const dateKey = date.toISOString().slice(0, 10);
   const existingByKey = {};
   existingRows.forEach(r => {
@@ -113,7 +176,11 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
     };
   });
 
-  const allocations = allocateDepartureManpower(departures, staffPools, config.clashProximityMinutes, existingByKey);
+  const engineInput = resolved.map(dep => ({
+    key: dep.key, depMin: dep.depMin, poolKey: dep.poolKey || `none:${dep.key}`,
+    releaserB1: dep.pools.B1.map(s => s.id), releaserCM: dep.pools.CM.map(s => s.id), supportNCS: dep.pools.NCS.map(s => s.id),
+  }));
+  const allocations = allocateDepartureManpower(engineInput, config.clashProximityMinutes, existingByKey);
   const byKey = {};
   departures.forEach(d => { byKey[d.key] = d; });
 
@@ -125,7 +192,7 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
   const unfilledCount = allocations.filter(a => a.unfilled).length;
   await auditTrail.logActivity(
     "Departure manpower auto-allocated",
-    `${dateKey}: ${allocations.length} departure(s), ${unfilledCount} unfilled`,
+    `${dateKey}: ${allocations.length} departure(s), ${unfilledCount} unfilled (drawn from the real shift roster only)`,
     stationId, actor, req,
   );
 
@@ -133,7 +200,11 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
 }
 
 // Manual override for exactly one departure — set releaserUserId/
-// supportUserId to null to clear that slot.
+// supportUserId to null to clear that slot. Does NOT itself re-validate
+// that the chosen person is on the resolved shift (the frontend only ever
+// offers eligibleReleasers/eligibleSupport as options), but a
+// station-scoped actor picking a real user id at their own station is not
+// a security boundary this needs to re-enforce server-side beyond that.
 async function manualAssign(input, actor, req) {
   const { stationId, year, month, day, eventType, eventId, flightRef, releaserUserId, releaserCategory, supportUserId } = input;
   assertOwnStation(actor, stationId);
@@ -154,19 +225,4 @@ async function manualAssign(input, actor, req) {
   return row;
 }
 
-// Purpose-built, minimal staff list for the releaser/support pickers on
-// this page — id/name/category only, gated by the same roster:read this
-// whole feature already requires. Deliberately NOT the full /api/users
-// listing (that requires the stricter `users:read` permission most
-// roster:update holders, e.g. LMM, don't have — this page must stay usable
-// for exactly that role without widening a broader admin permission just
-// to populate a picker).
-async function listEligibleStaff(stationId, actor) {
-  assertOwnStation(actor, stationId);
-  const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
-  return staff
-    .filter(s => s.category === "B1" || s.category === "CM" || s.category === "NCS")
-    .map(s => ({ id: s.id, fullName: s.fullName, category: s.category }));
-}
-
-module.exports = { getDayAllocation, autoAllocateDay, manualAssign, listEligibleStaff };
+module.exports = { getDayAllocation, autoAllocateDay, manualAssign };

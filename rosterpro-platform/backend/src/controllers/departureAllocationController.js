@@ -7,11 +7,6 @@ const getDay = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-const getStaff = asyncHandler(async (req, res) => {
-  const result = await service.listEligibleStaff(req.query.stationId, req.user);
-  res.json(result);
-});
-
 const autoAllocate = asyncHandler(async (req, res) => {
   const { stationId, year, month, day } = req.body;
   const result = await service.autoAllocateDay(stationId, year, month, day, req.user, req);
@@ -23,4 +18,4 @@ const manualAssign = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { getDay, getStaff, autoAllocate, manualAssign };
+module.exports = { getDay, autoAllocate, manualAssign };

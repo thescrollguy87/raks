@@ -1,7 +1,9 @@
 // Pure, DB-free per-flight manpower allocator for the day-wise Departure
 // Manpower Allocation feature. Distinct from rosterGenerationAlgorithm.js
 // (which assigns staff to whole-shift M/A/N duty codes for the month) —
-// this assigns specific staff to specific DEPARTURES on one day.
+// this assigns specific staff to specific DEPARTURES on one day, drawn
+// ONLY from whoever is actually on the real shift roster at that moment —
+// never from the station's full active-staff list.
 //
 // Each departure gets a "releaser" (a B1 OR a CM — either one legitimately
 // gives/releases a departure) plus one "support" (an NCS). This mirrors
@@ -12,6 +14,28 @@
 // legitimately be assigned to several departures that DON'T clash with
 // each other (same as one B1 covering several spaced-out movements), but
 // never to two that do.
+const { classifyTimeToShift } = require("./workloadEngine");
+const { excelCellToMinutes, minutesToHHMM } = require("./flightScheduleParser");
+
+// Resolves which real shift-roster row a departure at `depMin` (minutes
+// since midnight on its own calendar day) must be staffed from, and which
+// CALENDAR DATE that roster row is filed under. A shift whose window
+// crosses midnight (Night: e.g. 21:00-07:00) is filed on its START date —
+// so a 04:00-06:00 departure is covered by the PREVIOUS day's Night crew
+// (dayOffset -1, "still on duty till 07:00"), while a 22:00 departure on
+// the same shift is covered by THAT day's own Night crew (dayOffset 0).
+// A shift that doesn't cross midnight (Morning, Afternoon) always resolves
+// to dayOffset 0. Returns null if depMin falls in no configured shift at
+// all (a gap between shift windows, or shiftDefs missing entirely).
+function resolveRosterShiftForDeparture(depMin, shiftDefs) {
+  const shiftCode = classifyTimeToShift(minutesToHHMM(depMin), shiftDefs);
+  if (!shiftCode) return null;
+  const def = shiftDefs[shiftCode];
+  const start = excelCellToMinutes(def.start), end = excelCellToMinutes(def.end);
+  const crossesMidnight = start > end;
+  const dayOffset = (crossesMidnight && depMin < start) ? -1 : 0;
+  return { shiftCode, dayOffset };
+}
 
 // Tracks, per staff id, the list of [start,end] minute-windows they're
 // already committed to for the day — a candidate is eligible for a new
@@ -49,47 +73,56 @@ function makeRotator(pool, busyTracker) {
   };
 }
 
-// departures: [{ key, depMin }] — key is the stable identifier the caller
-// uses to persist this departure's assignment (e.g. "turn:<id>:<date>").
-// staffPools: { B1: [userId,...], CM: [...], NCS: [...] } — active,
-// non-blocked, non-on-leave staff at the station for this date, already
-// filtered by the caller (this function has no DB access and makes no
-// eligibility judgment beyond the clash-window check).
+// departures: [{ key, depMin, poolKey, releaserB1: [userId,...],
+// releaserCM: [...], supportNCS: [...] }] — the caller has ALREADY
+// resolved each departure to its correct roster-shift+date (via
+// resolveRosterShiftForDeparture) and looked up exactly who's on that
+// shift; this function has no DB access and makes no eligibility judgment
+// beyond the clash-window check. `poolKey` identifies which underlying
+// roster-shift a departure draws from (e.g. "N:2026-09-02") — departures
+// sharing a poolKey share ONE round-robin rotator (fair rotation across
+// that crew), while departures resolving to a different shift/date get
+// their own independent rotator, since they draw from a different crew
+// entirely.
 // existingAssignments: { [key]: { releaserUserId, releaserCategory,
 // supportUserId } } — a manual pick already on file for that departure is
 // kept as-is (and still marked busy, so it correctly blocks a clashing
 // departure from being auto-assigned to the same person) rather than
 // being overwritten.
-function allocateDepartureManpower(departures, staffPools, clashProximityMinutes, existingAssignments = {}) {
+function allocateDepartureManpower(departures, clashProximityMinutes, existingAssignments = {}) {
   const half = (clashProximityMinutes || 60) / 2;
   const ordered = departures
     .map((d, i) => ({ ...d, _i: i }))
     .sort((a, b) => (a.depMin - b.depMin) || (a._i - b._i));
 
   const busy = makeBusyTracker();
-  const releaserPool = [...(staffPools.B1 || []), ...(staffPools.CM || [])];
-  const releaserCategoryById = {};
-  (staffPools.B1 || []).forEach(id => { releaserCategoryById[id] = "B1"; });
-  (staffPools.CM || []).forEach(id => { releaserCategoryById[id] = "CM"; });
-  const supportPool = [...(staffPools.NCS || [])];
-
-  const pickReleaser = makeRotator(releaserPool, busy);
-  const pickSupport = makeRotator(supportPool, busy);
+  const releaserRotators = {};
+  const supportRotators = {};
 
   return ordered.map(dep => {
     const start = dep.depMin - half, end = dep.depMin + half;
     const existing = existingAssignments[dep.key];
 
+    const releaserPool = [...(dep.releaserB1 || []), ...(dep.releaserCM || [])];
+    const releaserCategoryById = {};
+    (dep.releaserB1 || []).forEach(id => { releaserCategoryById[id] = "B1"; });
+    (dep.releaserCM || []).forEach(id => { releaserCategoryById[id] = "CM"; });
+    const supportPool = dep.supportNCS || [];
+
     let releaserUserId = existing?.releaserUserId || null;
     let releaserCategory = existing?.releaserCategory || (releaserUserId ? releaserCategoryById[releaserUserId] : null);
     if (!releaserUserId) {
-      releaserUserId = pickReleaser(start, end);
+      releaserRotators[dep.poolKey] ??= makeRotator(releaserPool, busy);
+      releaserUserId = releaserRotators[dep.poolKey](start, end);
       releaserCategory = releaserUserId ? releaserCategoryById[releaserUserId] : null;
     }
     if (releaserUserId) busy.markBusy(releaserUserId, start, end);
 
     let supportUserId = existing?.supportUserId || null;
-    if (!supportUserId) supportUserId = pickSupport(start, end);
+    if (!supportUserId) {
+      supportRotators[dep.poolKey] ??= makeRotator(supportPool, busy);
+      supportUserId = supportRotators[dep.poolKey](start, end);
+    }
     if (supportUserId) busy.markBusy(supportUserId, start, end);
 
     return {
@@ -99,4 +132,4 @@ function allocateDepartureManpower(departures, staffPools, clashProximityMinutes
   });
 }
 
-module.exports = { allocateDepartureManpower };
+module.exports = { resolveRosterShiftForDeparture, allocateDepartureManpower };

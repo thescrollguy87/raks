@@ -164,6 +164,21 @@ function upsertAssignment({ rosterId, userId, shiftDate, shiftDefId, note, actor
   });
 }
 
+// Every staff member actually rostered onto a specific shift code on a
+// specific calendar date — the real, generated-or-hand-edited roster, not
+// just "who's active at the station." Used by departureAllocationService
+// so per-flight manpower is only ever drawn from who is genuinely on duty
+// at that moment, including a Night shift's carryover into the next
+// calendar day (queried directly by shiftDate, so it reaches into the
+// previous month's roster too when the resolved date crosses that
+// boundary — no month-scoped lookup needed).
+function findAssignmentsByStationDateShift(stationId, shiftDate, shiftCode) {
+  return prisma.shiftAssignment.findMany({
+    where: { shiftDate, deletedAt: null, roster: { stationId }, shiftDef: { code: shiftCode } },
+    select: { userId: true, user: { select: { id: true, fullName: true, category: true } } },
+  });
+}
+
 function bulkUpsertAssignments(rows) {
   // Prisma has no native bulk-upsert, so this runs as one transaction of
   // individual upserts — still a single round-trip commit, and small enough
@@ -180,5 +195,5 @@ module.exports = {
   listRostersForStation,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
   findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,
-  findAssignment, upsertAssignment, bulkUpsertAssignments,
+  findAssignment, upsertAssignment, bulkUpsertAssignments, findAssignmentsByStationDateShift,
 };

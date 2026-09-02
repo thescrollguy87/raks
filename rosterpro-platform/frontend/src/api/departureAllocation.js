@@ -1,9 +1,5 @@
 import { api } from "./client.js";
 
-export function listEligibleStaff(stationId) {
-  return api.get("/api/departure-allocation/staff", { stationId });
-}
-
 export function getDayAllocation(stationId, year, month, day) {
   return api.get("/api/departure-allocation", { stationId, year, month, day });
 }
