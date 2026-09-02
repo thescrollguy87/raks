@@ -115,13 +115,29 @@ async function deleteStaff(id, actor, req) {
   if (!user) throw ApiError.notFound("Staff member not found");
   assertOwnStation(actor, user.stationId);
 
+  // Checked up front (not just caught as a generic FK failure after the
+  // fact) so the message names EXACTLY which historical record is
+  // blocking — a Shift Pattern assignment, a staff group membership, a
+  // departure manpower assignment, or quality audit-finding/CAPA history
+  // are all deliberately non-cascading, but they're five different things
+  // and "some record exists somewhere" isn't actionable.
+  const blockers = await userRepo.findDeleteBlockers(id);
+  if (blockers.length) {
+    throw ApiError.conflict(
+      `Cannot permanently delete ${user.fullName} — they still have ${blockers.join(", ")}. Deactivate instead to remove them from future scheduling, or reassign/remove those records first if they truly must be deleted.`
+    );
+  }
+
   await auditTrail.recordDelete("User", id, user.stationId, actor, req);
   try {
     await userRepo.hardDelete(id);
   } catch (err) {
     if (err.code === "P2003") {
+      // Fallback for any non-cascading relation not covered by
+      // findDeleteBlockers above (e.g. a new one added later and missed
+      // here) — still a clean 409, never a raw 500.
       throw ApiError.conflict(
-        `Cannot permanently delete ${user.fullName} — they have historical quality audit-finding or CAPA records tied to their account. Deactivate instead to remove them from future scheduling.`
+        `Cannot permanently delete ${user.fullName} — they have other historical records tied to their account. Deactivate instead to remove them from future scheduling.`
       );
     }
     throw err;

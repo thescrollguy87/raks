@@ -162,6 +162,34 @@ function hardDelete(id) {
   return prisma.user.delete({ where: { id } });
 }
 
+// Every relation to User deliberately left NOT cascading (unlike the ones
+// listed above) because the record is meaningful even after the person is
+// gone — a Shift Pattern assignment, a Rule Builder staff group
+// membership, a departure's real releaser/support history, a quality
+// audit finding they raised, or a CAPA they own. A hard delete correctly
+// fails against any of these (Postgres FK violation), but that failure on
+// its own doesn't tell the caller WHICH one — this runs the same checks
+// up front so deleteStaff can name them specifically instead of just
+// "some historical record exists somewhere."
+async function findDeleteBlockers(userId) {
+  const [pattern, staffGroupCount, releaserCount, supportCount, auditFindingCount, capaCount] = await Promise.all([
+    prisma.staffShiftAllocation.findUnique({ where: { userId } }),
+    prisma.workloadRuleStaffGroupMember.count({ where: { userId } }),
+    prisma.departureManpowerAssignment.count({ where: { releaserUserId: userId } }),
+    prisma.departureManpowerAssignment.count({ where: { supportUserId: userId } }),
+    prisma.auditFinding.count({ where: { raisedById: userId } }),
+    prisma.capa.count({ where: { ownerId: userId } }),
+  ]);
+  const blockers = [];
+  if (pattern) blockers.push("a Shift Pattern assignment");
+  if (staffGroupCount) blockers.push(`${staffGroupCount} Rule Builder staff group membership${staffGroupCount === 1 ? "" : "s"}`);
+  const departureCount = releaserCount + supportCount;
+  if (departureCount) blockers.push(`${departureCount} departure manpower assignment${departureCount === 1 ? "" : "s"}`);
+  if (auditFindingCount) blockers.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised`);
+  if (capaCount) blockers.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own`);
+  return blockers;
+}
+
 // Lean, exhaustive (non-paginated) roster of one station's active staff —
 // for the Employee Master import's ID/name matching, which needs to check
 // every row against every staff member at the station, not one page of them.
@@ -169,7 +197,7 @@ function findActiveByStation(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
     select: {
-      id: true, employeeId: true, fullName: true, email: true, designation: true, category: true, department: true,
+      id: true, employeeId: true, fullName: true, email: true, phone: true, designation: true, category: true, department: true,
       reportsToId: true, reportsTo: { select: { id: true, employeeId: true, fullName: true } },
       roles: { select: { role: { select: { name: true } } } },
     },
@@ -182,5 +210,5 @@ module.exports = {
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,
   flattenRolesAndPermissions, findContactsByRoleAtStation,
-  create, update, setActive, setRoles, addRole, hardDelete,
+  create, update, setActive, setRoles, addRole, hardDelete, findDeleteBlockers,
 };
