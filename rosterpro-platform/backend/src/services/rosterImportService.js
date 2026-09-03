@@ -2,6 +2,7 @@ const ExcelJS = require("exceljs");
 const rosterRepo = require("../repositories/rosterRepository");
 const rosterService = require("./rosterService");
 const ApiError = require("../utils/ApiError");
+const { resolveAirlineId } = require("../utils/stationScope");
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -48,7 +49,7 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
 
   const [staff, shiftDefs] = await Promise.all([
     rosterRepo.getActiveStaffForGeneration(stationId),
-    rosterRepo.findAllShiftDefs(actor.airlineId),
+    rosterRepo.findAllShiftDefs(await resolveAirlineId(actor, stationId)),
   ]);
   const validCodes = new Set(shiftDefs.map(d => d.code));
   const byEmployeeId = new Map(staff.filter(s => s.employeeId).map(s => [s.employeeId, s]));

@@ -115,4 +115,22 @@ async function resolveStationScope(actor, requestedStationId) {
   return { stationId: undefined, stationIdIn: stations.map(s => s.id) };
 }
 
-module.exports = { isSuperAdmin, isAirlineWide, assertOwnStation, requireOwnStation, assertOwnAirline, resolveStationScope };
+// Resolves the airlineId a station-scoped read/write should actually use.
+// Never trust actor.airlineId at face value for this: SUPER_ADMIN's JWT
+// deliberately carries no airlineId (see isSuperAdmin above — the platform
+// owner isn't tied to one tenant), so any airline-scoped reference data
+// (shift definitions, roster generation, imports, departure allocation)
+// only has meaning once resolved against whichever station's airline the
+// request actually names. Everyone else's actor.airlineId is already the
+// authoritative answer regardless of stationId (fixed once at login, and
+// never valid for more than their own airline), so the lookup is skipped
+// for them — same "isSuperAdmin only" gate as assertOwnStation.
+async function resolveAirlineId(actor, stationId) {
+  if (!isSuperAdmin(actor)) return actor.airlineId;
+  if (!stationId) throw ApiError.badRequest("stationId is required");
+  const station = await stationRepo.findStationAirlineId(stationId);
+  if (!station) throw ApiError.notFound("Station not found");
+  return station.airlineId;
+}
+
+module.exports = { isSuperAdmin, isAirlineWide, assertOwnStation, requireOwnStation, assertOwnAirline, resolveStationScope, resolveAirlineId };

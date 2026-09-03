@@ -2,11 +2,11 @@ import { api } from "./client.js";
 
 // ─── Shift Definitions (single-row CRUD, for the Auto-Roster wizard's own
 // Shift Definitions tab — distinct from the bulk import/export in api/roster.js) ─
-export function upsertShiftDefinition(def) {
-  return api.put("/api/roster/shift-definitions", def);
+export function upsertShiftDefinition(def, stationId) {
+  return api.put("/api/roster/shift-definitions", { ...def, stationId });
 }
-export function deleteShiftDefinition(id) {
-  return api.delete(`/api/roster/shift-definitions/${id}`);
+export function deleteShiftDefinition(id, stationId) {
+  return api.delete(`/api/roster/shift-definitions/${id}`, { stationId });
 }
 
 // ─── Shift Patterns ───────────────────────────────────────────────────────────

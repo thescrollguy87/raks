@@ -3,7 +3,7 @@ const userRepo = require("../repositories/userRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const notificationService = require("./notificationService");
-const { assertOwnStation } = require("../utils/stationScope");
+const { assertOwnStation, resolveAirlineId } = require("../utils/stationScope");
 
 async function getOrCreateRoster(stationId, monthKey, actor) {
   let roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
@@ -86,11 +86,11 @@ async function unpublishRoster(rosterId, reason, actor, req) {
 // change alert — deliberately not awaited by the caller, so a slow or
 // failing notification never delays the API response for the shift edit
 // itself. Every failure path logs to the activity log rather than throwing.
-async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate, stationId, actor, req) {
+async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate, stationId, airlineId, actor, req) {
   try {
     const [user, oldDef] = await Promise.all([
       userRepo.findById(userId),
-      oldShiftDefId ? rosterRepo.findShiftDefById(actor.airlineId, oldShiftDefId) : null,
+      oldShiftDefId ? rosterRepo.findShiftDefById(airlineId, oldShiftDefId) : null,
     ]);
     if (!user) return;
     await notificationService.notifyShiftChanged(user, { shiftDate, oldCode: oldDef?.code || null, newCode });
@@ -109,7 +109,8 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
     throw ApiError.forbidden("Roster is published — republish is required after further edits, or contact an admin to unpublish");
   }
 
-  const shiftDef = await rosterRepo.findShiftDefByCode(actor.airlineId, shiftCode);
+  const airlineId = await resolveAirlineId(actor, stationId);
+  const shiftDef = await rosterRepo.findShiftDefByCode(airlineId, shiftCode);
   if (!shiftDef) throw ApiError.badRequest(`Unknown shift code: ${shiftCode}`);
 
   const dateObj = new Date(shiftDate + "T00:00:00.000Z");
@@ -132,7 +133,7 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
     // WhatsApp, fired only when the value genuinely changed (see the check
     // above), never on a no-op save. Runs after the response-critical work
     // above; failures are logged, never thrown back at the caller.
-    notifyShiftChangeAsync(userId, before?.shiftDefId, shiftDef.code, shiftDate, stationId, actor, req);
+    notifyShiftChangeAsync(userId, before?.shiftDefId, shiftDef.code, shiftDate, stationId, airlineId, actor, req);
   }
 
   return { assignment: updated, changed, shiftCode: shiftDef.code, previousShiftDefId: before?.shiftDefId || null };
@@ -144,7 +145,7 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
     throw ApiError.forbidden("Roster is published — unpublish before bulk-editing");
   }
 
-  const shiftDefs = await rosterRepo.findAllShiftDefs(actor.airlineId);
+  const shiftDefs = await rosterRepo.findAllShiftDefs(await resolveAirlineId(actor, stationId));
   const codeToId = Object.fromEntries(shiftDefs.map(d => [d.code, d.id]));
 
   const unknownCodes = assignments.map(a => a.shiftCode).filter(c => !codeToId[c]);
@@ -166,8 +167,8 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
   return { count: results.length };
 }
 
-function listShiftDefinitions(airlineId) {
-  return rosterRepo.findAllShiftDefs(airlineId);
+async function listShiftDefinitions(actor, stationId) {
+  return rosterRepo.findAllShiftDefs(await resolveAirlineId(actor, stationId));
 }
 
 function listRostersForStation(stationId) {

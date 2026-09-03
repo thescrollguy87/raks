@@ -4,6 +4,7 @@ const auditTrail = require("../utils/auditTrail");
 const { buildStyledSheet } = require("../utils/xlsxBuilder");
 const { findHeaderRowIndex, parseExcelTimeCell } = require("../utils/xlsxParser");
 const ApiError = require("../utils/ApiError");
+const { resolveAirlineId } = require("../utils/stationScope");
 
 const HEADER = ["Code", "Name", "Start Time (HH:MM)", "End Time (HH:MM)", "Break (min)", "Type (duty/night/off/leave/other)"];
 const VALID_TYPES = new Set(["duty", "night", "off", "leave", "other"]);
@@ -24,13 +25,13 @@ function generateTemplate() {
   return buildStyledSheet("Shift Definitions Template", HEADER, exampleRows, { legend });
 }
 
-async function exportShiftDefinitions(airlineId) {
-  const defs = await rosterRepo.findAllShiftDefs(airlineId);
+async function exportShiftDefinitions(actor, stationId) {
+  const defs = await rosterRepo.findAllShiftDefs(await resolveAirlineId(actor, stationId));
   const rows = defs.map(d => [d.code, d.name, d.startTime || "", d.endTime || "", d.breakMin, d.type]);
   return buildStyledSheet("Shift Definitions", ["Code", "Name", "Start Time", "End Time", "Break (min)", "Type"], rows);
 }
 
-async function importShiftDefinitions(buffer, actor, req) {
+async function importShiftDefinitions(buffer, actor, req, stationId) {
   const wb = new ExcelJS.Workbook();
   try {
     await wb.xlsx.load(buffer);
@@ -87,13 +88,14 @@ async function importShiftDefinitions(buffer, actor, req) {
   // than silently applying the good rows and skipping the rest.
   if (errors.length) throw ApiError.badRequest("Fix the following and re-upload — nothing was imported.", errors);
 
-  const existing = await rosterRepo.findAllShiftDefsIncludingInactive(actor.airlineId);
+  const airlineId = await resolveAirlineId(actor, stationId);
+  const existing = await rosterRepo.findAllShiftDefsIncludingInactive(airlineId);
   const existingByCode = new Map(existing.map(d => [d.code, d]));
   let created = 0, updated = 0;
 
   for (const row of rows) {
     const before = existingByCode.get(row.code);
-    const saved = await rosterRepo.upsertShiftDef(actor.airlineId, row);
+    const saved = await rosterRepo.upsertShiftDef(airlineId, row);
     if (before) {
       updated++;
       await auditTrail.recordUpdate(

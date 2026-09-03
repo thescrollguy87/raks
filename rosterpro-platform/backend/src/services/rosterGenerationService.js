@@ -17,6 +17,7 @@ const {
   computeDailyPeaks, computeAutomaticClashes,
 } = require("../utils/workloadEngine");
 const { checkHardRuleCompliance, computeSoftRuleScore } = require("../utils/ruleEngine");
+const { resolveAirlineId } = require("../utils/stationScope");
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -271,14 +272,15 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const nDays = daysInMonth(monthKey);
   const monthStart = dateAt(monthKey, 1);
   const monthEnd = dateAt(monthKey, nDays);
+  const airlineId = await resolveAirlineId(actor, stationId);
 
   const [leaves, complianceSummaries, shiftDefs, tailByUser, patternByUser, workloadContext] = await Promise.all([
     leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
     Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
-    rosterRepo.findAllShiftDefs(actor.airlineId),
+    rosterRepo.findAllShiftDefs(airlineId),
     continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
-    usePatterns ? buildPatternByUser(stationId, staff, actor.airlineId) : Promise.resolve(undefined),
-    buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, actor.airlineId),
+    usePatterns ? buildPatternByUser(stationId, staff, airlineId) : Promise.resolve(undefined),
+    buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, airlineId),
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);

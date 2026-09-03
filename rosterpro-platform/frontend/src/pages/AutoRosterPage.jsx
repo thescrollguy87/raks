@@ -55,7 +55,7 @@ export default function AutoRosterPage() {
         ))}
       </div>
 
-      {tab === "defs" && <ShiftDefinitionsTab />}
+      {tab === "defs" && <ShiftDefinitionsTab stationId={stationId} />}
       {tab === "patterns" && <ShiftPatternsTab stationId={stationId} />}
       {tab === "allocation" && <StaffAllocationTab stationId={stationId} />}
       {tab === "leave" && <LeaveAbsenceTab stationId={stationId} />}
@@ -69,14 +69,15 @@ export default function AutoRosterPage() {
 }
 
 // ═══ TAB 1: SHIFT DEFINITIONS ════════════════════════════════════════════════
-function ShiftDefinitionsTab() {
+function ShiftDefinitionsTab({ stationId }) {
   const [defs, setDefs] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   const load = useCallback(() => {
-    rosterApi.getShiftDefinitions().then(setDefs).catch(err => setError(err.message));
-  }, []);
+    if (!stationId) return;
+    rosterApi.getShiftDefinitions(stationId).then(setDefs).catch(err => setError(err.message));
+  }, [stationId]);
   useEffect(load, [load]);
 
   function netHours(d) {
@@ -99,7 +100,7 @@ function ShiftDefinitionsTab() {
       await planningApi.upsertShiftDefinition({
         code: d.code, name: d.name, startTime: d.startTime || null, endTime: d.endTime || null,
         breakMin: Number(d.breakMin) || 0, type: d.type, color: d.color,
-      });
+      }, stationId);
       load();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -108,7 +109,7 @@ function ShiftDefinitionsTab() {
     setBusy(true);
     setError("");
     try {
-      await planningApi.upsertShiftDefinition({ code: "NEW" + Math.floor(Math.random() * 900 + 100), name: "New Shift", breakMin: 0, type: "duty", color: "#AABBCC" });
+      await planningApi.upsertShiftDefinition({ code: "NEW" + Math.floor(Math.random() * 900 + 100), name: "New Shift", breakMin: 0, type: "duty", color: "#AABBCC" }, stationId);
       load();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -116,7 +117,7 @@ function ShiftDefinitionsTab() {
   async function remove(id) {
     setBusy(true);
     setError("");
-    try { await planningApi.deleteShiftDefinition(id); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
+    try { await planningApi.deleteShiftDefinition(id, stationId); load(); } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
   if (!defs) return <div className="card">Loading…</div>;
@@ -217,7 +218,10 @@ function ShiftPatternsTab({ stationId }) {
     planningApi.listPatterns(stationId).then(setPatterns).catch(err => setError(err.message));
   }, [stationId]);
   useEffect(load, [load]);
-  useEffect(() => { rosterApi.getShiftDefinitions().then(defs => setKnownCodes(defs.map(d => d.code))).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!stationId) return;
+    rosterApi.getShiftDefinitions(stationId).then(defs => setKnownCodes(defs.map(d => d.code))).catch(() => {});
+  }, [stationId]);
 
   function updateField(id, field, value) {
     setPatterns(list => list.map(p => (p.id === id ? { ...p, [field]: value } : p)));

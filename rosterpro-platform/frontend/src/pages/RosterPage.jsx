@@ -76,8 +76,12 @@ export default function RosterPage() {
     setLoading(true);
     setError("");
     try {
+      // Always refetched by stationId, never cached across renders — shift
+      // definitions are airline-scoped (see api/roster.js), and a SUPER_ADMIN
+      // switching the station switcher can land on a DIFFERENT airline
+      // entirely, whose codes must never be shadowed by a previous tenant's.
       const [defs, grid] = await Promise.all([
-        shiftDefs.length ? Promise.resolve(shiftDefs) : rosterApi.getShiftDefinitions(),
+        rosterApi.getShiftDefinitions(stationId),
         rosterApi.getRosterGrid(stationId, monthKey),
       ]);
       setShiftDefs(defs);

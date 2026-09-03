@@ -4,7 +4,7 @@ const userRepo = require("../repositories/userRepository");
 const complianceService = require("./complianceService");
 const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
-const { assertOwnStation } = require("../utils/stationScope");
+const { assertOwnStation, resolveAirlineId } = require("../utils/stationScope");
 const { parseCycle } = require("../utils/shiftPatternCycle");
 const { computeManpowerPlan } = require("../utils/manpowerPlanning");
 
@@ -12,15 +12,17 @@ const { computeManpowerPlan } = require("../utils/manpowerPlanning");
 // shiftDefinitionService.js already covers bulk, this covers the Shift
 // Definitions tab's inline add/edit/delete-a-row flow) ───────────────────────
 async function upsertShiftDefinition(input, actor, req) {
-  const def = await rosterRepo.upsertShiftDef(actor.airlineId, input);
+  const airlineId = await resolveAirlineId(actor, input.stationId);
+  const def = await rosterRepo.upsertShiftDef(airlineId, input);
   await auditTrail.logActivity("Shift definition saved", `${def.code} — ${def.name}`, null, actor, req);
   return def;
 }
 
-async function deactivateShiftDefinition(id, actor, req) {
-  const def = await rosterRepo.findShiftDefById(actor.airlineId, id);
+async function deactivateShiftDefinition(id, actor, req, stationId) {
+  const airlineId = await resolveAirlineId(actor, stationId);
+  const def = await rosterRepo.findShiftDefById(airlineId, id);
   if (!def) throw ApiError.notFound("Shift definition not found");
-  const updated = await rosterRepo.deactivateShiftDef(actor.airlineId, id);
+  const updated = await rosterRepo.deactivateShiftDef(airlineId, id);
   await auditTrail.logActivity("Shift definition removed", `${def.code} — ${def.name}`, null, actor, req);
   return updated;
 }

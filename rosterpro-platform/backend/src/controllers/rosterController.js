@@ -41,7 +41,7 @@ const unpublish = asyncHandler(async (req, res) => {
 });
 
 const shiftDefinitions = asyncHandler(async (req, res) => {
-  const result = await rosterService.listShiftDefinitions(req.user.airlineId);
+  const result = await rosterService.listShiftDefinitions(req.user, req.query.stationId);
   res.json(result);
 });
 
@@ -69,13 +69,13 @@ const shiftDefinitionsTemplate = asyncHandler(async (req, res) => {
 });
 
 const shiftDefinitionsExport = asyncHandler(async (req, res) => {
-  const buffer = await shiftDefinitionService.exportShiftDefinitions(req.user.airlineId);
+  const buffer = await shiftDefinitionService.exportShiftDefinitions(req.user, req.query.stationId);
   sendXlsx(res, buffer, "Shift_Definitions.xlsx");
 });
 
 const importShiftDefinitions = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest("No file uploaded");
-  const result = await shiftDefinitionService.importShiftDefinitions(req.file.buffer, req.user, req);
+  const result = await shiftDefinitionService.importShiftDefinitions(req.file.buffer, req.user, req, req.query.stationId);
   res.json(result);
 });
 
@@ -85,7 +85,7 @@ const upsertShiftDefinition = asyncHandler(async (req, res) => {
   res.json(result);
 });
 const deactivateShiftDefinition = asyncHandler(async (req, res) => {
-  const result = await rosterPlanningService.deactivateShiftDefinition(req.params.id, req.user, req);
+  const result = await rosterPlanningService.deactivateShiftDefinition(req.params.id, req.user, req, req.query.stationId);
   res.json(result);
 });
 

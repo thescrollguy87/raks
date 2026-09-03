@@ -1,7 +1,7 @@
 import { api } from "./client.js";
 
-export function getShiftDefinitions() {
-  return api.get("/api/roster/shift-definitions");
+export function getShiftDefinitions(stationId) {
+  return api.get("/api/roster/shift-definitions", { stationId });
 }
 
 export function getRosterGrid(stationId, monthKey) {
@@ -40,12 +40,12 @@ export async function downloadShiftDefinitionsTemplate() {
   return downloadFile("/api/roster/shift-definitions/template");
 }
 
-export async function downloadShiftDefinitionsExport() {
-  return downloadFile("/api/roster/shift-definitions/export");
+export async function downloadShiftDefinitionsExport(stationId) {
+  return downloadFile("/api/roster/shift-definitions/export", { stationId });
 }
 
-export function importShiftDefinitions(file) {
-  return api.upload("/api/roster/shift-definitions/import", {}, file);
+export function importShiftDefinitions(file, stationId) {
+  return api.upload("/api/roster/shift-definitions/import", { stationId }, file);
 }
 
 async function downloadFile(path, query) {

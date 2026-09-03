@@ -6,7 +6,7 @@ const flightScheduleService = require("./flightScheduleService");
 const workloadConfigService = require("./workloadConfigService");
 const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
-const { assertOwnStation } = require("../utils/stationScope");
+const { assertOwnStation, resolveAirlineId } = require("../utils/stationScope");
 const { expandOperatingDates, minutesToHHMM } = require("../utils/flightScheduleParser");
 const { resolveRosterShiftForDeparture, allocateDepartureManpower } = require("../utils/departureAllocationEngine");
 
@@ -145,7 +145,7 @@ async function getDayAllocation(stationId, year, month, day, actor, reasonOverri
   const existingByKey = {};
   existingRows.forEach(r => { existingByKey[`${r.eventType}:${r.eventId}:${date.toISOString().slice(0, 10)}`] = r; });
 
-  const resolved = await resolveDeparturePools(stationId, departures, date, actor.airlineId);
+  const resolved = await resolveDeparturePools(stationId, departures, date, await resolveAirlineId(actor, stationId));
 
   return resolved.map(dep => {
     const existing = existingByKey[dep.key];
@@ -181,7 +181,7 @@ async function autoAllocateDay(stationId, year, month, day, actor, req) {
   ]);
   if (departures.length === 0) return [];
 
-  const resolved = await resolveDeparturePools(stationId, departures, date, actor.airlineId);
+  const resolved = await resolveDeparturePools(stationId, departures, date, await resolveAirlineId(actor, stationId));
   const dateKey = date.toISOString().slice(0, 10);
   const existingByKey = {};
   existingRows.forEach(r => {

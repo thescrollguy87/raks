@@ -2,6 +2,7 @@ const svc = require("../services/flightService");
 const flightImportService = require("../services/flightImportService");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
+const { resolveAirlineId } = require("../utils/stationScope");
 
 const create = asyncHandler(async (req, res) => {
   res.status(201).json(await svc.createFlight(req.body, req.user, req));
@@ -29,7 +30,8 @@ const importTemplate = asyncHandler(async (req, res) => {
 const importFlightSchedule = asyncHandler(async (req, res) => {
   if (!req.file) throw ApiError.badRequest("No file uploaded");
   const { stationId, monthKey } = req.query;
-  const result = await flightImportService.importFlightSchedule(stationId, monthKey, req.user.airlineId, req.file.buffer, req.user, req);
+  const airlineId = await resolveAirlineId(req.user, stationId);
+  const result = await flightImportService.importFlightSchedule(stationId, monthKey, airlineId, req.file.buffer, req.user, req);
   res.json(result);
 });
 

@@ -74,7 +74,7 @@ export default function ImportExportPage() {
   async function handleShiftDefImport(file) {
     setSdBusy(true); setSdResult(null);
     try {
-      const r = await rosterApi.importShiftDefinitions(file);
+      const r = await rosterApi.importShiftDefinitions(file, stationId);
       setSdResult({ tone: "green", headline: `Imported: ${r.created} created, ${r.updated} updated.` });
     } catch (err) {
       setSdResult({ tone: "red", headline: err.message, lists: [{ label: "Details", items: err.details || [] }] });
@@ -198,7 +198,7 @@ export default function ImportExportPage() {
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             <button className="btn btn-ghost" onClick={() => rosterApi.downloadShiftDefinitionsTemplate()}>⬇ Download Template</button>
             {canReadShift && (
-              <button className="btn btn-ghost" onClick={() => rosterApi.downloadShiftDefinitionsExport()}>⬇ Export Current</button>
+              <button className="btn btn-ghost" onClick={() => rosterApi.downloadShiftDefinitionsExport(stationId)}>⬇ Export Current</button>
             )}
             {canManageRoster && (
               <FileImportButton label="⬆ Import" busy={sdBusy} onFile={handleShiftDefImport} />

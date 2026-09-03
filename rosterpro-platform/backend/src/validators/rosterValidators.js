@@ -55,6 +55,11 @@ const shiftDefTypes = z.enum(["duty", "night", "off", "leave", "other"]);
 const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM (24-hour)");
 
 const upsertShiftDefSchema = z.object({
+  // Only meaningful for SUPER_ADMIN, who has no fixed airlineId of their
+  // own (see resolveAirlineId in utils/stationScope.js) — names which
+  // tenant's shift definitions to touch. Every other role's actor.airlineId
+  // is already authoritative and this is ignored.
+  stationId: z.string().uuid().optional(),
   code: z.string().min(1).max(10),
   name: z.string().min(1).max(60),
   startTime: timeStr.optional().nullable(),
