@@ -1,7 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext.jsx";
 import { useStation } from "../../store/StationContext.jsx";
-import StationSwitcher from "./StationSwitcher.jsx";
+import AirlineSwitcher from "./AirlineSwitcher.jsx";
 
 // Same structure/classes as the prototype's <aside class="sidebar">: s-logo,
 // nav, nav-sl section labels, ni nav items with ni-icon/ni-badge, s-foot
@@ -36,10 +36,17 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <div className="s-logo">
-        <span className="lm">{currentStation ? `${currentStation.iataCode} · M&E` : "M&E"}</span>
+        {/* The airline's real name is the top-most line whenever there's more
+            than one to distinguish (SUPER_ADMIN/AIRLINE_ADMIN) — otherwise
+            a station-scoped user's own single airline never needs naming. */}
+        <span className="lm">
+          {currentStation?.airlineName || (currentStation ? `${currentStation.iataCode} · M&E` : "M&E")}
+        </span>
         <span className="ln">RosterPro</span>
-        <span className="ls">{currentStation ? `${currentStation.name} Line Maintenance` : "Select a station"}</span>
-        {needsSwitcher && <div style={{ marginTop: 8 }}><StationSwitcher /></div>}
+        <span className="ls">
+          {currentStation ? `${currentStation.iataCode} — ${currentStation.name} Line Maintenance` : "Select a station"}
+        </span>
+        {needsSwitcher && <AirlineSwitcher />}
       </div>
       <nav className="nav">
         {NAV_SECTIONS.map(section => (
