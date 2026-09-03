@@ -33,4 +33,42 @@ async function listAirlines() {
   }));
 }
 
-module.exports = { listAirlines };
+// Provisions a brand-new tenant in one transaction: the Airline itself,
+// its first Station, and a first AIRLINE_ADMIN user at that station —
+// deliberately atomic, so a failure partway through (e.g. the AIRLINE_ADMIN
+// role somehow missing from the seeded role table) never leaves a
+// half-created airline with no way to log into it.
+async function createAirlineWithAdmin({ airline, station, admin, passwordHash, actorId }) {
+  return prisma.$transaction(async (tx) => {
+    const adminRole = await tx.role.findUnique({ where: { name: "AIRLINE_ADMIN" } });
+    if (!adminRole) throw new Error("AIRLINE_ADMIN role not found — has the role/permission seed been run?");
+
+    const newAirline = await tx.airline.create({
+      data: {
+        name: airline.name, icaoCode: airline.icaoCode.toUpperCase(),
+        iataCode: airline.iataCode ? airline.iataCode.toUpperCase() : null,
+        createdById: actorId, updatedById: actorId,
+      },
+    });
+    const newStation = await tx.station.create({
+      data: {
+        airlineId: newAirline.id, name: station.name, iataCode: station.iataCode.toUpperCase(),
+        icaoCode: station.icaoCode ? station.icaoCode.toUpperCase() : null,
+        createdById: actorId, updatedById: actorId,
+      },
+    });
+    const newAdmin = await tx.user.create({
+      data: {
+        airlineId: newAirline.id, stationId: newStation.id,
+        fullName: admin.fullName, email: admin.email.toLowerCase(), passwordHash,
+        isActive: true, isEmailVerified: true, // admin-provisioned — same rule as userService.createStaff
+        createdById: actorId,
+      },
+    });
+    await tx.userRole.create({ data: { userId: newAdmin.id, roleId: adminRole.id } });
+
+    return { airline: newAirline, station: newStation, admin: newAdmin };
+  });
+}
+
+module.exports = { listAirlines, createAirlineWithAdmin };

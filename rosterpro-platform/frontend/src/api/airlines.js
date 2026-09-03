@@ -4,3 +4,7 @@ import { api } from "./client.js";
 export function listAirlines() {
   return api.get("/api/airlines");
 }
+
+export function createAirline(body) {
+  return api.post("/api/airlines", body);
+}
