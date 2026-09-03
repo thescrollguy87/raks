@@ -37,7 +37,7 @@ const PERMISSIONS = [
   ["flight", "read"], ["engineering_delay", "read"], ["engineering_delay", "create"],
   ["reports", "read"], ["reports", "export"],
   ["users", "read"], ["users", "create"], ["users", "update"], ["users", "assign_role"],
-  ["station", "read"], ["station", "update"],
+  ["station", "read"], ["station", "create"], ["station", "update"],
   ["airline", "read"], ["airline", "update"],
   ["audit_trail", "read"],
 ];

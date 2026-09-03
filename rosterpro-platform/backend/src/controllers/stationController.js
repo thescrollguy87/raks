@@ -1,4 +1,5 @@
 const stationRepo = require("../repositories/stationRepository");
+const stationService = require("../services/stationService");
 const asyncHandler = require("../utils/asyncHandler");
 
 const list = asyncHandler(async (req, res) => {
@@ -6,4 +7,9 @@ const list = asyncHandler(async (req, res) => {
   res.json(await stationRepo.listStations({ airlineId: req.user.airlineId, isSuperAdmin }));
 });
 
-module.exports = { list };
+const create = asyncHandler(async (req, res) => {
+  const station = await stationService.createStation(req.body, req.user, req);
+  res.status(201).json(station);
+});
+
+module.exports = { list, create };

@@ -21,6 +21,26 @@ export function StationProvider({ children }) {
 
   const needsSwitcher = isAuthenticated && !claims?.stationId;
 
+  // Pulled out of the mount effect so a fresh station (just added via
+  // AddStationModal) can be folded into the list without a full page
+  // reload — reload(newlyCreatedId) also selects it, so "add a station"
+  // immediately switches you onto it rather than leaving you looking at
+  // whatever was selected before.
+  const reload = useCallback((selectAfter) => {
+    setLoading(true);
+    return api.get("/api/stations").then(list => {
+      setStations(list);
+      if (selectAfter && list.some(s => s.id === selectAfter)) {
+        setSelectedStationId(selectAfter);
+        localStorage.setItem(STORAGE_KEY, selectAfter);
+      } else {
+        const stored = localStorage.getItem(STORAGE_KEY);
+        const valid = list.find(s => s.id === stored);
+        setSelectedStationId(valid ? stored : list[0]?.id || null);
+      }
+    }).finally(() => setLoading(false));
+  }, []);
+
   useEffect(() => {
     if (!isAuthenticated) { setLoading(false); return; }
 
@@ -32,13 +52,8 @@ export function StationProvider({ children }) {
     }
 
     // Airline-level user — fetch the list, restore a prior choice if valid.
-    setLoading(true);
-    api.get("/api/stations").then(list => {
-      setStations(list);
-      const stored = localStorage.getItem(STORAGE_KEY);
-      const valid = list.find(s => s.id === stored);
-      setSelectedStationId(valid ? stored : list[0]?.id || null);
-    }).finally(() => setLoading(false));
+    reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, claims?.stationId]);
 
   const selectStation = useCallback((id) => {
@@ -56,8 +71,8 @@ export function StationProvider({ children }) {
   }, [claims?.stationId, user?.station, stations, selectedStationId]);
 
   const value = useMemo(() => ({
-    stationId: selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation,
-  }), [selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation]);
+    stationId: selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation, reloadStations: reload,
+  }), [selectedStationId, stations, needsSwitcher, loading, selectStation, currentStation, reload]);
 
   return <StationContext.Provider value={value}>{children}</StationContext.Provider>;
 }

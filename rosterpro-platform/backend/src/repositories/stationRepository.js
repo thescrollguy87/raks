@@ -27,4 +27,19 @@ function findStationAirlineId(stationId) {
   return prisma.station.findUnique({ where: { id: stationId }, select: { airlineId: true } });
 }
 
-module.exports = { listStations, findStationAirlineId };
+// Duplicate-code guard for createStation — Station has no DB-level unique
+// constraint on iataCode (unlike ShiftDefinition's (airlineId, code)), so
+// this is an application-level check, scoped per-airline (two different
+// airlines legitimately reusing a 3-letter code is fine; the same airline
+// listing "BOM" twice is almost certainly a mistake).
+function findStationByAirlineAndIata(airlineId, iataCode) {
+  return prisma.station.findFirst({ where: { airlineId, iataCode, deletedAt: null } });
+}
+
+function createStation({ airlineId, name, iataCode, icaoCode, actorId }) {
+  return prisma.station.create({
+    data: { airlineId, name, iataCode, icaoCode: icaoCode || null, createdById: actorId, updatedById: actorId },
+  });
+}
+
+module.exports = { listStations, findStationAirlineId, findStationByAirlineAndIata, createStation };
