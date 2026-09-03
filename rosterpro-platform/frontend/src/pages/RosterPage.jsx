@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
+import { useBillingReadOnly } from "../hooks/useBillingReadOnly.js";
 import * as rosterApi from "../api/roster.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
@@ -66,10 +67,17 @@ export default function RosterPage() {
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef(null);
 
-  const canEdit = hasPermission("shift", "update");
-  const canPublish = hasPermission("roster", "publish");
-  const canUnpublish = hasPermission("roster", "unpublish");
-  const canGenerate = hasPermission("roster", "update");
+  const { isReadOnly } = useBillingReadOnly();
+  // Folded into the SAME flags every write control already checks, rather
+  // than adding a parallel set of `!isReadOnly &&` conditions at every call
+  // site — the backend is still the real enforcement point (billingGate.js
+  // rejects the write regardless), this just means every button already
+  // gated by canEdit/canPublish/etc. is disabled for the same reason,
+  // for free, with the existing "View-only" messaging below covering why.
+  const canEdit = hasPermission("shift", "update") && !isReadOnly;
+  const canPublish = hasPermission("roster", "publish") && !isReadOnly;
+  const canUnpublish = hasPermission("roster", "unpublish") && !isReadOnly;
+  const canGenerate = hasPermission("roster", "update") && !isReadOnly;
 
   const load = useCallback(async () => {
     if (!stationId) return;
@@ -232,7 +240,7 @@ export default function RosterPage() {
       )}
       <div className="ab info" style={{ marginBottom: 9 }}>
         ℹ {monthKey} · {staff.length} staff · {nDays} days
-        {canEdit ? " · Click any shift cell to edit" : " · View-only"}
+        {canEdit ? " · Click any shift cell to edit" : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
 
       <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>

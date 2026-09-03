@@ -114,8 +114,98 @@ model Airline {
   aircraft    Aircraft[]
   flights     Flight[]
   shiftDefinitions ShiftDefinition[]
+  billing     AirlineBilling?
 
   @@map("airlines")
+}
+
+// One row per tenant — the whole subscription-state machine lives here.
+// Per-seat pricing (₹100/active-staff/month) varies every cycle, which is
+// exactly why this is built on Razorpay's token-based Recurring Payments
+// (save a payment method once, WE compute the amount and trigger the charge
+// each cycle) rather than their fixed-Plan Subscriptions API — see
+// billingService.js for the full rationale.
+//
+// status:
+//   trialing  — within the 2-month free trial (trialEndAt in the future).
+//   active    — trial converted to a real, currently-paying subscription.
+//               A failed charge does NOT leave this status immediately —
+//               failureCount/graceEndsAt track an in-progress grace period
+//               while still `active`, matching "read-only, not locked out"
+//               (see billingService.processBillingCycle).
+//   read_only — trial expired with no payment method, OR the grace period
+//               after a failed charge ran out. The ONLY way out is the
+//               reactivate flow (add/confirm a payment method).
+//   cancelled — reserved for a future explicit cancel action; treated the
+//               same as read_only by the write-gate (never built a cancel
+//               UI for this pass — no requirement asked for one).
+model AirlineBilling {
+  id        String  @id @default(uuid())
+  airlineId String  @unique
+  airline   Airline @relation(fields: [airlineId], references: [id])
+
+  status String @default("trialing")
+
+  trialStartAt DateTime
+  trialEndAt   DateTime
+
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  // The next date the daily job should actually act for this tenant —
+  // anchored to THEIR OWN signup day, not a global billing date (see
+  // scheduler.js). Advances by exactly one calendar month on every
+  // successful cycle (trial "would-be" log, real charge, or reactivation).
+  nextBillingDate DateTime
+
+  razorpayCustomerId   String?
+  paymentMethodToken   String? // Razorpay token_id for the saved card — the thing actually charged each cycle
+  paymentMethodLast4   String? // display only
+  paymentMethodNetwork String? // e.g. "Visa" — display only
+  paymentMethodAddedAt DateTime?
+
+  // Grace-period/retry state for an in-progress payment failure. All null
+  // whenever there is no unresolved failure (the normal case).
+  failureCount  Int       @default(0)
+  firstFailureAt DateTime?
+  graceEndsAt    DateTime?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  charges BillingCharge[]
+
+  @@map("airline_billing")
+}
+
+// One row per billing-cycle attempt (including trial "would-be" log rows
+// and each retry within a grace period) — the charge history log the spec
+// asks for, and the audit trail for exactly what was computed/charged.
+model BillingCharge {
+  id        String         @id @default(uuid())
+  billingId String
+  billing   AirlineBilling @relation(fields: [billingId], references: [id])
+
+  periodStart DateTime
+  periodEnd   DateTime
+  staffCount  Int
+  amountPaise Int // staffCount * 10000 (Rs.100 in paise) — the real computed amount, never assumed
+
+  // would_be — trial period, informational only, nothing charged
+  // success  — charge captured
+  // failed   — charge attempted and declined/errored
+  status String
+
+  attemptNumber     Int    @default(1) // 1 = first attempt this period; >1 = a grace-period retry
+  razorpayPaymentId String?
+  razorpayOrderId   String?
+  failureReason     String?
+
+  createdAt DateTime @default(now())
+
+  @@map("billing_charges")
+  @@index([billingId])
 }
 
 model Station {

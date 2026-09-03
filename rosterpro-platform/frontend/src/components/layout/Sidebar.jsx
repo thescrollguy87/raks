@@ -67,6 +67,11 @@ export default function Sidebar() {
             <span className="ni-icon">🏢</span>Tenants
           </NavLink>
         )}
+        {hasPermission("billing", "read") && (
+          <NavLink to="/billing" className={({ isActive }) => `ni${isActive ? " active" : ""}`}>
+            <span className="ni-icon">💳</span>Billing
+          </NavLink>
+        )}
         <button className="ni" onClick={logout}>
           <span className="ni-icon">🔓</span>Sign Out
         </button>

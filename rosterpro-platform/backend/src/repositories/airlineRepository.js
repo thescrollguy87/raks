@@ -1,4 +1,5 @@
 const prisma = require("../config/prisma");
+const billingService = require("../services/billingService");
 
 // SUPER_ADMIN-only listing (see routes/airlineRoutes.js — gated by
 // requireRole("SUPER_ADMIN"), not just a permission string, since this is
@@ -66,6 +67,10 @@ async function createAirlineWithAdmin({ airline, station, admin, passwordHash, a
       },
     });
     await tx.userRole.create({ data: { userId: newAdmin.id, roleId: adminRole.id } });
+
+    // Trial starts automatically, in the same transaction — no separate
+    // step, no window where a tenant exists without a billing record.
+    await billingService.startTrial(newAirline.id, actorId, tx);
 
     return { airline: newAirline, station: newStation, admin: newAdmin };
   });

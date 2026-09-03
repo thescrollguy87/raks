@@ -17,6 +17,7 @@ import PastRostersPage from "./pages/PastRostersPage.jsx";
 import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
 import ImportExportPage from "./pages/ImportExportPage.jsx";
 import TenantsPage from "./pages/TenantsPage.jsx";
+import BillingPage from "./pages/BillingPage.jsx";
 
 export default function App() {
   return (
@@ -71,6 +72,10 @@ export default function App() {
         <Route
           path="/tenants"
           element={<ProtectedRoute role="SUPER_ADMIN"><TenantsPage /></ProtectedRoute>}
+        />
+        <Route
+          path="/billing"
+          element={<ProtectedRoute permission={["billing", "read"]}><BillingPage /></ProtectedRoute>}
         />
       </Route>
     </Routes>

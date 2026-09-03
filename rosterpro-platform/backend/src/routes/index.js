@@ -16,6 +16,7 @@ const ruleBuilderRoutes = require("./ruleBuilderRoutes");
 const dailyOpsRoutes = require("./dailyOpsRoutes");
 const departureAllocationRoutes = require("./departureAllocationRoutes");
 const airlineRoutes = require("./airlineRoutes");
+const billingRoutes = require("./billingRoutes");
 
 const router = express.Router();
 
@@ -37,5 +38,6 @@ router.use("/rule-builder", ruleBuilderRoutes); // Auto-Roster Generator: Rule B
 router.use("/daily-ops", dailyOpsRoutes); // Auto-Roster Generator: Daily Operational Adjustment tab
 router.use("/departure-allocation", departureAllocationRoutes); // Flight Schedule page: day-wise per-departure manpower (releaser + support)
 router.use("/airlines", airlineRoutes); // SUPER_ADMIN-only: every tenant on the platform, with station/staff counts
+router.use("/billing", billingRoutes); // per-seat Razorpay subscription: status, payment method, charge history
 
 module.exports = router;

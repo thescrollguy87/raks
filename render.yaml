@@ -44,7 +44,13 @@ services:
     # seed-stations` if it's ever needed again). Adding either back here
     # would mean every future tenant silently inherits that data on its
     # very first deploy.
-    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && node scripts/create-admin.js
+    #
+    # scripts/backfill-billing.js IS safe here, unlike those two — it only
+    # ever fills in a missing AirlineBilling row for a tenant that doesn't
+    # have one yet (every new tenant already gets one automatically at
+    # creation), so it's a no-op after its first successful run and never
+    # touches tenant-specific data.
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npx prisma db seed && node scripts/create-admin.js && node scripts/backfill-billing.js
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
@@ -86,6 +92,19 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
       - key: ADMIN_NAME
+        sync: false
+      # Subscription billing (Razorpay). Both blank = the backend runs an
+      # honest in-process FAKE Razorpay client instead (see
+      # src/integrations/razorpayClient.js) — the whole trial/charge/
+      # grace-period/read-only state machine still works end-to-end, no
+      # real money moves. Set both, from Render's Environment tab, whenever
+      # you're ready to go live with a real Razorpay account (test-mode
+      # keys first, to run the checklist in RazorpayCheckout.jsx's Add
+      # Payment Method flow against Razorpay's own test cards before
+      # switching to live keys).
+      - key: RAZORPAY_KEY_ID
+        sync: false
+      - key: RAZORPAY_KEY_SECRET
         sync: false
 
   # ── Frontend (static build) ────────────────────────────────────────────

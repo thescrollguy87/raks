@@ -1,6 +1,7 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import BillingBanner from "./BillingBanner.jsx";
 import { PageHeaderProvider } from "../../store/PageHeaderContext.jsx";
 
 // Matches the prototype's <div class="app"><aside>...</aside><main
@@ -14,6 +15,7 @@ export default function AppLayout() {
         <Sidebar />
         <main className="main">
           <TopBar />
+          <BillingBanner />
           <div className="content">
             <Outlet />
           </div>

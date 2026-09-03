@@ -39,6 +39,7 @@ const PERMISSIONS = [
   ["users", "read"], ["users", "create"], ["users", "update"], ["users", "assign_role"],
   ["station", "read"], ["station", "create"], ["station", "update"],
   ["airline", "read"], ["airline", "update"],
+  ["billing", "read"], ["billing", "manage"],
   ["audit_trail", "read"],
 ];
 
@@ -59,6 +60,7 @@ const ROLE_MATRIX = {
     "roster:*", "shift:*", "staff:*", "leave:*", "qualification:*", "license:*",
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
+    "billing:*", // the Billing page is Airline Admin only — no other role gets this
   ],
   STATION_MANAGER: [
     "roster:*", "shift:*", "staff:read", "staff:update", "leave:*",

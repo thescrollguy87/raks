@@ -5,6 +5,7 @@ const logger = require("../config/logger");
 const rosterRepo = require("../repositories/rosterRepository");
 const notificationService = require("../services/notificationService");
 const complianceService = require("../services/complianceService");
+const billingService = require("../services/billingService");
 
 function shiftLabel(shiftDef) {
   if (!shiftDef.startTime) return shiftDef.name;
@@ -59,6 +60,18 @@ async function runComplianceExpiryReminders() {
   }
 }
 
+// ── Job 3: billing cycle (per-tenant, on their own signup anchor) ───────────
+// Runs daily but "acts" for a given tenant only on their own monthly
+// anchor date (or every day while they're mid-grace-period-retry) — see
+// billingRepo.listDueForCycle/listInGracePeriod and
+// billingService.processTenantCycle for the actual per-tenant logic.
+async function runBillingCycle() {
+  const results = await billingService.runDueCycles(new Date());
+  const byAction = {};
+  results.forEach(r => { byAction[r.action || "error"] = (byAction[r.action || "error"] || 0) + 1; });
+  logger.info(`[job:billing-cycle] processed ${results.length} tenant(s): ${JSON.stringify(byAction)}`);
+}
+
 function startScheduler() {
   // Daily reminder: defaults to 18:00 station-local time, so staff get
   // tomorrow's shift the evening before.
@@ -73,10 +86,16 @@ function startScheduler() {
     runComplianceExpiryReminders().catch(err => logger.error(`[job:compliance-expiry] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance expiry @06:00");
+  // Billing runs once a day, off-peak — each tenant's own signup anchor
+  // decides whether today is actually a "do something" day for them.
+  cron.schedule(env.billingCycleCron || "0 7 * * *", () => {
+    runBillingCycle().catch(err => logger.error(`[job:billing-cycle] failed: ${err.message}`));
+  }, { timezone: env.tz || "Asia/Kolkata" });
+
+  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance expiry @06:00, billing cycle @07:00");
 }
 
 module.exports = {
   startScheduler,
-  runDailyShiftReminders, runComplianceExpiryReminders,
+  runDailyShiftReminders, runComplianceExpiryReminders, runBillingCycle,
 };

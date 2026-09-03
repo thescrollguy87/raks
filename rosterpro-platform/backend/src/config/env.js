@@ -46,7 +46,24 @@ module.exports = {
   },
 
   dailyReminderCron: process.env.DAILY_REMINDER_CRON || "0 18 * * *",
+  billingCycleCron: process.env.BILLING_CYCLE_CRON || "0 7 * * *",
   tz: process.env.TZ || "Asia/Kolkata",
+
+  // Optional like SMTP/Twilio above — the app boots fine without these
+  // (billingService.getRazorpayClient() throws a clear error only when a
+  // billing action is actually attempted), since a fresh deploy shouldn't
+  // hard-fail just because Razorpay hasn't been configured yet.
+  razorpay: {
+    keyId: process.env.RAZORPAY_KEY_ID,
+    keySecret: process.env.RAZORPAY_KEY_SECRET,
+    webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
+  },
+
+  billing: {
+    pricePerStaffPaise: parseInt(process.env.BILLING_PRICE_PER_STAFF_PAISE || "10000", 10), // Rs.100
+    trialMonths: parseInt(process.env.BILLING_TRIAL_MONTHS || "2", 10),
+    graceDays: parseInt(process.env.BILLING_GRACE_DAYS || "3", 10),
+  },
 
   appUrl: process.env.APP_URL || "http://localhost:5173",
 
