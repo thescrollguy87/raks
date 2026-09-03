@@ -1,19 +1,21 @@
 :root{
-  /* Dark navy theme, matching the real RosterPro reference app (variable
-     names read literally here — --navy IS a navy background, --white IS
-     white text). Values aren't guessed: they're the exact colors already
-     hardcoded as rgba() tints throughout this file's own components
-     (badge/alert backgrounds like rgba(0,200,83,.12) for green,
-     rgba(229,57,53,.12) for red, rgba(245,166,35,.12) for amber,
-     rgba(0,198,255,.12) for cyan) — this just gives those same colors a
-     home as the real theme variables instead of leaving --green/--red/etc
-     mismatched with the tints already used everywhere against them. */
-  --navy:#0B1622;--navy-mid:#13212F;--navy-lite:#1B2C3D;
+  /* Executive-grade dark theme — a deep neutral (near-black slate)
+     background with elevated card surfaces one step lighter, rather than
+     the old flat navy-on-navy look. --navy is the page background, --navy-mid
+     the standard elevated surface (cards/sidebar/topbar), --navy-lite a
+     further-raised surface (inputs, nested blocks, timeline entries) —
+     same three-tier relationship as before, new values. Accent/status
+     colors (--sky/--cyan/--amber/--red/--green/--purple) are unchanged so
+     every existing rgba() tint built against them (badges, alerts, shift
+     colors) stays correct without touching each call site. */
+  --navy:#090D16;--navy-mid:#111827;--navy-lite:#1E293B;
   --sky:#0096FF;--cyan:#00C6FF;--amber:#F5A623;--red:#E53935;
   --orange:#C2703D;--green:#00C853;--purple:#7E22CE;--teal:#14B8A6;
-  --white:#F1F5F9;--text-dim:#7A8CA3;--border:rgba(255,255,255,.08);
-  --glass:rgba(255,255,255,.05);--r:10px;--r-lg:16px;
+  --white:#F8FAFC;--text-dim:#94A3B8;--border:rgba(255,255,255,.07);
+  --glass:rgba(255,255,255,.05);--r:12px;--r-lg:16px;
   --rp-red:#E53935;--rp-green:#00C853;
+  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 4px 12px -4px rgba(0,0,0,.35);
+  --shadow-pop:0 8px 24px -6px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
   --ui:'Inter','Segoe UI',system-ui,sans-serif;
   --mono:'Fira Code','Consolas',monospace;
 }
@@ -56,10 +58,14 @@ table{border-collapse:collapse}
 .s-logo .ln{font-size:16px;font-weight:800;margin-top:1px}
 .s-logo .ls{font-size:9px;margin-top:1px}
 .nav{flex:1;padding:8px 6px;overflow-y:auto}
-.nav-sl{font-size:8px;font-weight:700;letter-spacing:2px;color:var(--text-dim);padding:9px 8px 3px;text-transform:uppercase}
-.ni{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:7px;margin-bottom:1px;color:var(--text-dim);font-size:11px;font-weight:500;cursor:pointer;transition:all .15s;border:none;background:transparent;width:100%;text-align:left}
-.ni:hover{background:var(--glass);color:var(--white)}
-.ni.active{background:linear-gradient(135deg,rgba(0,198,255,.15),rgba(27,108,168,.2));color:var(--cyan);border:1px solid rgba(0,198,255,.2)}
+.nav-sl{font-size:8px;font-weight:700;letter-spacing:2px;color:var(--text-dim);padding:9px 8px 3px;text-transform:uppercase;opacity:.75}
+/* Left accent bar + a flat tint, not the old all-around-bordered gradient
+   pill — the "clean active indicator" treatment Linear/Vercel-style
+   sidebars use, via a transparent left border that only shows on .active
+   so nothing shifts layout on hover vs active. */
+.ni{display:flex;align-items:center;gap:8px;padding:7px 9px 7px 8px;border-radius:6px;margin-bottom:1px;color:var(--text-dim);font-size:11px;font-weight:500;cursor:pointer;transition:background .15s,color .15s;border:none;border-left:2px solid transparent;background:transparent;width:100%;text-align:left}
+.ni:hover{background:rgba(255,255,255,.04);color:var(--white)}
+.ni.active{background:rgba(0,198,255,.09);color:var(--cyan);border-left:2px solid var(--cyan);font-weight:600}
 .ni-icon{font-size:13px;width:16px;text-align:center}
 .ni-badge{margin-left:auto;background:var(--red);color:#fff;font-size:8px;font-weight:700;padding:1px 4px;border-radius:8px;min-width:16px;text-align:center}
 .s-foot{padding:9px 7px;border-top:1px solid var(--border)}
@@ -78,8 +84,8 @@ table{border-collapse:collapse}
 .page.active{display:block}
 
 /* CARDS */
-.card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px;margin-bottom:12px}
-.card-title{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);margin-bottom:11px;display:flex;align-items:center;gap:6px}
+.card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r-lg);padding:14px;margin-bottom:12px;box-shadow:var(--shadow-card)}
+.card-title{font-size:11px;font-weight:600;letter-spacing:.4px;text-transform:uppercase;color:var(--text-dim);margin-bottom:11px;display:flex;align-items:center;gap:6px}
 
 /* BUTTONS */
 .btn{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:7px;font-size:11px;font-weight:600;transition:all .15s}
@@ -95,17 +101,69 @@ table{border-collapse:collapse}
 
 /* STATS */
 .stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:12px}
-.stat-card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r);padding:11px;position:relative;overflow:hidden}
+.stat-card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r);padding:13px 14px;position:relative;overflow:hidden;box-shadow:var(--shadow-card);transition:border-color .15s}
+.stat-card:hover{border-color:rgba(255,255,255,.14)}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
 .stat-card.sky::before{background:linear-gradient(90deg,var(--sky),var(--cyan))}
 .stat-card.green::before{background:var(--green)}
 .stat-card.amber::before{background:var(--amber)}
 .stat-card.red::before{background:var(--red)}
 .stat-card.purple::before{background:var(--purple)}
-.stat-label{font-size:9px;color:var(--text-dim);font-weight:600}
-.stat-value{font-size:24px;font-weight:800;margin:3px 0 1px;line-height:1}
+.stat-card.neutral::before{background:rgba(148,163,184,.3)}
+.stat-label{font-size:11px;color:var(--text-dim);font-weight:500;letter-spacing:.2px}
+.stat-value{font-size:28px;font-weight:700;margin:5px 0 1px;line-height:1;color:var(--white);letter-spacing:-.3px}
 .stat-sub{font-size:9px;color:var(--text-dim)}
-.stat-icon{position:absolute;right:9px;top:9px;font-size:18px;opacity:.2}
+.stat-icon{position:absolute;right:10px;top:11px;font-size:16px;opacity:.35}
+
+/* DASHBOARD MICRO-COMPONENTS ------------------------------------------------
+   Small, reusable pieces the redesigned Dashboard widgets are built from —
+   translucent-tinted pills matching the color convention every other alert/
+   badge in this file already uses (rgba tint + solid-color text), so a
+   metric badge, an alert card, and (e.g.) a shift pill all read as the same
+   design language rather than one-off styling. */
+
+/* A metric's value as a small pill instead of plain bold text. "neutral" is
+   the deliberate default for a zero/no-data count — calm gray, not an
+   alarm color, so "Qualifications Expired: 0" doesn't read as a warning
+   that happens to be green. */
+.metric-badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+.metric-badge.neutral{background:rgba(148,163,184,.1);color:var(--text-dim);border:1px solid rgba(148,163,184,.16)}
+.metric-badge.red{background:rgba(229,57,53,.12);color:var(--red);border:1px solid rgba(229,57,53,.25)}
+.metric-badge.amber{background:rgba(245,166,35,.12);color:var(--amber);border:1px solid rgba(245,166,35,.25)}
+.metric-badge.green{background:rgba(0,200,83,.12);color:var(--green);border:1px solid rgba(0,200,83,.25)}
+.metric-badge.sky{background:rgba(0,150,255,.12);color:var(--sky);border:1px solid rgba(0,150,255,.25)}
+
+/* Coverage-by-category row: category chip + a horizontal bar (width scaled
+   relative to the day's other categories, not a fabricated target/quota —
+   there's no "required headcount" in the data to compare against) + count. */
+.cov-row{display:flex;align-items:center;gap:9px}
+.cov-row-label{width:34px;flex-shrink:0}
+.cov-row-track{flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.05);overflow:hidden}
+.cov-row-fill{height:100%;border-radius:4px;transition:width .5s ease}
+.cov-row-val{width:22px;flex-shrink:0;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
+
+/* Translucent alert/notification card — the pill-card treatment for
+   compliance alerts and coverage gaps, reusing the same red/amber tint
+   ratios as .ab/.expiry-alert elsewhere, just as a denser stacked card. */
+.alert-card{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.35}
+.alert-card.red{background:rgba(229,57,53,.1);color:#FCA5A5;border:1px solid rgba(229,57,53,.2)}
+.alert-card.amber{background:rgba(245,166,35,.1);color:#FCD34D;border:1px solid rgba(245,166,35,.2)}
+.alert-card-title{font-weight:700;color:inherit}
+.alert-card-sub{color:var(--text-dim);font-size:10px;margin-top:1px}
+
+/* Empty-state banner for a widget with genuinely nothing to show — calmer
+   than the red/amber alert cards above, on purpose. */
+.empty-note{font-size:11px;color:var(--text-dim);padding:6px 2px}
+
+/* Circular percentage gauge (DGCA Compliance, Leave Balance) — an SVG ring
+   with the number centered inside it, plus an inline label to its right. */
+.gauge-row{display:flex;align-items:center;gap:10px}
+.gauge-ring{position:relative;flex-shrink:0}
+.gauge-ring svg{transform:rotate(-90deg)}
+.gauge-ring-value{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--white)}
+.gauge-label{display:flex;flex-direction:column;gap:2px}
+.gauge-label-title{font-size:12px;color:var(--text-dim)}
+.gauge-label-sub{font-size:10px;color:var(--text-dim)}
 
 /* ROSTER */
 .roster-wrap{overflow-x:auto;border-radius:var(--r)}
@@ -154,9 +212,13 @@ table{border-collapse:collapse}
 /* FORMS */
 .fg{display:flex;flex-direction:column;gap:4px}
 .fl{font-size:10px;font-weight:600;color:var(--text-dim)}
-.fi{background:var(--navy-lite);border:1px solid var(--border);border-radius:7px;padding:7px 9px;color:var(--white);font-size:11px;outline:none;transition:border .15s;width:100%}
-.fi:focus{border-color:var(--cyan)}
+.fi{background:var(--navy-lite);border:1px solid var(--border);border-radius:7px;padding:7px 9px;color:var(--white);font-size:11px;outline:none;transition:border-color .15s,background .15s;width:100%}
+.fi:focus{border-color:var(--cyan);background:#243244}
 .fi::placeholder{color:var(--text-dim)}
+/* Minimalist select: kill the native OS chrome, draw one small custom
+   chevron instead — same flat surface as every other input, just with an
+   affordance that it opens a list. */
+select.fi{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:26px;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1L5 5L9 1' stroke='%2394A3B8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center}
 select.fi option{background:var(--navy-mid)}
 .fg2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .fg3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
