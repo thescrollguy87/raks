@@ -15,8 +15,15 @@ export default function AirlineSwitcher() {
   const { stationId, stations, needsSwitcher, selectStation, reloadStations } = useStation();
   const { hasPermission } = useAuth();
   const [showAddStation, setShowAddStation] = useState(false);
-  if (!needsSwitcher || stations.length === 0) return null;
 
+  // useMemo must run on every render regardless of `needsSwitcher`/
+  // `stations.length` — the early return below used to sit BEFORE this
+  // hook, so the very first render (stations still []) called one fewer
+  // hook than every render after the fetch resolved. React detected the
+  // mismatched hook count and threw ("Rendered more hooks than during the
+  // previous render"), which unmounted the whole app to a blank screen on
+  // every reload. All hooks now run unconditionally; only the JSX return
+  // is conditional.
   const airlines = useMemo(() => {
     const byId = new Map();
     stations.forEach(s => {
@@ -24,6 +31,8 @@ export default function AirlineSwitcher() {
     });
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [stations]);
+
+  if (!needsSwitcher || stations.length === 0) return null;
 
   const currentStationObj = stations.find(s => s.id === stationId);
   const currentAirlineId = currentStationObj?.airlineId || airlines[0]?.id;
