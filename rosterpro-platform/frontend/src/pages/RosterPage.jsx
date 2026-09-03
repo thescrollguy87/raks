@@ -328,7 +328,7 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
                   <div
                     className="sp" onClick={() => onCellClick(s, day)}
                     title={def ? `${def.name}${def.startTime ? `: ${def.startTime}–${def.endTime}` : ""}` : code}
-                    style={{ background: def?.bg || "rgba(180,180,180,.1)", color: def?.color || "#AABBCC" }}
+                    style={{ background: def?.color || "rgba(180,180,180,.1)", color: "#000" }}
                   >
                     <span className="sc-code">{code}</span>
                     {def?.startTime && <span className="sc-time">{def.startTime}–{def.endTime}</span>}
