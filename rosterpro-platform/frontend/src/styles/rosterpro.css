@@ -79,7 +79,7 @@ table{border-collapse:collapse}
 .topbar{height:50px;flex-shrink:0;background:var(--navy-mid);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:9px}
 .topbar-title{font-size:14px;font-weight:700;flex:1}
 .topbar-sub{font-size:9px;color:var(--text-dim)}
-.content{flex:1;overflow-y:auto;padding:14px}
+.content{flex:1;overflow:auto;padding:14px}
 .page{display:none}
 .page.active{display:block}
 
@@ -166,7 +166,13 @@ table{border-collapse:collapse}
 .gauge-label-sub{font-size:10px;color:var(--text-dim)}
 
 /* ROSTER */
-.roster-wrap{overflow-x:auto;border-radius:var(--r)}
+/* No overflow of its own — .content is the single scrolling ancestor for
+   both axes (see .content above). A wrapper-level overflow-x:auto here
+   would make THIS the sticky-positioning ancestor instead (per spec,
+   overflow-x:auto forces overflow-y:auto too), so the sticky day-header
+   row and frozen staff-name column would "stick" to a box that never
+   itself scrolls — i.e. scroll straight off screen with everything else. */
+.roster-wrap{border-radius:var(--r)}
 .rt{min-width:100%;font-size:10px}
 .rt th{background:var(--navy-lite);color:var(--text-dim);padding:5px 3px;text-align:center;font-weight:700;font-size:8px;white-space:nowrap;position:sticky;top:0;z-index:10}
 .rt th.sc{position:sticky;left:0;z-index:20;text-align:left;padding-left:7px;min-width:165px}
@@ -330,7 +336,10 @@ select.fi option{background:var(--navy-mid)}
 .r-ok{background:rgba(0,200,83,.08);color:var(--green);font-weight:700}
 .r-warn{background:rgba(245,166,35,.12);color:var(--amber);font-weight:700}
 .r-over{background:rgba(229,57,53,.18);color:var(--red);font-weight:700}
-.rolling-wrap{overflow-x:auto}
+/* Same reasoning as .roster-wrap above: no overflow of its own, so its
+   sticky table header sticks relative to .content (which actually
+   scrolls) instead of a wrapper box that never scrolls itself. */
+.rolling-wrap{}
 .rolling-table{font-size:10px;min-width:100%}
 .rolling-table th{background:var(--navy-lite);padding:4px 3px;text-align:center;font-size:8px;position:sticky;top:0}
 .rolling-table td{padding:2px 3px;text-align:center}
