@@ -25,3 +25,44 @@ export function shiftNetHours(def, assignment) {
   }
   return Math.max(0, (mins - (def?.breakMin || 0)) / 60);
 }
+
+// Effective start/end time for one assignment (override, else the shift
+// definition's default), plus which calendar date the shift actually ENDS
+// on — an overnight shift like Night (21:00->07:00) ends on the day AFTER
+// the one it's coded on, which matters for any rest-gap-between-shifts math.
+export function effectiveShiftWindow(def, assignment, dateStr) {
+  const in1 = assignment?.in1 || def?.startTime;
+  const lastOut = (assignment?.in2 && assignment?.out2) ? assignment.out2 : (assignment?.out1 || def?.endTime);
+  if (!in1 || !lastOut) return null;
+  const overnight = toMinutes(lastOut) <= toMinutes(in1);
+  return { in1, lastOut, endDateStr: overnight ? addOneDay(dateStr) : dateStr };
+}
+
+// Rest hours between the end of `fromWindow` (from effectiveShiftWindow, on
+// fromDateStr) and the start of a shift beginning at `toDateStr toTime`.
+// Returns null when either side has no real time (e.g. Off/Leave).
+export function restGapHours(fromWindow, toDateStr, toTime) {
+  if (!fromWindow || !toTime) return null;
+  const [fh, fm] = fromWindow.lastOut.split(":").map(Number);
+  const [th, tm] = toTime.split(":").map(Number);
+  const fromMs = new Date(fromWindow.endDateStr + "T00:00:00Z").getTime() + (fh * 60 + fm) * 60000;
+  const toMs = new Date(toDateStr + "T00:00:00Z").getTime() + (th * 60 + tm) * 60000;
+  const diffH = (toMs - fromMs) / 3600000;
+  return diffH >= 0 ? diffH : null;
+}
+
+function toMinutes(hhmm) { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; }
+function addOneDay(dateStr) { const d = new Date(dateStr + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); }
+
+// Buckets a shift code into Morning/Afternoon/Night — matches this app's
+// real shift-code convention (M/M1/MS, A/A1/A2/AS, N/N1/N2/N3 from the seed
+// data) rather than assuming only literal "M"/"A"/"N" exist. Used by the
+// Roster page's KPI row and Daily Coverage table, and by the Edit Shift
+// popover's coverage-maintained check.
+export function shiftBucket(code, def) {
+  if (!code || code === "O") return null;
+  if (def?.type === "night") return "N";
+  if (code[0] === "M") return "M";
+  if (code[0] === "A") return "A";
+  return null;
+}

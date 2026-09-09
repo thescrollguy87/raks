@@ -1,21 +1,26 @@
 :root{
-  /* Executive-grade dark theme — a deep neutral (near-black slate)
-     background with elevated card surfaces one step lighter, rather than
-     the old flat navy-on-navy look. --navy is the page background, --navy-mid
-     the standard elevated surface (cards/sidebar/topbar), --navy-lite a
-     further-raised surface (inputs, nested blocks, timeline entries) —
-     same three-tier relationship as before, new values. Accent/status
-     colors (--sky/--cyan/--amber/--red/--green/--purple) are unchanged so
-     every existing rgba() tint built against them (badges, alerts, shift
-     colors) stays correct without touching each call site. */
-  --navy:#090D16;--navy-mid:#111827;--navy-lite:#1E293B;
-  --sky:#0096FF;--cyan:#00C6FF;--amber:#F5A623;--red:#E53935;
-  --orange:#C2703D;--green:#00C853;--purple:#7E22CE;--teal:#14B8A6;
-  --white:#F8FAFC;--text-dim:#94A3B8;--border:rgba(255,255,255,.07);
-  --glass:rgba(255,255,255,.05);--r:12px;--r-lg:16px;
-  --rp-red:#E53935;--rp-green:#00C853;
-  --shadow-card:0 1px 2px rgba(0,0,0,.4),0 4px 12px -4px rgba(0,0,0,.35);
-  --shadow-pop:0 8px 24px -6px rgba(0,0,0,.55),0 2px 8px rgba(0,0,0,.35);
+  /* Light SaaS workspace — a near-white page base with pure-white elevated
+     cards, plus a dark-navy sidebar carved out separately (see .sidebar
+     below, which locally redeclares these same variable NAMES back to dark
+     values within its own subtree). Keeping the NAMES stable — --navy is
+     "base surface", --navy-mid is "elevated/card surface", --navy-lite is
+     "recessed/nested surface", --white is "primary text", --text-dim is
+     "secondary text" — is what lets every existing rule across the app
+     (.card/.btn/.fi/.stat-card/.modal/.tl-content/dozens more) repaint
+     correctly without editing each one individually; only the token
+     VALUES changed, not what each token means structurally. Accent colors
+     (amber/red/green/purple/orange/teal) are unchanged — translucent tint +
+     solid-color-text badges/alerts read fine on both light and dark bases.
+     --sky/--cyan were tuned to a cleaner "modern SaaS blue" pair. */
+  --navy:#F4F6F9;--navy-mid:#FFFFFF;--navy-lite:#EEF2F6;
+  --sky:#2563EB;--cyan:#3B82F6;--amber:#D97706;--red:#DC2626;
+  --orange:#C2703D;--green:#16A34A;--purple:#7E22CE;--teal:#0D9488;
+  --white:#0F172A;--text-dim:#64748B;--border:rgba(15,23,42,.09);
+  --glass:rgba(15,23,42,.04);--r:8px;--r-lg:10px;
+  --rp-red:#DC2626;--rp-green:#16A34A;
+  --on-accent:#0B1220;
+  --shadow-card:0 1px 2px rgba(15,23,42,.04),0 1px 3px rgba(15,23,42,.07);
+  --shadow-pop:0 12px 28px -8px rgba(15,23,42,.18),0 4px 10px rgba(15,23,42,.08);
   --ui:'Inter','Segoe UI',system-ui,sans-serif;
   --mono:'Fira Code','Consolas',monospace;
 }
@@ -40,7 +45,7 @@ table{border-collapse:collapse}
 .l-label{font-size:10px;font-weight:600;color:var(--text-dim);margin-bottom:3px;display:block}
 .l-input{width:100%;background:var(--navy-lite);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--white);font-size:12px;outline:none;transition:border .15s}
 .l-input:focus{border-color:var(--cyan)}
-.l-btn{margin-top:6px;width:100%;padding:11px;background:linear-gradient(135deg,var(--sky),var(--cyan));color:var(--navy);font-size:13px;font-weight:700;border-radius:9px}
+.l-btn{margin-top:6px;width:100%;padding:11px;background:linear-gradient(135deg,var(--sky),var(--cyan));color:#fff;font-size:13px;font-weight:700;border-radius:9px}
 .l-btn:hover{opacity:.9}
 .l-err{background:rgba(229,57,53,.12);border:1px solid rgba(229,57,53,.3);color:var(--red);border-radius:7px;padding:7px 10px;font-size:11px;display:none;margin-top:6px}
 .l-view{margin-top:14px;font-size:10px;color:var(--text-dim)}
@@ -52,7 +57,31 @@ table{border-collapse:collapse}
 .rb-viewer{background:rgba(0,200,83,.1);color:var(--green);border:1px solid rgba(0,200,83,.25)}
 
 /* SIDEBAR */
-.sidebar{width:210px;flex-shrink:0;background:var(--navy-mid);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100}
+/* Stays dark navy while the rest of the app is now a light workspace — done
+   by locally redeclaring the SAME variable names the rest of this file's
+   sidebar rules already reference (--navy-mid/--border/--text-dim/--white/
+   --glass/--shadow-card), so .s-logo/.nav-sl/.ni/.u-card/etc. below need no
+   changes at all: within .sidebar's subtree those variables resolve to
+   these dark values via normal CSS custom-property scoping; everywhere
+   else in the app they resolve to the light :root values above. */
+.sidebar{
+  --navy-mid:#0B1220;--navy-lite:#141B2C;--white:#F1F5F9;--text-dim:#8B96AB;
+  --border:rgba(255,255,255,.08);--glass:rgba(255,255,255,.05);
+  --shadow-card:none;
+  /* Redefining the custom properties above only affects rules that
+     freshly reference var(...) at or below this element — it does NOT
+     retroactively change `color`'s already-inherited value cascading down
+     from body{color:var(--white)} (resolved against the LIGHT --white,
+     since body sits outside .sidebar). Explicitly re-setting `color` here
+     forces a fresh resolution using this scope's dark --white, which then
+     inherits correctly into .ln/.ls/.u-name and everything else below that
+     doesn't set its own color. */
+  color:var(--white);
+  position:relative;width:240px;flex-shrink:0;background:var(--navy-mid);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;transition:width .18s ease}
+.sidebar.collapsed{width:64px}
+.sidebar.collapsed .s-logo .ln,.sidebar.collapsed .s-logo .ls,.sidebar.collapsed .ni span:not(.ni-icon),.sidebar.collapsed .u-name,.sidebar.collapsed .u-role,.sidebar.collapsed .nav-sl{display:none}
+.sidebar.collapsed .u-card{justify-content:center}
+.sb-collapse-btn{position:absolute;top:14px;right:-11px;width:22px;height:22px;border-radius:50%;background:var(--navy-mid);border:1px solid var(--border);color:var(--text-dim);display:flex;align-items:center;justify-content:center;font-size:10px;z-index:101}
 .s-logo{padding:14px 12px 10px;border-bottom:1px solid var(--border)}
 .s-logo .lm{font-size:9px;letter-spacing:3px}
 .s-logo .ln{font-size:16px;font-weight:800;margin-top:1px}
@@ -76,9 +105,14 @@ table{border-collapse:collapse}
 
 /* MAIN */
 .main{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.topbar{height:50px;flex-shrink:0;background:var(--navy-mid);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 16px;gap:9px}
-.topbar-title{font-size:14px;font-weight:700;flex:1}
-.topbar-sub{font-size:9px;color:var(--text-dim)}
+.topbar{height:58px;flex-shrink:0;background:var(--navy-mid);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:9px}
+.topbar-title{font-size:17px;font-weight:700}
+.topbar-sub{font-size:11px;color:var(--text-dim);margin-top:1px}
+.tb-bell{position:relative;width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:15px;background:var(--glass);border:1px solid var(--border);cursor:default}
+.tb-bell-badge{position:absolute;top:-4px;right:-4px;background:var(--red);color:#fff;font-size:8px;font-weight:800;padding:1px 4px;border-radius:8px;min-width:15px;text-align:center;border:2px solid var(--navy-mid)}
+.tb-user{display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;border-radius:8px;border:1px solid var(--border)}
+.tb-user-name{font-size:11px;font-weight:700;line-height:1.25}
+.tb-user-role{font-size:9px;color:var(--text-dim);text-transform:capitalize}
 .content{flex:1;overflow:auto;padding:14px}
 .page{display:none}
 .page.active{display:block}
@@ -89,10 +123,10 @@ table{border-collapse:collapse}
 
 /* BUTTONS */
 .btn{display:inline-flex;align-items:center;gap:5px;padding:6px 11px;border-radius:7px;font-size:11px;font-weight:600;transition:all .15s}
-.btn-primary{background:linear-gradient(135deg,var(--sky),var(--cyan));color:var(--navy)}
+.btn-primary{background:linear-gradient(135deg,var(--sky),var(--cyan));color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.35)}
 .btn-primary:hover{opacity:.88}
 .btn-ghost{background:var(--glass);border:1px solid var(--border);color:var(--white)}
-.btn-ghost:hover{background:rgba(255,255,255,.08)}
+.btn-ghost:hover{background:rgba(15,23,42,.06)}
 .btn-danger{background:rgba(229,57,53,.12);border:1px solid rgba(229,57,53,.3);color:var(--red)}
 .btn-success{background:rgba(0,200,83,.12);border:1px solid rgba(0,200,83,.25);color:var(--green)}
 .btn-amber{background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.25);color:var(--amber)}
@@ -102,7 +136,7 @@ table{border-collapse:collapse}
 /* STATS */
 .stats-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:9px;margin-bottom:12px}
 .stat-card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r);padding:13px 14px;position:relative;overflow:hidden;box-shadow:var(--shadow-card);transition:border-color .15s}
-.stat-card:hover{border-color:rgba(255,255,255,.14)}
+.stat-card:hover{border-color:rgba(15,23,42,.16)}
 .stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
 .stat-card.sky::before{background:linear-gradient(90deg,var(--sky),var(--cyan))}
 .stat-card.green::before{background:var(--green)}
@@ -138,7 +172,7 @@ table{border-collapse:collapse}
    there's no "required headcount" in the data to compare against) + count. */
 .cov-row{display:flex;align-items:center;gap:9px}
 .cov-row-label{width:34px;flex-shrink:0}
-.cov-row-track{flex:1;height:7px;border-radius:4px;background:rgba(255,255,255,.05);overflow:hidden}
+.cov-row-track{flex:1;height:7px;border-radius:4px;background:rgba(15,23,42,.08);overflow:hidden}
 .cov-row-fill{height:100%;border-radius:4px;transition:width .5s ease}
 .cov-row-val{width:22px;flex-shrink:0;text-align:right;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums}
 
@@ -174,14 +208,16 @@ table{border-collapse:collapse}
    itself scrolls — i.e. scroll straight off screen with everything else. */
 .roster-wrap{border-radius:var(--r)}
 .rt{min-width:100%;font-size:10px;border-collapse:separate;border-spacing:0}
-.rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:10;border-bottom:1px solid rgba(255,255,255,.09)}
+.rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:10;border-bottom:1px solid rgba(15,23,42,.12)}
 .rt th.sc{position:sticky;left:0;z-index:20;text-align:left;padding-left:7px;min-width:165px}
 .rt th.sc2{position:sticky;left:165px;z-index:20;min-width:50px}
-.rt th.wknd{background:#243147}
-.rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
+.rt th.wknd{background:#E8EFFB}
+.rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(15,23,42,.07)}
 .rt td.sc{position:sticky;left:0;z-index:5;background:var(--navy-mid);padding-left:7px;text-align:left}
 .rt td.sc2{position:sticky;left:165px;z-index:5;background:var(--navy-mid)}
-.rt td.wknd{background:rgba(148,163,184,.06)}
+.rt td.wknd{background:rgba(59,130,246,.045)}
+.rt td.today,.rt th.today{background:#DCEAFE!important}
+.rt td.today .sp{outline:2px solid var(--sky);outline-offset:-1px}
 .sn{font-weight:600;font-size:10px;line-height:1.2}
 .sr{font-size:8px;color:var(--text-dim)}
 .sid{font-size:8px;color:var(--text-dim);font-family:var(--mono)}
@@ -189,7 +225,7 @@ table{border-collapse:collapse}
    swatch: a hairline dark border and soft shadow keep it legible even
    when two shift definitions happen to use similar background hues. */
 .sp{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:42px;min-height:30px;padding:3px 5px;border-radius:6px;cursor:pointer;transition:filter .12s,box-shadow .12s;position:relative;border:1px solid rgba(0,0,0,.16);box-shadow:0 1px 2px rgba(0,0,0,.22)}
-.sp:hover{filter:brightness(1.08);box-shadow:0 0 0 2px rgba(255,255,255,.45),0 2px 5px rgba(0,0,0,.3);z-index:10}
+.sp:hover{filter:brightness(1.05);box-shadow:0 0 0 2px rgba(15,23,42,.35),0 2px 5px rgba(0,0,0,.18);z-index:10}
 .sp.expired-lock{opacity:.7;cursor:not-allowed;background:rgba(220,38,38,.09)!important;border:1px solid rgba(220,38,38,.3)!important}
 .sp.expired-lock::after{content:"🔒";position:absolute;top:-2px;right:-2px;font-size:8px}
 .sc-code{font-weight:800;font-size:10.5px;line-height:1.15;letter-spacing:.2px}
@@ -223,7 +259,7 @@ table{border-collapse:collapse}
 .fg{display:flex;flex-direction:column;gap:4px}
 .fl{font-size:10px;font-weight:600;color:var(--text-dim)}
 .fi{background:var(--navy-lite);border:1px solid var(--border);border-radius:7px;padding:7px 9px;color:var(--white);font-size:11px;outline:none;transition:border-color .15s,background .15s;width:100%}
-.fi:focus{border-color:var(--cyan);background:#243244}
+.fi:focus{border-color:var(--cyan);background:#EFF6FF}
 .fi::placeholder{color:var(--text-dim)}
 /* Minimalist select: kill the native OS chrome, draw one small custom
    chevron instead — same flat surface as every other input, just with an
@@ -305,12 +341,76 @@ input[type="time"].fi::-webkit-calendar-picker-indicator{filter:invert(1);cursor
 .diff-new{color:var(--green)}
 
 /* MODAL */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:1000;display:none;align-items:center;justify-content:center}
+.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:1000;display:none;align-items:center;justify-content:center}
 .modal-overlay.open{display:flex}
-.modal{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;position:relative}
+.modal{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r-lg);padding:20px;width:500px;max-width:96vw;max-height:90vh;overflow-y:auto;position:relative;box-shadow:var(--shadow-pop)}
 .modal-lg{width:680px}
 .modal-title{font-size:14px;font-weight:800;margin-bottom:14px}
 .modal-close{position:absolute;top:13px;right:13px;background:var(--glass);border:1px solid var(--border);color:var(--white);width:24px;height:24px;border-radius:5px;font-size:14px;display:flex;align-items:center;justify-content:center}
+
+/* SHIFT-EDIT POPOVER — the same overlay/backdrop pattern as .modal, just a
+   compact anchored card rather than a centered dialog, and with its own
+   validation-checklist rows. */
+.popover-card{background:var(--navy-mid);border:1px solid var(--border);border-radius:var(--r-lg);padding:16px;width:340px;max-width:92vw;position:relative;box-shadow:var(--shadow-pop)}
+.popover-title{font-size:13px;font-weight:800}
+.popover-sub{font-size:10px;color:var(--text-dim);margin-top:1px;margin-bottom:12px}
+.pop-current{display:flex;align-items:center;gap:10px;background:var(--navy-lite);border:1px solid var(--border);border-radius:var(--r);padding:9px 11px;margin-bottom:12px}
+.pop-current-code{font-size:16px;font-weight:900}
+.pop-current-time{font-size:10px;color:var(--text-dim);font-family:var(--mono)}
+.quick-shift-row{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:12px}
+.quick-shift-btn{padding:5px 10px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid var(--border);background:var(--navy-lite);cursor:pointer;transition:all .12s}
+.quick-shift-btn:hover{border-color:var(--sky)}
+.quick-shift-btn.sel{border-color:var(--sky);box-shadow:0 0 0 1px var(--sky)}
+.validation-list{display:flex;flex-direction:column;gap:5px;margin:12px 0}
+.validation-row{display:flex;align-items:flex-start;gap:7px;font-size:10.5px;line-height:1.35}
+.validation-row.ok{color:var(--green)}
+.validation-row.warn{color:var(--amber)}
+.validation-row.crit{color:var(--red)}
+.validation-row .vr-icon{flex-shrink:0}
+
+/* STAFF DETAIL DRAWER — right-side slide-in panel; same dim-overlay idea as
+   .modal-overlay but the panel itself is pinned to the right edge, full
+   height, instead of centered. */
+.drawer-overlay{position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:1000;display:flex;justify-content:flex-end}
+.drawer{width:380px;max-width:94vw;height:100%;background:var(--navy-mid);border-left:1px solid var(--border);box-shadow:var(--shadow-pop);overflow-y:auto;animation:drawerIn .18s ease}
+@keyframes drawerIn{from{transform:translateX(24px);opacity:.4}to{transform:translateX(0);opacity:1}}
+.drawer-hdr{display:flex;align-items:flex-start;gap:11px;padding:18px 18px 14px;border-bottom:1px solid var(--border)}
+.drawer-avatar{width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--sky),var(--cyan));color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex-shrink:0}
+.drawer-name{font-size:14px;font-weight:800}
+.drawer-role{font-size:11px;color:var(--text-dim);margin-top:1px}
+.drawer-avail{display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:600;margin-top:6px}
+.drawer-close{margin-left:auto;background:var(--glass);border:1px solid var(--border);color:var(--white);width:26px;height:26px;border-radius:6px;flex-shrink:0}
+.drawer-body{padding:14px 18px 20px}
+.drawer-metric-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:7px 0;border-bottom:1px solid var(--border)}
+.drawer-metric-row:last-child{border-bottom:none}
+.drawer-metric-label{color:var(--text-dim)}
+.drawer-metric-val{font-weight:700}
+.avail-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.avail-dot.green{background:var(--green)}
+.avail-dot.amber{background:var(--amber)}
+.avail-dot.red{background:var(--red)}
+
+/* Compact Month/Week/Day segmented control + shift-code legend row. */
+.view-toggle{display:inline-flex;background:var(--navy-lite);border:1px solid var(--border);border-radius:7px;padding:2px}
+.view-toggle-btn{padding:5px 12px;border-radius:5px;font-size:11px;font-weight:600;color:var(--text-dim);background:transparent}
+.view-toggle-btn.active{background:var(--navy-mid);color:var(--white);box-shadow:var(--shadow-card)}
+.legend-row{display:flex;flex-wrap:wrap;gap:8px}
+.legend-chip{display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:7px;border:1px solid var(--border);background:var(--navy-lite);font-size:10px}
+.legend-swatch{width:11px;height:11px;border-radius:3px;flex-shrink:0;border:1px solid rgba(0,0,0,.15)}
+.legend-code{font-weight:800;font-size:11px}
+.legend-time{color:var(--text-dim);font-family:var(--mono)}
+.staff-name-btn{background:none;border:none;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
+.staff-name-btn:hover .sn{color:var(--sky);text-decoration:underline}
+
+/* Daily Coverage (Required vs Assigned) table below the roster grid. */
+.dc-table{width:100%;font-size:11px;border-collapse:collapse}
+.dc-table th{text-align:center;font-size:9px;font-weight:700;color:var(--text-dim);padding:5px 4px;border-bottom:1px solid var(--border)}
+.dc-table th:first-child{text-align:left}
+.dc-table td{text-align:center;padding:5px 4px;border-bottom:1px solid var(--border)}
+.dc-table td:first-child{text-align:left;font-weight:700;font-size:10px}
+.dc-table tr:last-child td{border-bottom:none;font-weight:800}
+.dc-short{color:var(--red);font-weight:800}
+.dc-ok{color:var(--green);font-weight:700}
 
 /* TOAST */
 .toast-container{position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;flex-direction:column;gap:6px}

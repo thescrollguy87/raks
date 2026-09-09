@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useBillingReadOnly } from "../hooks/useBillingReadOnly.js";
 import * as rosterApi from "../api/roster.js";
+import * as workloadConfigApi from "../api/workloadConfig.js";
+import { getDashboardSummary } from "../api/dashboard.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
+import StaffDetailDrawer from "../components/roster/StaffDetailDrawer.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
-import { shiftNetHours } from "../utils/shiftHours.js";
+import { shiftNetHours, shiftBucket } from "../utils/shiftHours.js";
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
+const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -29,6 +33,8 @@ function shiftMonth(monthKey, delta) {
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
+function todayISO() { return new Date().toISOString().slice(0, 10); }
+const WEEKDAY_LETTERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // 7-day blocks across the real length of the month (4 for a 28-day
 // February, 5 for a 29-31 day month) — same idea as reference-ui's WKB
@@ -46,17 +52,25 @@ export default function RosterPage() {
   const { hasPermission } = useAuth();
   const { stationId, loading: stationLoading, currentStation } = useStation();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [monthKey, setMonthKey] = useState(() => searchParams.get("month") || new Date().toISOString().slice(0, 7));
   const [catFilter, setCatFilter] = useState("ALL");
+  const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState("month");
   const [shiftDefs, setShiftDefs] = useState([]);
   const [roster, setRoster] = useState(null);
   const [staff, setStaff] = useState([]);
+  const [dashboardSummary, setDashboardSummary] = useState(null);
+  const [mandatoryRules, setMandatoryRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [editingCell, setEditingCell] = useState(null);
+  const [selectedStaff, setSelectedStaff] = useState(null);
+  const [showAllIssues, setShowAllIssues] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
   const importInputRef = useRef(null);
 
   const { isReadOnly } = useBillingReadOnly();
@@ -80,13 +94,20 @@ export default function RosterPage() {
       // definitions are airline-scoped (see api/roster.js), and a SUPER_ADMIN
       // switching the station switcher can land on a DIFFERENT airline
       // entirely, whose codes must never be shadowed by a previous tenant's.
-      const [defs, grid] = await Promise.all([
+      // Dashboard summary + mandatory coverage rules feed the new KPI row,
+      // Daily Coverage table, and Roster Validation card below with real
+      // numbers already computed elsewhere in the app — never fabricated.
+      const [defs, grid, summary, rules] = await Promise.all([
         rosterApi.getShiftDefinitions(stationId),
         rosterApi.getRosterGrid(stationId, monthKey),
+        getDashboardSummary(stationId).catch(() => null),
+        workloadConfigApi.listMandatoryCoverageRules(stationId).catch(() => []),
       ]);
       setShiftDefs(defs);
       setRoster(grid.roster);
       setStaff(grid.staff);
+      setDashboardSummary(summary);
+      setMandatoryRules(rules || []);
     } catch (err) {
       setError(err.message || "Failed to load roster");
     } finally {
@@ -104,6 +125,7 @@ export default function RosterPage() {
     try {
       const result = await rosterApi.generateRoster(stationId, monthKey);
       setGenerationResult(result);
+      setLastSavedAt(new Date());
       await load();
     } catch (err) {
       alert(`Generate failed: ${err.message}`);
@@ -125,6 +147,7 @@ export default function RosterPage() {
       if (result.invalidCodes.length) msg += `\n\nUnrecognized shift code(s), skipped: ${result.invalidCodes.join(", ")}`;
       if (result.duplicates.length) msg += `\n\n${result.duplicates.length} duplicate row(s) in the file — only the last occurrence of each was used.`;
       alert(msg);
+      setLastSavedAt(new Date());
       await load();
     } catch (err) {
       alert(`Import failed: ${err.message}`);
@@ -140,37 +163,41 @@ export default function RosterPage() {
   // the block below, or the handlers it calls, close over.
   const headerActions = useMemo(() => (
     <>
+      <button className="btn btn-ghost" disabled={loading} onClick={load} title="Reload roster data">↻ Refresh</button>
       {canEdit && roster && !roster.isPublished && (
         <>
           <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleImportFile} />
           <button className="btn btn-ghost" disabled={importing} onClick={() => importInputRef.current?.click()}>
-            {importing ? "Importing…" : "⬆ Import Excel"}
+            {importing ? "Importing…" : "⬆ Import"}
           </button>
         </>
       )}
       {canGenerate && roster && !roster.isPublished && (
         <button className="btn btn-ghost" disabled={generating} onClick={handleGenerate}>
-          {generating ? "Generating…" : "🤖 Generate"}
+          {generating ? "Generating…" : "🤖 Auto Generate"}
         </button>
       )}
       {canPublish && roster && !roster.isPublished && (
-        <button className="btn btn-primary" onClick={() => handlePublish()}>✅ Publish</button>
+        <button className="btn btn-primary" onClick={() => handlePublish()}>✅ Publish Roster</button>
       )}
       {canUnpublish && roster?.isPublished && (
         <button className="btn btn-ghost" onClick={() => handleUnpublish()}>↩ Unpublish</button>
       )}
     </>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [canEdit, canGenerate, canPublish, canUnpublish, roster, generating, importing, monthKey, stationId]);
+  ), [canEdit, canGenerate, canPublish, canUnpublish, roster, generating, importing, loading, monthKey, stationId]);
 
   usePageHeader({
     title: "Shift Roster",
-    subtitle: currentStation ? `${currentStation.iataCode} · ${monthKey}${roster?.isPublished ? " · Published" : " · Draft"}` : "",
+    subtitle: "Plan today for a smoother tomorrow",
     actions: headerActions,
   });
 
   const shiftDefByCode = useMemo(() => Object.fromEntries(shiftDefs.map(d => [d.code, d])), [shiftDefs]);
   const nDays = daysInMonth(monthKey);
+  const todayStr = todayISO();
+  const isCurrentMonth = monthKey === todayStr.slice(0, 7);
+  const todayDayNum = isCurrentMonth ? Number(todayStr.slice(8, 10)) : null;
 
   async function handlePublish() {
     if (!confirm(`Publish the ${monthKey} roster? Staff will be notified by email.`)) return;
@@ -211,12 +238,75 @@ export default function RosterPage() {
     await rosterApi.upsertShift(stationId, monthKey, {
       userId: editingCell.userId, shiftDate: editingCell.dateStr, shiftCode, reason, in1, out1, in2, out2,
     });
+    setLastSavedAt(new Date());
     await load();
   }
 
-  const visibleStaff = catFilter === "ALL" ? staff : staff.filter(s => (s.category || "NCS") === catFilter);
+  const q = search.trim().toLowerCase();
+  const visibleStaff = staff
+    .filter(s => catFilter === "ALL" || (s.category || "NCS") === catFilter)
+    .filter(s => !q || s.fullName.toLowerCase().includes(q) || (s.designation || "").toLowerCase().includes(q));
   const byCategory = CATEGORIES.map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
     .filter(g => g.staff.length > 0);
+
+  const dayRange = useMemo(() => {
+    if (viewMode === "day") return [todayDayNum || 1];
+    if (viewMode === "week") {
+      const base = todayDayNum || 1;
+      const dow = dateAt(monthKey, base).getUTCDay();
+      const mondayOffset = (dow + 6) % 7;
+      const start = Math.max(1, base - mondayOffset);
+      const days = [];
+      for (let d = start; d <= Math.min(start + 6, nDays); d++) days.push(d);
+      return days;
+    }
+    return Array.from({ length: nDays }, (_, i) => i + 1);
+  }, [viewMode, nDays, todayDayNum, monthKey]);
+
+  // Legend: only the shift codes actually assigned somewhere this month, in
+  // their configured display order — not a hardcoded M/A/N/L/O/FS list,
+  // since this app's real seed data has two dozen+ codes (M1, MS, A1, A2,
+  // AS, N1-N3, BS, FS, SOD, TRG, ...) and a fixed 6-item legend would
+  // mislabel most of what's actually on the grid.
+  const legendDefs = useMemo(() => {
+    const inUse = new Set();
+    staff.forEach(s => s.shiftAssignments.forEach(sa => inUse.add(sa.shiftDef.code)));
+    return shiftDefs.filter(d => inUse.has(d.code)).sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
+  }, [staff, shiftDefs]);
+
+  // KPI row + Daily Coverage's real "Required" numbers, computed once and
+  // shared between both — Required comes from the Mandatory Coverage rules
+  // already configured in Workload Config (Rule Builder's own minimum-
+  // staffing source), never an invented target.
+  const kpi = useMemo(() => {
+    const requiredByShift = { M: 0, A: 0, N: 0 };
+    mandatoryRules.filter(r => r.enabled).forEach(r => {
+      if (requiredByShift[r.shift] != null) requiredByShift[r.shift] += r.minCount;
+    });
+    const assignedToday = { M: 0, A: 0, N: 0 };
+    if (isCurrentMonth) {
+      for (const s of staff) {
+        const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayStr);
+        const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
+        if (bucket) assignedToday[bucket]++;
+      }
+    }
+    const totalReq = requiredByShift.M + requiredByShift.A + requiredByShift.N;
+    let coveragePct = 100;
+    if (totalReq > 0) {
+      const covered = Math.min(assignedToday.M, requiredByShift.M) + Math.min(assignedToday.A, requiredByShift.A) + Math.min(assignedToday.N, requiredByShift.N);
+      coveragePct = Math.round((covered / totalReq) * 100);
+    }
+    return {
+      totalStaff: staff.length,
+      flights: dashboardSummary?.flightCoverage?.totalFlights ?? 0,
+      onTimeRate: dashboardSummary?.flightCoverage?.onTimeRate,
+      conflicts: dashboardSummary?.rosterCoverage?.violationCount ?? 0,
+      requiredByShift, assignedToday, coveragePct,
+    };
+  }, [staff, mandatoryRules, dashboardSummary, shiftDefByCode, isCurrentMonth, todayStr]);
+
+  const violations = dashboardSummary?.rosterCoverage?.violations || [];
 
   // Order matters here for the same reason as DashboardPage.jsx: check
   // stationLoading (still figuring out which station to use) before the
@@ -232,21 +322,63 @@ export default function RosterPage() {
       {generationResult && (
         <GenerationResultPanel result={generationResult} onDismiss={() => setGenerationResult(null)} />
       )}
-      <div className="ab info" style={{ marginBottom: 9 }}>
-        ℹ {monthKey} · {staff.length} staff · {nDays} days
-        {canEdit ? " · Click any shift cell to edit" : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        <StatusPill roster={roster} lastSavedAt={lastSavedAt} />
       </div>
 
-      <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+      {/* Toolbar: month / station-scoped category / search / view density */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
           <button onClick={() => setMonthKey(m => shiftMonth(m, -1))} style={navBtnStyle}>‹</button>
-          <span style={{ fontSize: 12, fontWeight: 700, minWidth: 80, textAlign: "center" }}>{monthKey}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, minWidth: 88, textAlign: "center" }}>{monthLabel(monthKey)}</span>
           <button onClick={() => setMonthKey(m => shiftMonth(m, 1))} style={navBtnStyle}>›</button>
         </div>
-        <select className="fi" style={{ width: 160, fontSize: 10 }} value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
+        <select className="fi" style={{ width: 170, fontSize: 11 }} value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
           <option value="ALL">All Categories</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
         </select>
+        <input
+          className="fi" style={{ width: 200, fontSize: 11 }} type="text" placeholder="🔍 Search staff…"
+          value={search} onChange={(e) => setSearch(e.target.value)}
+        />
+        <div className="view-toggle">
+          {["Month", "Week", "Day"].map(m => (
+            <button key={m} className={`view-toggle-btn${viewMode === m.toLowerCase() ? " active" : ""}`} onClick={() => setViewMode(m.toLowerCase())}>{m}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* KPI row */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
+        <StatCard tone="sky" icon="👥" label="Total Staff" value={kpi.totalStaff} />
+        <StatCard tone="sky" icon="✈️" label="Flights (this month)" value={kpi.flights} />
+        <StatCard tone="sky" icon="🌅" label="Morning Today" value={kpi.assignedToday.M} />
+        <StatCard tone="green" icon="☀️" label="Afternoon Today" value={kpi.assignedToday.A} />
+        <StatCard tone="purple" icon="🌙" label="Night Today" value={kpi.assignedToday.N} />
+        <StatCard tone={kpi.conflicts > 0 ? "red" : "neutral"} icon="⚠️" label="Conflicts" value={kpi.conflicts} />
+        <StatCard tone={kpi.coveragePct >= 90 ? "green" : kpi.coveragePct >= 70 ? "amber" : "red"} icon="📈" label="Coverage" value={`${kpi.coveragePct}%`} />
+      </div>
+
+      {/* Shift legend */}
+      {legendDefs.length > 0 && (
+        <div className="card" style={{ padding: "10px 14px" }}>
+          <div className="legend-row">
+            {legendDefs.map(d => (
+              <div key={d.code} className="legend-chip">
+                <span className="legend-swatch" style={{ background: d.color }} />
+                <span className="legend-code">{d.code}</span>
+                <span>{d.name}</span>
+                {d.startTime && <span className="legend-time">{d.startTime}–{d.endTime}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="ab info" style={{ marginBottom: 9 }}>
+        ℹ {monthKey} · {visibleStaff.length} staff shown · {dayRange.length} day{dayRange.length === 1 ? "" : "s"} visible
+        {canEdit ? " · Click any shift cell to edit, click a staff name for details" : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
 
       <div className="roster-wrap">
@@ -255,27 +387,54 @@ export default function RosterPage() {
             <tr>
               <th className="sc">Staff</th>
               <th className="sc2">Cat</th>
-              {Array.from({ length: nDays }, (_, i) => (
-                <th key={i} className={isWeekend(monthKey, i + 1) ? "wknd" : undefined}>{i + 1}</th>
+              {dayRange.map(day => (
+                <th key={day} className={dayCellClasses(monthKey, day, todayDayNum)}>
+                  <div>{day}</div>
+                  <div style={{ fontSize: 7, fontWeight: 600, opacity: .75 }}>{WEEKDAY_LETTERS[dateAt(monthKey, day).getUTCDay()]}</div>
+                </th>
               ))}
-              {weekBlocks(nDays).map((wk, i) => <th key={i}>W{i + 1}</th>)}
-              <th>Tot</th>
+              {viewMode === "month" && weekBlocks(nDays).map((wk, i) => <th key={i}>W{i + 1}</th>)}
+              {viewMode === "month" && <th>Tot</th>}
             </tr>
           </thead>
           <tbody>
             {byCategory.map(group => (
               <RosterCategoryGroup
-                key={group.cat} group={group} nDays={nDays} monthKey={monthKey}
-                shiftDefByCode={shiftDefByCode} onCellClick={openCell}
+                key={group.cat} group={group} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
+                shiftDefByCode={shiftDefByCode} onCellClick={openCell} onStaffClick={setSelectedStaff}
+                todayDayNum={todayDayNum} showTotals={viewMode === "month"}
               />
             ))}
-            <CoverageRows staff={visibleStaff} nDays={nDays} monthKey={monthKey} />
+            <CoverageRows staff={visibleStaff} dayRange={dayRange} monthKey={monthKey} todayDayNum={todayDayNum} showTotals={viewMode === "month"} nDays={nDays} />
           </tbody>
         </table>
       </div>
 
+      {/* Daily Coverage + Coverage Status + Roster Validation */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginTop: 14 }}>
+        <DailyCoverageCard staff={visibleStaff} dayRange={dayRange} monthKey={monthKey} shiftDefByCode={shiftDefByCode} mandatoryRules={mandatoryRules} todayDayNum={todayDayNum} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <CoverageStatusCard coveragePct={kpi.coveragePct} conflicts={kpi.conflicts} />
+          <RosterValidationCard
+            violations={violations} showAll={showAllIssues} onToggleAll={() => setShowAllIssues(v => !v)}
+            onFixAutomatically={() => navigate("/auto-roster")}
+          />
+        </div>
+      </div>
+
       {editingCell && (
-        <ShiftEditModal cell={editingCell} shiftDefs={shiftDefs} onSave={saveCell} onClose={() => setEditingCell(null)} />
+        <ShiftEditModal
+          cell={editingCell} shiftDefs={shiftDefs} staff={staff} monthKey={monthKey} mandatoryRules={mandatoryRules}
+          onSave={saveCell} onClose={() => setEditingCell(null)}
+        />
+      )}
+
+      {selectedStaff && (
+        <StaffDetailDrawer
+          staff={selectedStaff} monthKey={monthKey} nDays={nDays} shiftDefByCode={shiftDefByCode}
+          onClose={() => setSelectedStaff(null)}
+          onEditToday={(s) => { setSelectedStaff(null); openCell(s, todayDayNum || 1); }}
+        />
       )}
     </div>
   );
@@ -283,22 +442,59 @@ export default function RosterPage() {
 
 const navBtnStyle = { width: 24, height: 24, borderRadius: 5, background: "var(--glass)", border: "1px solid var(--border)", color: "var(--white)" };
 
-function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellClick }) {
+function monthLabel(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, { month: "long", year: "numeric", timeZone: "UTC" });
+}
+
+function dayCellClasses(monthKey, day, todayDayNum) {
+  const classes = [];
+  if (isWeekend(monthKey, day)) classes.push("wknd");
+  if (todayDayNum === day) classes.push("today");
+  return classes.join(" ") || undefined;
+}
+
+function StatusPill({ roster, lastSavedAt }) {
+  if (!roster) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-dim)" }}>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: roster.isPublished ? "var(--green)" : "var(--amber)", display: "inline-block" }} />
+      {roster.isPublished ? "Published" : lastSavedAt ? `Draft saved ${relativeTime(lastSavedAt)}` : "Draft"}
+    </div>
+  );
+}
+
+function relativeTime(date) {
+  const secs = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  return `${mins} min ago`;
+}
+
+function StatCard({ tone, icon, label, value }) {
+  return (
+    <div className={`stat-card ${tone}`}>
+      <div className="stat-label">{icon} {label}</div>
+      <div className="stat-value" style={{ fontSize: 22 }}>{value}</div>
+    </div>
+  );
+}
+
+function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode, onCellClick, onStaffClick, todayDayNum, showTotals }) {
   return (
     <>
       <tr>
         <td
-          colSpan={nDays + 2 + weekBlocks(nDays).length + 1}
-          style={{ padding: "5px 7px", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", background: "rgba(255,255,255,.025)", borderTop: "1px solid rgba(255,255,255,.06)", borderBottom: "1px solid rgba(255,255,255,.06)" }}
+          colSpan={dayRange.length + 2 + (showTotals ? weekBlocks(nDays).length + 1 : 0)}
+          style={{ padding: "5px 7px", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", background: "rgba(15,23,42,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
         >
           <span className={`cat-tag cat-${group.cat}`}>{group.cat}</span> {CAT_LABELS[group.cat]} · {group.staff.length} staff
         </td>
       </tr>
       {group.staff.map(s => {
-        // Resolve each day's assignment once so the weekly-total pass below
-        // doesn't re-derive it from shiftAssignments a second time. Keeping
-        // the whole assignment (not just its code) means a per-day time
-        // override feeds both the cell display and the hours math below.
+        // Resolve every day of the MONTH (not just the visible dayRange) so
+        // the weekly-hour totals stay correct even while Week/Day view is
+        // only rendering a subset of day columns.
         const assignmentsByDay = Array.from({ length: nDays }, (_, i) => {
           const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
           return s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
@@ -317,18 +513,20 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
         return (
           <tr key={s.id}>
             <td className="sc">
-              <div className="sn">{s.fullName.split("(")[0].trim().substring(0, 20)}</div>
-              <div className="sr">{s.designation}</div>
+              <button className="staff-name-btn" onClick={() => onStaffClick(s)} title="View staff details">
+                <div className="sn">{s.fullName.split("(")[0].trim().substring(0, 20)}</div>
+                <div className="sr">{s.designation}</div>
+              </button>
             </td>
             <td className="sc2"><span className={`cat-tag cat-${group.cat}`}>{group.cat}</span></td>
-            {assignmentsByDay.map((a, i) => {
-              const day = i + 1;
+            {dayRange.map(day => {
+              const a = assignmentsByDay[day - 1];
               const code = a?.shiftDef.code || "O";
               const def = shiftDefByCode[code];
               const in1 = a?.in1 || def?.startTime;
               const out1 = a?.out1 || def?.endTime;
               return (
-                <td key={i} className={isWeekend(monthKey, day) ? "wknd" : undefined}>
+                <td key={day} className={dayCellClasses(monthKey, day, todayDayNum)}>
                   <div
                     className="sp" onClick={() => onCellClick(s, day)}
                     title={def ? `${def.name}${in1 ? `: ${in1}–${out1}${a?.in2 && a?.out2 ? `, ${a.in2}–${a.out2}` : ""}` : ""}` : code}
@@ -341,12 +539,12 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
                 </td>
               );
             })}
-            {weekHours.map((hrs, i) => (
+            {showTotals && weekHours.map((hrs, i) => (
               <td key={i}>
                 <span className={hrs > 48 ? "hrs-over" : hrs > 42 ? "hrs-warn" : "hrs-ok"}>{hrs.toFixed(1)}</span>
               </td>
             ))}
-            <td><span className={totalHours > 200 ? "hrs-warn" : "hrs-ok"}>{totalHours.toFixed(1)}</span></td>
+            {showTotals && <td><span className={totalHours > 200 ? "hrs-warn" : "hrs-ok"}>{totalHours.toFixed(1)}</span></td>}
           </tr>
         );
       })}
@@ -356,34 +554,149 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
 
 // Mirrors the prototype's coverage rows — per-day count of staff on each
 // shift, so gaps are visible at a glance without opening the dashboard.
-function CoverageRows({ staff, nDays, monthKey }) {
-  const shifts = [
-    { key: "M", label: "Morning" },
-    { key: "A", label: "Afternoon" },
-    { key: "N", label: "Night" },
-  ];
+function CoverageRows({ staff, dayRange, monthKey, todayDayNum, showTotals, nDays }) {
   return (
     <>
-      {shifts.map(sh => (
+      {SHIFT_KEYS.map(sh => (
         <tr key={sh.key}>
           <td className="sc" style={{ fontSize: 8, fontWeight: 700, color: "var(--text-dim)" }}>{sh.label} Coverage</td>
           <td className="sc2"></td>
-          {Array.from({ length: nDays }, (_, i) => {
-            const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
+          {dayRange.map(day => {
+            const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
             const count = staff.filter(s => s.shiftAssignments.some(sa =>
               new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr && sa.shiftDef.code === sh.key
             )).length;
             return (
-              <td key={i} className={isWeekend(monthKey, i + 1) ? "wknd" : undefined}>
+              <td key={day} className={dayCellClasses(monthKey, day, todayDayNum)}>
                 <span className="cov-badge" style={{ opacity: count > 0 ? 1 : 0.3, color: count < 1 ? "var(--rp-red)" : "inherit" }}>
                   {count}
                 </span>
               </td>
             );
           })}
-          <td colSpan={weekBlocks(nDays).length + 1}></td>
+          {showTotals && <td colSpan={weekBlocks(nDays).length + 1}></td>}
         </tr>
       ))}
     </>
+  );
+}
+
+// Required comes from the enabled Mandatory Coverage rules (Workload Config
+// → Rule Builder's own minimum-staffing source), summed per shift across
+// every category — never an invented target. Assigned is the real count of
+// staff on that shift that day, same computation the in-grid coverage rows
+// above use.
+function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandatoryRules, todayDayNum }) {
+  const requiredByShift = useMemo(() => {
+    const req = { M: 0, A: 0, N: 0 };
+    mandatoryRules.filter(r => r.enabled).forEach(r => { if (req[r.shift] != null) req[r.shift] += r.minCount; });
+    return req;
+  }, [mandatoryRules]);
+
+  const assignedByDayShift = useMemo(() => {
+    return dayRange.map(day => {
+      const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
+      const counts = { M: 0, A: 0, N: 0 };
+      for (const s of staff) {
+        const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+        const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
+        if (bucket) counts[bucket]++;
+      }
+      return { day, counts };
+    });
+  }, [staff, dayRange, monthKey, shiftDefByCode]);
+
+  const hasRules = mandatoryRules.some(r => r.enabled);
+
+  return (
+    <div className="card">
+      <div className="card-title">📅 Daily Coverage <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— Required vs Assigned Staff</span></div>
+      {!hasRules && (
+        <div className="empty-note">No mandatory coverage rules are enabled yet (Auto Generator → Rule Builder) — showing assigned counts only.</div>
+      )}
+      <div style={{ overflowX: "auto" }}>
+        <table className="dc-table">
+          <thead>
+            <tr>
+              <th>Shift</th>
+              {dayRange.map(day => <th key={day} style={{ fontWeight: todayDayNum === day ? 800 : 700, color: todayDayNum === day ? "var(--sky)" : undefined }}>{day}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {SHIFT_KEYS.map(sh => (
+              <tr key={sh.key}>
+                <td>{sh.label}{hasRules ? ` (Req ${requiredByShift[sh.key]})` : ""}</td>
+                {assignedByDayShift.map(({ day, counts }) => {
+                  const assigned = counts[sh.key];
+                  const required = requiredByShift[sh.key];
+                  const short = hasRules && required > 0 && assigned < required;
+                  return <td key={day} className={short ? "dc-short" : hasRules && required > 0 ? "dc-ok" : undefined}>{assigned}</td>;
+                })}
+              </tr>
+            ))}
+            <tr>
+              <td>Total</td>
+              {assignedByDayShift.map(({ day, counts }) => <td key={day}>{counts.M + counts.A + counts.N}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function CoverageStatusCard({ coveragePct, conflicts }) {
+  const circumference = 2 * Math.PI * 34;
+  const offset = circumference - (coveragePct / 100) * circumference;
+  const color = coveragePct >= 90 ? "var(--rp-green)" : coveragePct >= 70 ? "var(--amber)" : "var(--rp-red)";
+  return (
+    <div className="card" style={{ textAlign: "center" }}>
+      <div className="card-title" style={{ justifyContent: "center" }}>Coverage Status</div>
+      <div className="gauge-ring" style={{ width: 84, height: 84, margin: "4px auto" }}>
+        <svg width={84} height={84}>
+          <circle cx={42} cy={42} r={34} fill="none" stroke="rgba(15,23,42,.08)" strokeWidth={8} />
+          <circle cx={42} cy={42} r={34} fill="none" stroke={color} strokeWidth={8} strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round" />
+        </svg>
+        <div className="gauge-ring-value" style={{ fontSize: 16 }}>{coveragePct}%</div>
+      </div>
+      <div style={{ fontSize: 11, marginTop: 6 }}>
+        {conflicts === 0
+          ? <span style={{ color: "var(--rp-green)" }}>🟢 Coverage acceptable</span>
+          : <span style={{ color: "var(--rp-red)" }}>🔴 {conflicts} uncovered shift{conflicts === 1 ? "" : "s"}</span>}
+      </div>
+    </div>
+  );
+}
+
+function RosterValidationCard({ violations, showAll, onToggleAll, onFixAutomatically }) {
+  const shown = showAll ? violations : violations.slice(0, 3);
+  return (
+    <div className="card">
+      <div className="card-title">Roster Validation</div>
+      {violations.length === 0 ? (
+        <div className="empty-note">✅ No issues detected this month.</div>
+      ) : (
+        <>
+          <div className={`metric-badge ${violations.length > 5 ? "red" : "amber"}`} style={{ marginBottom: 8 }}>🔴 {violations.length} Issue{violations.length === 1 ? "" : "s"}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {shown.map((v, i) => (
+              <div key={i} className="alert-card red">
+                <span>⚠</span>
+                <div>
+                  <div className="alert-card-title">{v.date} · {v.shift}</div>
+                  <div className="alert-card-sub">{v.issue}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 7, marginTop: 10 }}>
+            {violations.length > 3 && (
+              <button className="btn btn-ghost btn-sm" onClick={onToggleAll}>{showAll ? "Show Less" : `View All (${violations.length})`}</button>
+            )}
+            <button className="btn btn-primary btn-sm" onClick={onFixAutomatically} title="Opens Auto-Roster Generator — nothing is changed without your confirmation">🤖 Fix Automatically</button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
