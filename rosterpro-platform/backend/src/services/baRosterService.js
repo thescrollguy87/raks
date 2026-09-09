@@ -58,10 +58,14 @@ async function buildBARosterRows(stationId, dateStr) {
     if (!todayShift) continue;
     const def = todayShift.shiftDef;
     if (def.type !== "duty" && def.type !== "night") continue; // BA roster = who's actually reporting for duty
-    if (!def.startTime || !def.endTime) continue; // shift types with no real time can't produce a valid row
+    // A per-day override (in1/out1) takes priority over the definition's
+    // default times — e.g. a manually retimed shift for this one date.
+    const startTime = todayShift.in1 || def.startTime;
+    const endTime = todayShift.out1 || def.endTime;
+    if (!startTime || !endTime) continue; // shift types with no real time can't produce a valid row
 
-    const [sh, sm] = def.startTime.split(":").map(Number);
-    const [eh, em] = def.endTime.split(":").map(Number);
+    const [sh, sm] = startTime.split(":").map(Number);
+    const [eh, em] = endTime.split(":").map(Number);
     const overnight = (eh * 60 + em) < (sh * 60 + sm); // e.g. Night: 21:00 -> 07:00 crosses midnight
     const endDateObj = new Date(Date.UTC(y, m - 1, d + (overnight ? 1 : 0)));
 
@@ -75,7 +79,7 @@ async function buildBARosterRows(stationId, dateStr) {
       s.department || "M&E",
       station?.iataCode || "",
       d, m, y,
-      toBATime(def.startTime), toBATime(def.endTime), def.name.toUpperCase(),
+      toBATime(startTime), toBATime(endTime), def.name.toUpperCase(),
       endDateObj.getUTCDate(), endDateObj.getUTCMonth() + 1, endDateObj.getUTCFullYear(),
     ]);
   }

@@ -56,7 +56,11 @@ function getRosterGrid(stationId, rosterId) {
       id: true, fullName: true, category: true, designation: true, department: true, employeeId: true, email: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
-        select: { shiftDate: true, shiftDefId: true, shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } }, note: true },
+        select: {
+          shiftDate: true, shiftDefId: true,
+          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } },
+          note: true, in1: true, out1: true, in2: true, out2: true,
+        },
       },
     },
   });
@@ -164,11 +168,12 @@ function findAssignment(rosterId, userId, shiftDate) {
 
 // Upsert keyed on the (rosterId, userId, shiftDate) unique constraint —
 // mirrors the "one cell in the roster grid" concept from the prototype.
-function upsertAssignment({ rosterId, userId, shiftDate, shiftDefId, note, actorId }) {
+function upsertAssignment({ rosterId, userId, shiftDate, shiftDefId, note, actorId, in1, out1, in2, out2 }) {
+  const overrides = { in1: in1 || null, out1: out1 || null, in2: in2 || null, out2: out2 || null };
   return prisma.shiftAssignment.upsert({
     where: { rosterId_userId_shiftDate: { rosterId, userId, shiftDate } },
-    update: { shiftDefId, note: note || null, updatedById: actorId, version: { increment: 1 } },
-    create: { rosterId, userId, shiftDate, shiftDefId, note: note || null, createdById: actorId, updatedById: actorId },
+    update: { shiftDefId, note: note || null, ...overrides, updatedById: actorId, version: { increment: 1 } },
+    create: { rosterId, userId, shiftDate, shiftDefId, note: note || null, ...overrides, createdById: actorId, updatedById: actorId },
   });
 }
 

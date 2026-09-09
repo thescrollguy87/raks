@@ -76,9 +76,31 @@ describe("rosterService.upsertShift", () => {
     expect(result.changed).toBe(true);
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
       "ShiftAssignment", "sa-1", "station-1",
-      { shiftDefId: "def-OLD" }, { shiftDefId: "def-M" },
+      { shiftDefId: "def-OLD", in1: null, out1: null, in2: null, out2: null },
+      { shiftDefId: "def-M", in1: null, out1: null, in2: null, out2: null },
       actor, expect.any(Object), undefined
     );
+  });
+
+  it("passes per-day time overrides through to the repository upsert", async () => {
+    rosterRepo.findAssignment.mockResolvedValue(null);
+    rosterRepo.upsertAssignment.mockResolvedValue({ id: "sa-1", shiftDefId: "def-M" });
+
+    await rosterService.upsertShift({ ...baseInput, in1: "07:00", out1: "11:00", in2: "14:00", out2: "18:00" }, actor, {});
+
+    expect(rosterRepo.upsertAssignment).toHaveBeenCalledWith(expect.objectContaining({
+      in1: "07:00", out1: "11:00", in2: "14:00", out2: "18:00",
+    }));
+  });
+
+  it("treats a time-only edit (same shift code, different override) as a real change", async () => {
+    rosterRepo.findAssignment.mockResolvedValue({ id: "sa-1", shiftDefId: "def-M", in1: "06:30", out1: "14:00", in2: null, out2: null });
+    rosterRepo.upsertAssignment.mockResolvedValue({ id: "sa-1", shiftDefId: "def-M" });
+
+    const result = await rosterService.upsertShift({ ...baseInput, in1: "07:00", out1: "14:00" }, actor, {});
+
+    expect(result.changed).toBe(true);
+    expect(auditTrail.recordUpdate).toHaveBeenCalled();
   });
 
   it("does NOT write an audit entry when the value is unchanged (idempotent save)", async () => {

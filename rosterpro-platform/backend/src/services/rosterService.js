@@ -103,7 +103,7 @@ async function notifyShiftChangeAsync(userId, oldShiftDefId, newCode, shiftDate,
 // point from the original spec: one function, called by both the single
 // and bulk endpoints, that both writes the audit trail entry and will be
 // where Module 4 fires the change-alert email/WhatsApp.
-async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, note, reason }, actor, req) {
+async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, note, reason, in1, out1, in2, out2 }, actor, req) {
   const roster = await getOrCreateRoster(stationId, monthKey, actor);
   if (roster.isPublished) {
     throw ApiError.forbidden("Roster is published — republish is required after further edits, or contact an admin to unpublish");
@@ -118,14 +118,22 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
 
   const updated = await rosterRepo.upsertAssignment({
     rosterId: roster.id, userId, shiftDate: dateObj, shiftDefId: shiftDef.id, note, actorId: actor.sub,
+    in1, out1, in2, out2,
   });
 
-  const changed = !before || before.shiftDefId !== shiftDef.id;
+  // A same-code edit that only changes the override times (e.g. a one-off
+  // Break Shift split, or a Night that starts an hour late) is still a real
+  // roster change — not just a shiftDefId swap — so it must audit-log and
+  // notify the same as a code change would.
+  const timesChanged = !before
+    || (before.in1 || null) !== (in1 || null) || (before.out1 || null) !== (out1 || null)
+    || (before.in2 || null) !== (in2 || null) || (before.out2 || null) !== (out2 || null);
+  const changed = !before || before.shiftDefId !== shiftDef.id || timesChanged;
   if (changed) {
     await auditTrail.recordUpdate(
       "ShiftAssignment", updated.id, stationId,
-      { shiftDefId: before?.shiftDefId || "—" },
-      { shiftDefId: shiftDef.id },
+      { shiftDefId: before?.shiftDefId || "—", in1: before?.in1 || null, out1: before?.out1 || null, in2: before?.in2 || null, out2: before?.out2 || null },
+      { shiftDefId: shiftDef.id, in1: in1 || null, out1: out1 || null, in2: in2 || null, out2: out2 || null },
       actor, req, reason
     );
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import * as rosterApi from "../api/roster.js";
+import { shiftNetHours } from "../utils/shiftHours.js";
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function addDays(iso, n) {
@@ -20,17 +21,6 @@ const SHIFTS = [
 function daysInMonthOf(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
-}
-
-// Net hours for one shift: end - start (crossing midnight if end < start),
-// minus the break. Shifts with no real time (O/L placeholders) are 0.
-function shiftNetHours(def) {
-  if (!def?.startTime || !def?.endTime) return 0;
-  const [sh, sm] = def.startTime.split(":").map(Number);
-  const [eh, em] = def.endTime.split(":").map(Number);
-  let minutes = (eh * 60 + em) - (sh * 60 + sm);
-  if (minutes <= 0) minutes += 24 * 60; // overnight shift
-  return Math.max(0, minutes - (def.breakMin || 0)) / 60;
 }
 
 // DGCA rolling-7-day cap: 48h; 42h is the warning threshold before that.
@@ -93,7 +83,7 @@ export default function CoveragePage() {
       const dailyHours = new Array(nDays).fill(0);
       for (const sa of s.shiftAssignments) {
         const day = new Date(sa.shiftDate).getUTCDate();
-        if (day >= 1 && day <= nDays) dailyHours[day - 1] = shiftNetHours(sa.shiftDef);
+        if (day >= 1 && day <= nDays) dailyHours[day - 1] = shiftNetHours(sa.shiftDef, sa);
       }
       const rolling = dailyHours.map((_, i) => {
         let sum = 0;

@@ -8,12 +8,22 @@ const createRosterSchema = z.object({
   monthKey: monthKey,
 });
 
+// Declared before upsertShiftSchema so it's in scope for the field defs below.
+const timeStrOverride = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM (24-hour)").optional().nullable();
+
 const upsertShiftSchema = z.object({
   userId: z.string().uuid(),
   shiftDate: isoDate,
   shiftCode: z.string().min(1).max(10),
   note: z.string().max(500).optional(),
   reason: z.string().max(500).optional(), // shown in the audit trail entry for this change
+  // Per-day time overrides — null/omitted means "use the shift definition's
+  // own startTime/endTime". in2/out2 are a second duty segment, only
+  // meaningful for a split-duty code like Break Shift (BS).
+  in1: timeStrOverride,
+  out1: timeStrOverride,
+  in2: timeStrOverride,
+  out2: timeStrOverride,
 });
 
 // Bulk variant — e.g. applying a generated roster or a pattern across many

@@ -8,8 +8,8 @@ export function getRosterGrid(stationId, monthKey) {
   return api.get("/api/roster", { stationId, monthKey });
 }
 
-export function upsertShift(stationId, monthKey, { userId, shiftDate, shiftCode, note, reason }) {
-  return api.patch("/api/roster/shift", { userId, shiftDate, shiftCode, note, reason }, { stationId, monthKey });
+export function upsertShift(stationId, monthKey, { userId, shiftDate, shiftCode, note, reason, in1, out1, in2, out2 }) {
+  return api.patch("/api/roster/shift", { userId, shiftDate, shiftCode, note, reason, in1, out1, in2, out2 }, { stationId, monthKey });
 }
 
 export function bulkUpsertShifts(stationId, monthKey, assignments) {

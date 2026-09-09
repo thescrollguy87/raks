@@ -7,9 +7,18 @@ const notificationService = require("../services/notificationService");
 const complianceService = require("../services/complianceService");
 const billingService = require("../services/billingService");
 
-function shiftLabel(shiftDef) {
-  if (!shiftDef.startTime) return shiftDef.name;
-  return `${shiftDef.name} (${shiftDef.startTime}-${shiftDef.endTime})`;
+// Prefers the assignment's own per-day time override (in1/out1) over the
+// shift definition's default startTime/endTime, and appends a second
+// segment (in2/out2) for a split-duty day like Break Shift — otherwise a
+// staff member whose shift was manually retimed would get reminded about
+// the wrong hours.
+function shiftLabel(assignment) {
+  const def = assignment.shiftDef;
+  const start = assignment.in1 || def.startTime;
+  const end = assignment.out1 || def.endTime;
+  if (!start) return def.name;
+  const segment2 = assignment.in2 && assignment.out2 ? `, ${assignment.in2}-${assignment.out2}` : "";
+  return `${def.name} (${start}-${end}${segment2})`;
 }
 
 // ── Job 1: daily "your shift tomorrow" reminder — requirement #2 ────────────
@@ -26,7 +35,7 @@ async function runDailyShiftReminders() {
   for (const a of assignments) {
     if (!a.user?.isActive) continue;
     const result = await notificationService.notifyDailyShiftReminder(a.user, {
-      shiftDate: dateStr, shiftLabel: shiftLabel(a.shiftDef),
+      shiftDate: dateStr, shiftLabel: shiftLabel(a),
     });
     if (result.skipped) skipped++;
     else if (result.sent) sent++;

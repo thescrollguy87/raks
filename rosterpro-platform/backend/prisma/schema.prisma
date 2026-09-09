@@ -868,6 +868,16 @@ model ShiftAssignment {
   shiftDef    ShiftDefinition @relation(fields: [shiftDefId], references: [id])
   note        String?
 
+  // Per-day time overrides — null means "use shiftDef.startTime/endTime as-is".
+  // in2/out2 are a second duty segment, only meaningful for a split-duty code
+  // like Break Shift (BS): the gap between out1 and in2 IS the break, so net
+  // hours for that day = (out1-in1) + (out2-in2), not the shiftDef's single
+  // start/end span.
+  in1  String? // "HH:MM"
+  out1 String?
+  in2  String?
+  out2 String?
+
   createdById String?
   updatedById String?
   createdAt   DateTime @default(now())
