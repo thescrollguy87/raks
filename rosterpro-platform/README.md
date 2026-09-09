@@ -1236,6 +1236,44 @@ secret you ever hardcoded locally and committed, even temporarily: rewriting
 history to remove it isn't enough on a shared/pushed branch — rotate the
 value at its source instead.
 
+### Personal-data audit — what's fixed, and the one open item
+
+A separate pass traced how personal data (email, phone, password, tokens,
+IP address) moves through the app end to end — collection points, logs,
+third-party sends (Razorpay, SMTP, Twilio — this app has no Supabase/
+Stripe/Mongo/Next.js/Firebase to check), password hashing, storage, and API
+response shaping. Fixed this pass: `emailService`/`whatsappService` no
+longer log the recipient's address/phone or message body when SMTP/Twilio
+aren't configured; Prisma's dev-only query debug log no longer prints bound
+params (which included plaintext emails/tokens for any query touching
+`users`); the roster grid API no longer returns every staff member's email
+(the frontend never used it); a self-service "request account deletion"
+flow now exists (My Account page → notifies the requester's station
+admins, who action it via the existing Staff Registry deactivate/delete —
+never an instant unreviewed self-delete, since staff records also double
+as aviation maintenance work history that may need retention). Password
+hashing (bcrypt), API response field-whitelisting elsewhere, and
+third-party payload minimality were already sound.
+
+**One item was deliberately left open, by choice, not by oversight**: the
+refresh token (30-day credential) and a display copy of the user's
+name/email live in browser `localStorage`, not an `httpOnly` cookie —
+`frontend/src/api/client.js` has carried a comment about this since it was
+first written. `localStorage` is readable by any script that runs on the
+page, so a successful XSS on this app would be able to steal a live
+session, not just the current page's data. The access token alongside it
+is lower-risk (15-minute default TTL). The proper fix is having the backend
+set/read the refresh token via an `httpOnly; Secure; SameSite` cookie
+instead of returning it in the JSON body — `app.js` already imports
+`cookie-parser` and CORS already runs with `credentials: true`, suggesting
+this was anticipated but never finished. It wasn't done in this pass
+because it touches `login`/`refresh`/`logout` on both of this repo's
+documented deployment shapes (same-origin via the docker-compose/nginx
+path, and the AWS guide's CloudFront-served frontend calling a separate
+backend origin), and the cross-origin cookie behavior on the second one
+needs a real deployed environment to verify, not this sandbox. Worth doing
+before a wider commercial rollout.
+
 ---
 
 ## The build is complete
