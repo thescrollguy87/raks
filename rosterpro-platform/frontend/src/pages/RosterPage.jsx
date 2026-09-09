@@ -19,6 +19,10 @@ function dateAt(monthKey, day) {
   const [y, m] = monthKey.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, day));
 }
+function isWeekend(monthKey, day) {
+  const dow = dateAt(monthKey, day).getUTCDay();
+  return dow === 0 || dow === 6;
+}
 function shiftMonth(monthKey, delta) {
   const [y, m] = monthKey.split("-").map(Number);
   const d = new Date(Date.UTC(y, m - 1 + delta, 1));
@@ -262,7 +266,7 @@ export default function RosterPage() {
               <th className="sc">Staff</th>
               <th className="sc2">Cat</th>
               {Array.from({ length: nDays }, (_, i) => (
-                <th key={i}><div style={{ fontSize: 8 }}>{i + 1}</div></th>
+                <th key={i} className={isWeekend(monthKey, i + 1) ? "wknd" : undefined}>{i + 1}</th>
               ))}
               {weekBlocks(nDays).map((wk, i) => <th key={i}>W{i + 1}</th>)}
               <th>Tot</th>
@@ -293,7 +297,10 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
   return (
     <>
       <tr>
-        <td colSpan={nDays + 2 + weekBlocks(nDays).length + 1} style={{ padding: "2px 7px", fontSize: 8, fontWeight: 700, color: "var(--text-dim)" }}>
+        <td
+          colSpan={nDays + 2 + weekBlocks(nDays).length + 1}
+          style={{ padding: "5px 7px", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", background: "rgba(255,255,255,.025)", borderTop: "1px solid rgba(255,255,255,.06)", borderBottom: "1px solid rgba(255,255,255,.06)" }}
+        >
           <span className={`cat-tag cat-${group.cat}`}>{group.cat}</span> {CAT_LABELS[group.cat]} · {group.staff.length} staff
         </td>
       </tr>
@@ -324,7 +331,7 @@ function RosterCategoryGroup({ group, nDays, monthKey, shiftDefByCode, onCellCli
               const day = i + 1;
               const def = shiftDefByCode[code];
               return (
-                <td key={i}>
+                <td key={i} className={isWeekend(monthKey, day) ? "wknd" : undefined}>
                   <div
                     className="sp" onClick={() => onCellClick(s, day)}
                     title={def ? `${def.name}${def.startTime ? `: ${def.startTime}–${def.endTime}` : ""}` : code}
@@ -369,7 +376,7 @@ function CoverageRows({ staff, nDays, monthKey }) {
               new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr && sa.shiftDef.code === sh.key
             )).length;
             return (
-              <td key={i}>
+              <td key={i} className={isWeekend(monthKey, i + 1) ? "wknd" : undefined}>
                 <span className="cov-badge" style={{ opacity: count > 0 ? 1 : 0.3, color: count < 1 ? "var(--rp-red)" : "inherit" }}>
                   {count}
                 </span>

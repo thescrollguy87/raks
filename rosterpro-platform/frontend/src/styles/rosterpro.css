@@ -173,21 +173,26 @@ table{border-collapse:collapse}
    row and frozen staff-name column would "stick" to a box that never
    itself scrolls — i.e. scroll straight off screen with everything else. */
 .roster-wrap{border-radius:var(--r)}
-.rt{min-width:100%;font-size:10px}
-.rt th{background:var(--navy-lite);color:var(--text-dim);padding:5px 3px;text-align:center;font-weight:700;font-size:8px;white-space:nowrap;position:sticky;top:0;z-index:10}
+.rt{min-width:100%;font-size:10px;border-collapse:separate;border-spacing:0}
+.rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:10;border-bottom:1px solid rgba(255,255,255,.09)}
 .rt th.sc{position:sticky;left:0;z-index:20;text-align:left;padding-left:7px;min-width:165px}
 .rt th.sc2{position:sticky;left:165px;z-index:20;min-width:50px}
-.rt td{padding:2px 2px;text-align:center;border-bottom:1px solid rgba(255,255,255,.03)}
+.rt th.wknd{background:#243147}
+.rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(255,255,255,.05)}
 .rt td.sc{position:sticky;left:0;z-index:5;background:var(--navy-mid);padding-left:7px;text-align:left}
 .rt td.sc2{position:sticky;left:165px;z-index:5;background:var(--navy-mid)}
+.rt td.wknd{background:rgba(148,163,184,.06)}
 .sn{font-weight:600;font-size:10px;line-height:1.2}
 .sr{font-size:8px;color:var(--text-dim)}
 .sid{font-size:8px;color:var(--text-dim);font-family:var(--mono)}
-.sp{display:inline-flex;flex-direction:column;align-items:center;min-width:34px;padding:2px 2px;border-radius:4px;cursor:pointer;transition:all .1s;position:relative}
-.sp:hover{transform:scale(1.1);z-index:10}
+/* Shift cell — a small, well-defined "chip" rather than a bare color
+   swatch: a hairline dark border and soft shadow keep it legible even
+   when two shift definitions happen to use similar background hues. */
+.sp{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;min-width:42px;min-height:30px;padding:3px 5px;border-radius:6px;cursor:pointer;transition:filter .12s,box-shadow .12s;position:relative;border:1px solid rgba(0,0,0,.16);box-shadow:0 1px 2px rgba(0,0,0,.22)}
+.sp:hover{filter:brightness(1.08);box-shadow:0 0 0 2px rgba(255,255,255,.45),0 2px 5px rgba(0,0,0,.3);z-index:10}
 .sp.expired-lock{opacity:.7;cursor:not-allowed;background:rgba(220,38,38,.09)!important;border:1px solid rgba(220,38,38,.3)!important}
 .sp.expired-lock::after{content:"🔒";position:absolute;top:-2px;right:-2px;font-size:8px}
-.sc-code{font-weight:800;font-size:9px;line-height:1.2}
+.sc-code{font-weight:800;font-size:10.5px;line-height:1.15;letter-spacing:.2px}
 .sc-time{font-size:8px;color:#000;opacity:1;font-family:var(--mono);font-weight:800;white-space:nowrap}
 .s-M{background:rgba(3,105,161,.12);border:1px solid rgba(3,105,161,.3);color:#0369A1}
 .s-A{background:rgba(21,128,61,.12);border:1px solid rgba(21,128,61,.3);color:#15803D}
@@ -203,8 +208,7 @@ table{border-collapse:collapse}
 .viol-red{box-shadow:0 0 0 2px var(--red)!important;background:rgba(229,57,53,.28)!important}
 .viol-orange{box-shadow:0 0 0 2px var(--orange)!important;background:rgba(251,140,0,.22)!important}
 .viol-yellow{box-shadow:0 0 0 2px var(--amber)!important}
-.wknd{background:rgba(255,80,80,.04)}
-.cat-tag{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:800}
+.cat-tag{display:inline-block;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:800}
 .cat-B1{background:rgba(0,100,200,.2);color:#60AAFF;border:1px solid rgba(0,100,200,.3)}
 .cat-B2{background:rgba(0,150,200,.18);color:#60CCFF;border:1px solid rgba(0,150,200,.28)}
 .cat-CM{background:rgba(120,50,200,.2);color:#C08FFF;border:1px solid rgba(120,50,200,.3)}
