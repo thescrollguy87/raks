@@ -39,7 +39,15 @@ const { hashPassword } = require("../src/utils/password");
 const prisma = new PrismaClient();
 const APPLY = process.argv.includes("--apply");
 
-const TEMP_PASSWORD = "AkasaAmd2026!"; // shared temporary password — rotate immediately after import
+// Shared temporary password for all imported accounts — set via env, never
+// hardcoded (it's printed nowhere; distribute it out-of-band and rotate
+// immediately after handing out real credentials). Only required with
+// --apply, since a dry run never hashes/stores it.
+const TEMP_PASSWORD = process.env.AMD_MIGRATION_TEMP_PASSWORD;
+if (APPLY && !TEMP_PASSWORD) {
+  console.error("AMD_MIGRATION_TEMP_PASSWORD is not set. Refusing to run --apply without a temporary password.");
+  process.exit(1);
+}
 
 // RosterPro's Role field is granular (matches real-world designations, not
 // a handful of coarse tiers) — see rolesFor() below, which picks the exact
@@ -158,7 +166,7 @@ function printSummary() {
   console.log(`    import (shown above) so newly-imported B1/B2/CM staff aren't immediately BLOCKED from`);
   console.log(`    auto-roster generation. Every other date is reference-ui's real value, unchanged.`);
   console.log();
-  console.log(`Temporary shared login password for all imported accounts: ${TEMP_PASSWORD}`);
+  console.log(`Temporary shared login password for all imported accounts: set via AMD_MIGRATION_TEMP_PASSWORD env var (not printed here)`);
   console.log(`  (rotate this immediately after distributing real credentials)`);
   console.log("=".repeat(78));
   if (!APPLY) {

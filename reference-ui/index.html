@@ -914,9 +914,13 @@ if ("serviceWorker" in navigator) {
 </script>
 <script>
 // ── CREDENTIALS ─────────────────────────────────────────────────────────────
+// This is a static, standalone prototype with no server side — there is
+// nowhere to move these to. The values below are placeholders only; they do
+// NOT follow any real person's real password and must be changed before this
+// file is shared or deployed anywhere.
 const USERS = {
-  "rakesh.patel": {password:"AMD@700577",role:"editor",name:"Rakesh Kumar Patel",id:"700577",desig:"Station I/C · B1 AME"},
-  "viewer":       {password:"amd.view",  role:"viewer",name:"AMD Staff",         id:"",      desig:"View-Only Access"}
+  "rakesh.patel": {password:"CHANGE-ME-EDITOR",role:"editor",name:"Rakesh Kumar Patel",id:"700577",desig:"Station I/C · B1 AME"},
+  "viewer":       {password:"CHANGE-ME-VIEWER",role:"viewer",name:"AMD Staff",         id:"",      desig:"View-Only Access"}
 };
 let CU=null, IS_ED=false, changeLog=[];
 

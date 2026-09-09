@@ -1198,6 +1198,46 @@ files — all present, none invented.
 
 ---
 
+## Security — secrets, and two you must rotate before going live
+
+A full secret-safety pass was done across this repository (source, config,
+scripts, and git history). The baseline was already sound: every real
+secret — `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`,
+`MFA_ENCRYPTION_KEY`, SMTP credentials, Twilio credentials, and the
+Razorpay `key_id`/`key_secret` — is read from `process.env` via
+`backend/src/config/env.js` with no insecure fallback (the process exits if
+a required one is missing), `.env` is gitignored, and `.env.example` lists
+placeholders only. `render.yaml` and `docker-compose.prod.yml` use Render's
+`generateValue`/`sync: false` and a fail-loud `${VAR:?...}` pattern
+respectively — no secret is committed there either.
+
+Two real, hardcoded secrets were found and fixed:
+
+1. **`backend/scripts/migrate-amd-real-data.js`** — a shared temporary
+   password for imported staff accounts was a string literal in the file
+   (and was printed in plaintext to stdout on every run, including a plain
+   dry run). It now comes from `AMD_MIGRATION_TEMP_PASSWORD` (see
+   `backend/.env.example`), the script refuses to `--apply` without it, and
+   it is never logged.
+2. **`reference-ui/index.html`** — a static, standalone prototype with no
+   server side (it was never connected to this app's auth system) had two
+   hardcoded login passwords, one of which followed a real, guessable
+   convention (`"AMD@" + a real employee ID`). Both are now non-guessable
+   placeholders.
+
+**⚠ If you have ever cloned, forked, or deployed from this repository
+before this fix**: both of the original values above are still present in
+this repo's git history (old commits aren't rewritten by this fix) and must
+be treated as compromised. Rotate them — set a new
+`AMD_MIGRATION_TEMP_PASSWORD` before re-running that script, and change the
+`reference-ui/index.html` placeholder passwords again if you actually rely
+on that file's login gate for anything. The same applies to any other
+secret you ever hardcoded locally and committed, even temporarily: rewriting
+history to remove it isn't enough on a shared/pushed branch — rotate the
+value at its source instead.
+
+---
+
 ## The build is complete
 
 Every module from the original architecture request has been delivered:
