@@ -7,6 +7,7 @@ const REQUIRED = [
   "DATABASE_URL",
   "JWT_ACCESS_SECRET",
   "JWT_REFRESH_SECRET",
+  "MFA_ENCRYPTION_KEY", // encrypts MFA TOTP secrets at rest — an auth secret, not optional
 ];
 
 const missing = REQUIRED.filter(key => !process.env[key]);
@@ -17,10 +18,26 @@ if (missing.length) {
   process.exit(1);
 }
 
+const isProd = (process.env.NODE_ENV || "development") === "production";
+
+// CORS must never default to "*" — that's fine for a genuinely public,
+// unauthenticated API, but this one issues bearer tokens and serves
+// per-tenant business data, so an open CORS_ORIGIN would let any site read
+// an authenticated user's data via their browser. Production must set it
+// explicitly; local dev only gets a same-origin-friendly default.
+if (isProd && !process.env.CORS_ORIGIN) {
+  // eslint-disable-next-line no-console
+  console.error("CORS_ORIGIN is not set. Refusing to start in production with an unrestricted CORS policy — set it to your frontend's exact origin (e.g. https://app.yourdomain.com).");
+  process.exit(1);
+}
+
 module.exports = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: parseInt(process.env.PORT || "4000", 10),
-  corsOrigin: process.env.CORS_ORIGIN || "*",
+  // Never "*" — see the production check above. Local dev without
+  // CORS_ORIGIN set falls back to the Vite dev server's own origin, not a
+  // wildcard.
+  corsOrigin: process.env.CORS_ORIGIN || "http://localhost:5173",
 
   jwt: {
     accessSecret: process.env.JWT_ACCESS_SECRET,
@@ -67,5 +84,5 @@ module.exports = {
 
   appUrl: process.env.APP_URL || "http://localhost:5173",
 
-  isProd: (process.env.NODE_ENV || "development") === "production",
+  isProd,
 };

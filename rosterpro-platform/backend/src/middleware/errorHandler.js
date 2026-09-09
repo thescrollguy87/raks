@@ -1,7 +1,6 @@
 const { Prisma } = require("@prisma/client");
 const ApiError = require("../utils/ApiError");
 const logger = require("../config/logger");
-const env = require("../config/env");
 
 // Translates Prisma's own error types into ApiError so callers never have to
 // know Prisma exists — a unique-constraint violation becomes a clean 409,
@@ -32,22 +31,27 @@ function errorHandler(err, req, res, next) {
   if (!(error instanceof ApiError)) {
     error = translatePrismaError(err) || error;
   }
+  const correlationId = req.id;
 
   if (error instanceof ApiError) {
-    if (error.statusCode >= 500) logger.error(error.message, { stack: error.stack, path: req.originalUrl });
-    else logger.warn(error.message, { path: req.originalUrl, status: error.statusCode });
+    if (error.statusCode >= 500) logger.error(error.message, { stack: error.stack, path: req.originalUrl, correlationId });
+    else logger.warn(error.message, { path: req.originalUrl, status: error.statusCode, correlationId });
 
     return res.status(error.statusCode).json({
       error: error.message,
       details: error.details || undefined,
+      correlationId,
     });
   }
 
-  // Truly unexpected error — never leak internals to the client.
-  logger.error(err.message, { stack: err.stack, path: req.originalUrl });
+  // Truly unexpected error — never leak internals (stack trace, query
+  // details, file paths) to the client in ANY environment. The full stack
+  // goes to the server-side log only, keyed by correlationId so it can be
+  // matched to what the client sees.
+  logger.error(err.message, { stack: err.stack, path: req.originalUrl, correlationId });
   res.status(500).json({
     error: "Internal server error",
-    stack: env.isProd ? undefined : err.stack,
+    correlationId,
   });
 }
 

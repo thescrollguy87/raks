@@ -55,6 +55,14 @@ more scalable one. Pick one, don't mix them.
    is simpler than the self-managed `pg_dump` approach in
    `infra/aws/backup.sh` if you're using RDS. Use one or the other, not
    both, to avoid confusing yourself about which backup is authoritative.
+8. Enforce TLS on the connection itself, not just network isolation:
+   RDS's default parameter group already accepts TLS, but doesn't reject
+   plaintext connections unless you turn that on. In the DB instance's
+   parameter group, set `rds.force_ssl = 1` (Postgres) so RDS refuses any
+   non-TLS connection outright — belt-and-suspenders alongside §4's
+   `sslmode=require` on the connection string, so a future `DATABASE_URL`
+   edit that accidentally drops the parameter still can't downgrade to
+   plaintext.
 
 ## 2. S3 buckets
 
@@ -131,6 +139,15 @@ bucket itself private while CloudFront serves it publicly.
    pointing at the RDS endpoint from §1, real JWT secrets, SES SMTP
    credentials (below), Twilio credentials. Keep this file readable only
    by root (`chmod 600`); it's the single most sensitive file on the box.
+   Append `?sslmode=require` to `DATABASE_URL` so the Postgres connection
+   itself is encrypted in transit — this is on top of, not instead of,
+   RDS living in a private subnet (§1.5) and §1.8's `rds.force_ssl`:
+   ```
+   DATABASE_URL=postgresql://user:pass@your-rds-endpoint:5432/rosterpro?sslmode=require
+   ```
+   (Render's managed Postgres, used by `render.yaml`, already enforces TLS
+   on every connection string it generates — no extra parameter needed
+   there.)
 7. Run migrations once, after the container is up:
    ```bash
    docker exec rosterpro-backend npx prisma migrate deploy
