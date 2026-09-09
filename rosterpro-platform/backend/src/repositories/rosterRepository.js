@@ -53,7 +53,11 @@ function getRosterGrid(stationId, rosterId) {
     where: { stationId, isActive: true, deletedAt: null },
     orderBy: { fullName: "asc" },
     select: {
-      id: true, fullName: true, category: true, designation: true, department: true, employeeId: true, email: true,
+      // No email here — this grid renders to everyone with roster:read
+      // (potentially every active staff member at a station), and the
+      // frontend never displays it; notifications are dispatched server-side
+      // via a separate, purpose-built query (getActiveStaffContacts).
+      id: true, fullName: true, category: true, designation: true, department: true, employeeId: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
         select: {

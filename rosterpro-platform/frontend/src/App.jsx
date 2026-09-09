@@ -18,6 +18,7 @@ import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
 import ImportExportPage from "./pages/ImportExportPage.jsx";
 import TenantsPage from "./pages/TenantsPage.jsx";
 import BillingPage from "./pages/BillingPage.jsx";
+import MyAccountPage from "./pages/MyAccountPage.jsx";
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
           element={<ProtectedRoute permission={["roster", "update"]}><AutoRosterPage /></ProtectedRoute>}
         />
         <Route path="/leave" element={<LeavePage />} />
+        <Route path="/my-account" element={<MyAccountPage />} />
         <Route path="/compliance-rules" element={<ComplianceRulesPage />} />
         <Route
           path="/staff"

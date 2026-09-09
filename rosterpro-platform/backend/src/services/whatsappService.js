@@ -19,7 +19,9 @@ function getClient() {
 async function send(to, body) {
   const c = getClient();
   if (!c) {
-    logger.info(`[whatsapp:not-configured] to=${to} body="${body}"`);
+    // Never log the recipient phone number or message body — this fires in
+    // any environment where Twilio isn't configured, not just local dev.
+    logger.info(`[whatsapp:not-configured] message not sent (Twilio not configured)`);
     return;
   }
   if (!to) throw new Error("Recipient has no phone number on file");

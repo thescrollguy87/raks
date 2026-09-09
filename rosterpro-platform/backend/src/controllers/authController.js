@@ -64,7 +64,12 @@ const me = asyncHandler(async (req, res) => {
   res.json({ user: req.user });
 });
 
+const requestDeletion = asyncHandler(async (req, res) => {
+  const result = await authService.requestAccountDeletion(req.user.sub, req.body.reason, req);
+  res.json(result);
+});
+
 module.exports = {
   login, refresh, logout, forgotPassword, resetPassword, changePassword,
-  resendVerification, verifyEmail, setupMfa, verifyMfa, disableMfa, me,
+  resendVerification, verifyEmail, setupMfa, verifyMfa, disableMfa, me, requestDeletion,
 };

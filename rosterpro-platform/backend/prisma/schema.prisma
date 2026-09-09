@@ -1167,7 +1167,7 @@ model Notification {
   userId      String
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   channel     NotificationChannel
-  kind        String   // daily_reminder | change_alert | leave_approval | password_reset | roster_published | audit_due
+  kind        String   // daily_reminder | change_alert | leave_approval | password_reset | roster_published | audit_due | account_deletion_requested
   subject     String?
   body        String
   status      NotificationStatus @default(PENDING)

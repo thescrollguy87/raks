@@ -36,7 +36,11 @@ const mfaVerifySchema = z.object({
   code: z.string().length(6, "Enter the 6-digit code"),
 });
 
+const requestDeletionSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
 module.exports = {
   loginSchema, refreshSchema, forgotPasswordSchema, resetPasswordSchema,
-  changePasswordSchema, verifyEmailSchema, mfaVerifySchema,
+  changePasswordSchema, verifyEmailSchema, mfaVerifySchema, requestDeletionSchema,
 };

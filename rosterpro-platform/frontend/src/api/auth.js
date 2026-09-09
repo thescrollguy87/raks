@@ -27,3 +27,7 @@ export function resetPassword(token, newPassword) {
 export function me() {
   return api.get("/api/auth/me");
 }
+
+export function requestAccountDeletion(reason) {
+  return api.post("/api/auth/request-deletion", { reason: reason || undefined });
+}

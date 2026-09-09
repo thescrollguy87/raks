@@ -6,10 +6,13 @@ function create(userId, tokenHash, expiresAt, ip, userAgent) {
   });
 }
 
+// Callers only ever need record.userId/record.id — never the joined user
+// row, which isn't included here on purpose: `include: { user: true }`
+// would pull passwordHash/mfaSecret/reset tokens into memory for no reason
+// every time a refresh token is checked.
 function findValidByHash(tokenHash) {
   return prisma.refreshToken.findFirst({
     where: { tokenHash, revokedAt: null, expiresAt: { gt: new Date() } },
-    include: { user: true },
   });
 }
 

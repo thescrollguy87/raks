@@ -87,6 +87,9 @@ export default function Sidebar() {
             <span className="ni-icon">💳</span><span>Billing</span>
           </NavLink>
         )}
+        <NavLink to="/my-account" className={({ isActive }) => `ni${isActive ? " active" : ""}`} title={collapsed ? "My Account" : undefined}>
+          <span className="ni-icon">👤</span><span>My Account</span>
+        </NavLink>
         <button className="ni" onClick={logout} title={collapsed ? "Sign Out" : undefined}>
           <span className="ni-icon">🔓</span><span>Sign Out</span>
         </button>

@@ -6,6 +6,7 @@ const { signAccessToken, generateRefreshToken, hashToken } = require("../utils/j
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const emailService = require("./emailService");
+const notificationService = require("./notificationService");
 const mfaService = require("./mfaService");
 const env = require("../config/env");
 
@@ -167,6 +168,37 @@ async function verifyAndEnableMfa(userId, { code }, req) {
   return { ok: true };
 }
 
+// Self-service "right to erasure" request — a logged-in user asking that
+// their personal data be removed. This does NOT hard-delete on the spot:
+// staff records here are also aviation-maintenance work history (who
+// performed/witnessed what, when) that the airline may be legally required
+// to retain, and userService.deleteStaff already refuses to hard-delete
+// anyone with that kind of history attached. So this records the request
+// and notifies the requester's own station admins, who action it via the
+// existing admin-only deactivate/hard-delete flow (Staff Registry) once
+// they've confirmed no retention obligation blocks it — never an instant
+// unreviewed self-delete.
+async function requestAccountDeletion(userId, reason, req) {
+  const user = await userRepo.findById(userId);
+  if (!user) throw ApiError.notFound("User not found");
+
+  await auditTrail.logActivity(
+    "Account deletion requested", user.fullName, user.stationId,
+    { sub: userId, name: user.fullName }, req
+  );
+
+  if (user.stationId) {
+    const admins = await userRepo.findContactsByRoleAtStation(user.stationId, ["STATION_MANAGER", "AIRLINE_ADMIN"]);
+    const subject = `Account deletion requested: ${user.fullName}`;
+    const body = `${user.fullName} (${user.email}) has requested that their RosterPro account and personal data be deleted.` +
+      (reason ? `\nReason given: ${reason}` : "") +
+      `\n\nReview their record in Staff Registry and deactivate or permanently delete it there once any retention requirements (e.g. audit/quality history) are cleared.`;
+    await Promise.all(admins.map(a => notificationService.dispatch(a, "EMAIL", "account_deletion_requested", subject, body)));
+  }
+
+  return { ok: true };
+}
+
 async function disableMfa(userId, req) {
   const user = await userRepo.findById(userId);
   await userRepo.setMfaEnabled(userId, false);
@@ -178,5 +210,5 @@ async function disableMfa(userId, req) {
 module.exports = {
   login, refresh, logout, forgotPassword, resetPassword, changePassword,
   sendVerificationEmail, verifyEmail, setupMfa, verifyAndEnableMfa, disableMfa,
-  toPublicUser,
+  requestAccountDeletion, toPublicUser,
 };

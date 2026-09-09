@@ -5,7 +5,7 @@ const { validate } = require("../middleware/validate");
 const { authLimiter } = require("../middleware/rateLimiter");
 const {
   loginSchema, refreshSchema, forgotPasswordSchema, resetPasswordSchema,
-  changePasswordSchema, verifyEmailSchema, mfaVerifySchema,
+  changePasswordSchema, verifyEmailSchema, mfaVerifySchema, requestDeletionSchema,
 } = require("../validators/authValidators");
 
 const router = express.Router();
@@ -25,5 +25,6 @@ router.post("/resend-verification", requireAuth, ctrl.resendVerification);
 router.post("/mfa/setup", requireAuth, ctrl.setupMfa);
 router.post("/mfa/verify", requireAuth, validate(mfaVerifySchema), ctrl.verifyMfa);
 router.post("/mfa/disable", requireAuth, ctrl.disableMfa);
+router.post("/request-deletion", requireAuth, validate(requestDeletionSchema), ctrl.requestDeletion);
 
 module.exports = router;

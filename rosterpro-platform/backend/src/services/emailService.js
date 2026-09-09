@@ -21,7 +21,11 @@ function getTransporter() {
 async function send(to, subject, html, text, attachments) {
   const t = getTransporter();
   if (!t) {
-    logger.info(`[email:not-configured] to=${to} subject="${subject}"${attachments ? ` attachments=${attachments.length}` : ""}`);
+    // Never log the recipient address (or body/token content, which callers
+    // only pass via html/text — deliberately not logged here either) — this
+    // fires in any environment where SMTP isn't configured, not just local
+    // dev, so it must stay PII-safe.
+    logger.info(`[email:not-configured] subject="${subject}"${attachments ? ` attachments=${attachments.length}` : ""}`);
     return;
   }
   await t.sendMail({ from: env.smtp.from, to, subject, html, text, attachments });

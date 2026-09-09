@@ -13,7 +13,10 @@ const prisma = new PrismaClient({
 prisma.$on("warn", (e) => logger.warn(e.message));
 prisma.$on("error", (e) => logger.error(e.message));
 if (!env.isProd) {
-  prisma.$on("query", (e) => logger.debug(`${e.query} — ${e.params} (${e.duration}ms)`));
+  // Query text only, never e.params — params are raw bound values and would
+  // include plaintext emails/phones/tokens (password reset/email-verify
+  // tokens, MFA secrets) for any query that touches the users table.
+  prisma.$on("query", (e) => logger.debug(`${e.query} (${e.duration}ms)`));
 }
 
 module.exports = prisma;
