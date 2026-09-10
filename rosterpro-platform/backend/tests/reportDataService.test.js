@@ -1,8 +1,10 @@
 jest.mock("../src/repositories/rosterRepository");
+jest.mock("../src/repositories/stationRepository");
 jest.mock("../src/services/complianceService");
 jest.mock("../src/services/leaveService");
 
 const rosterRepo = require("../src/repositories/rosterRepository");
+const stationRepo = require("../src/repositories/stationRepository");
 const complianceService = require("../src/services/complianceService");
 const reportDataService = require("../src/services/reportDataService");
 
@@ -27,6 +29,8 @@ describe("reportDataService.getRosterReportData", () => {
 
   it("builds a header/row grid with shift codes on the right days and O elsewhere", async () => {
     rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: true });
+    stationRepo.findStationAirlineId.mockResolvedValue({ airlineId: "airline-1" });
+    rosterRepo.findAllShiftDefs.mockResolvedValue([]);
     rosterRepo.getRosterGrid.mockResolvedValue([{
       id: "s1", fullName: "RAKESH PATEL", category: "B1", designation: "STN I/C",
       shiftAssignments: [
