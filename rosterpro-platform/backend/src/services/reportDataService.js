@@ -1,7 +1,26 @@
 const rosterRepo = require("../repositories/rosterRepository");
+const stationRepo = require("../repositories/stationRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
 const ApiError = require("../utils/ApiError");
+
+// Real shift-code legend for the Monthly Roster's footer (Excel export/
+// template) — the station's own configured codes/timings, never a
+// hardcoded list that could drift from what's actually in Shift
+// Definitions.
+async function shiftLegendFor(stationId) {
+  const station = await stationRepo.findStationAirlineId(stationId);
+  if (!station) return [];
+  return rosterRepo.findAllShiftDefs(station.airlineId);
+}
+
+// "Rakesh Patel" + category "B1" -> "RAKESH PATEL (B1)" — the Monthly
+// Roster file's own convention for carrying category alongside the name
+// (see utils/rosterFileFormat.js); purely informational, stripped back off
+// by the importer before matching.
+function nameWithCategory(fullName, category) {
+  return category ? `${fullName.toUpperCase()} (${category})` : fullName.toUpperCase();
+}
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -35,10 +54,13 @@ function byCategoryThenName(staff) {
 
 // ── Roster grid ───────────────────────────────────────────────────────────
 
-// Shapes the roster grid into { header: string[], rows: string[][] } —
-// identical structure regardless of whether the caller wants it as Excel,
-// PDF, or CSV. This mirrors buildRosterSheetData from the original
-// prototype, now backed by real per-staff shift assignment records.
+// Shapes the roster grid into { header: string[], rows: string[][], meta }
+// matching the real Monthly Roster file this app imports/exports (see
+// utils/rosterFileFormat.js) — S/N, Staff Name (with category noted in
+// parentheses), Designation, Staff ID, then one column per day. Used
+// as-is for PDF/CSV; toRosterExcelBuffer (reportRenderService) re-lays
+// this same data out as the fuller title+date-row+weekday-row+legend
+// Excel workbook.
 async function getRosterReportData(stationId, monthKey) {
   const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
   if (!roster) throw ApiError.notFound(`No roster exists yet for ${monthKey}`);
@@ -46,38 +68,40 @@ async function getRosterReportData(stationId, monthKey) {
   const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
   const nDays = daysInMonth(monthKey);
   const dayLabels = Array.from({ length: nDays }, (_, i) => dateLabel(monthKey, i + 1));
+  const shiftDefs = await shiftLegendFor(stationId);
 
-  // Employee ID leads the row so a re-import (see rosterImportService) can
-  // match staff reliably even if two people share a similar name — name
-  // alone is the fallback, not the primary key.
-  const header = ["Employee ID", "Name", "Category", "Designation", ...dayLabels];
-  const rows = staff.map(s => {
+  // Staff ID trails, matching the real file's own column order — a
+  // re-import (see rosterImportService) still matches by it first, name
+  // (with the category suffix stripped) only as a fallback.
+  const header = ["S/N", "Staff Name", "Designation", "Staff ID", ...dayLabels];
+  const rows = staff.map((s, i) => {
     const byDate = {};
     for (const sa of s.shiftAssignments) {
       const key = new Date(sa.shiftDate).toISOString().slice(0, 10);
       byDate[key] = sa.shiftDef.code;
     }
-    return [s.employeeId || "", s.fullName, s.category || "", s.designation || "", ...dayLabels.map(d => byDate[d] || "O")];
+    return [i + 1, nameWithCategory(s.fullName, s.category), s.designation || "", s.employeeId || "", ...dayLabels.map(d => byDate[d] || "O")];
   });
 
-  return { header, rows, meta: { stationId, monthKey, isPublished: roster.isPublished, staffCount: staff.length } };
+  return { header, rows, meta: { stationId, monthKey, isPublished: roster.isPublished, staffCount: staff.length, shiftDefs, title: `ROSTER — ${monthKey}` } };
 }
 
-// Blank starting point for the Monthly Roster import — same header/row
-// shape as getRosterReportData above (so it round-trips through Import
-// exactly the same way), but every day defaults to "O" rather than
-// reflecting real assignments, and it needs no roster to already exist for
-// the month (unlike the export, which 404s until someone has opened that
-// month's Shift Roster page at least once).
+// Blank starting point for the Monthly Roster import — same shape as
+// getRosterReportData above (so it round-trips through Import exactly the
+// same way), but every day defaults to "O" rather than reflecting real
+// assignments, and it needs no roster to already exist for the month
+// (unlike the export, which 404s until someone has opened that month's
+// Shift Roster page at least once).
 async function getRosterTemplateData(stationId, monthKey) {
   const staff = byCategoryThenName(await rosterRepo.getActiveStaffForGeneration(stationId));
   const nDays = daysInMonth(monthKey);
   const dayLabels = Array.from({ length: nDays }, (_, i) => dateLabel(monthKey, i + 1));
+  const shiftDefs = await shiftLegendFor(stationId);
 
-  const header = ["Employee ID", "Name", "Category", "Designation", ...dayLabels];
-  const rows = staff.map(s => [s.employeeId || "", s.fullName, s.category || "", s.designation || "", ...dayLabels.map(() => "O")]);
+  const header = ["S/N", "Staff Name", "Designation", "Staff ID", ...dayLabels];
+  const rows = staff.map((s, i) => [i + 1, nameWithCategory(s.fullName, s.category), s.designation || "", s.employeeId || "", ...dayLabels.map(() => "O")]);
 
-  return { header, rows, meta: { stationId, monthKey, staffCount: staff.length } };
+  return { header, rows, meta: { stationId, monthKey, staffCount: staff.length, shiftDefs, title: `ROSTER TEMPLATE — ${monthKey}` } };
 }
 
 // ── Compliance report ─────────────────────────────────────────────────────

@@ -12,11 +12,16 @@ const REPORT_TYPES = {
     title: (p) => `Roster — ${p.monthKey}`,
     fetch: (p) => reportData.getRosterReportData(p.stationId, p.monthKey),
     filename: (p) => `roster_${p.monthKey}`,
+    // Excel needs the real Monthly Roster layout (multi-row header + shift
+    // legend), not the generic single-header-row table — see
+    // reportRenderService.toRosterExcelBuffer. PDF/CSV stay generic.
+    renderExcel: (data) => render.toRosterExcelBuffer(data),
   },
   "roster-template": {
     title: (p) => `Roster Import Template — ${p.monthKey}`,
     fetch: (p) => reportData.getRosterTemplateData(p.stationId, p.monthKey),
     filename: (p) => `roster_template_${p.monthKey}`,
+    renderExcel: (data) => render.toRosterExcelBuffer(data),
   },
   compliance: {
     title: () => "Compliance Status Report",
@@ -46,7 +51,8 @@ async function generateReport(type, format, params) {
   const title = def.title(params);
 
   let buffer;
-  if (format === "excel") buffer = await render.toExcelBuffer(data, title, title);
+  if (format === "excel" && def.renderExcel) buffer = await def.renderExcel(data, params);
+  else if (format === "excel") buffer = await render.toExcelBuffer(data, title, title);
   else if (format === "pdf") buffer = await render.toPdfBuffer(data, title);
   else buffer = render.toCsvBuffer(data);
 

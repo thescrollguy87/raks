@@ -3,6 +3,7 @@ const rosterRepo = require("../repositories/rosterRepository");
 const rosterService = require("./rosterService");
 const ApiError = require("../utils/ApiError");
 const { resolveAirlineId } = require("../utils/stationScope");
+const { LEADING_COLUMNS, LEGEND_SENTINEL, stripNameSuffix, findHeaderRowIndex, findDateRowIndex } = require("../utils/rosterFileFormat");
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -13,37 +14,63 @@ function dateAt(monthKey, day) {
   return new Date(Date.UTC(y, m - 1, day)).toISOString().slice(0, 10);
 }
 
-// Reads the same layout getRosterReportData's Excel export produces
-// (Employee ID, Name, Category, Designation, then one column per day) so
-// exporting a roster, editing it in Excel, and re-importing round-trips
-// cleanly. Matches rows to EXISTING active staff at the station by Employee
-// ID first, falling back to an exact case-insensitive name match — it does
-// NOT create new staff from unmatched rows (unlike the original prototype,
-// which had no real accounts to match against): a real account needs a
-// login/email/role, which isn't something a roster spreadsheet carries, so
-// unmatched rows are reported back for the caller to add via Staff Registry
-// first, rather than silently fabricated.
+// Resolves ExcelJS's 1-indexed, leading-empty-slot row.values into a plain
+// 0-indexed array, and unwraps formula/rich-text cells down to the plain
+// value a person would actually read on screen.
+function sheetToRows(ws) {
+  const rows = [];
+  for (let r = 1; r <= ws.rowCount; r++) {
+    rows.push(ws.getRow(r).values.slice(1).map(cellPlainValue));
+  }
+  return rows;
+}
+function cellPlainValue(v) {
+  if (v === undefined) return null;
+  if (v && typeof v === "object") {
+    if (v instanceof Date) return v;
+    if (typeof v.result !== "undefined") return v.result;
+    if (typeof v.text !== "undefined") return v.text;
+    if (Array.isArray(v.richText)) return v.richText.map(rt => rt.text).join("");
+  }
+  return v;
+}
+
+// Reads the real Monthly Roster layout — see utils/rosterFileFormat.js for
+// the full shape (S/N, Staff Name, Designation, Staff ID, then a date per
+// day, with a title+date row, a weekday row, and a trailing "Legends"
+// section this never treats as staff data). Matches rows to EXISTING
+// active staff at the station by Staff ID (Employee ID) first, falling
+// back to a name match with any "(...)" suffix stripped — it does NOT
+// create new staff from unmatched rows: a real account needs a login/
+// email/role, which isn't something a roster spreadsheet carries, so
+// unmatched rows are reported back for the caller to add via Staff
+// Registry first, rather than silently fabricated.
 async function importRoster(stationId, monthKey, buffer, actor, req) {
   const wb = new ExcelJS.Workbook();
   try {
     await wb.xlsx.load(buffer);
   } catch {
-    throw ApiError.badRequest("Couldn't read that file — expected a .xlsx roster export");
+    throw ApiError.badRequest("Couldn't read that file — expected a .xlsx roster file");
   }
   const ws = wb.worksheets[0];
   if (!ws) throw ApiError.badRequest("The file has no worksheet");
 
-  const headerRow = ws.getRow(1).values.slice(1); // exceljs rows are 1-indexed with a leading empty slot
-  const LEADING_COLUMNS = 4; // Employee ID, Name, Category, Designation
-  if (!headerRow.length || headerRow.length <= LEADING_COLUMNS) {
-    throw ApiError.badRequest("That file doesn't look like a RosterPro roster export (missing header row/columns)");
+  const rows = sheetToRows(ws);
+  const headerRowIndex = findHeaderRowIndex(rows);
+  if (headerRowIndex === -1) {
+    throw ApiError.badRequest("Could not find the header row (looking for \"S/N\" and \"Staff Name\" columns) — is this a Monthly Roster file?");
+  }
+  const dateRowIndex = findDateRowIndex(rows, headerRowIndex);
+  if (dateRowIndex === -1) {
+    throw ApiError.badRequest("Could not find the row of dates above the header — is this a Monthly Roster file?");
   }
 
+  const dateRow = rows[dateRowIndex];
   const nDays = daysInMonth(monthKey);
-  const fileDayCount = headerRow.length - LEADING_COLUMNS;
+  const fileDayCount = dateRow.slice(LEADING_COLUMNS).filter(v => v instanceof Date).length;
   if (fileDayCount !== nDays) {
     throw ApiError.badRequest(
-      `File has ${fileDayCount} day columns but ${monthKey} has ${nDays} days — import into the same month the file was exported from.`
+      `File has ${fileDayCount} day columns but ${monthKey} has ${nDays} days — import into the same month the file is for.`
     );
   }
 
@@ -53,7 +80,7 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
   ]);
   const validCodes = new Set(shiftDefs.map(d => d.code));
   const byEmployeeId = new Map(staff.filter(s => s.employeeId).map(s => [s.employeeId, s]));
-  const byName = new Map(staff.map(s => [s.fullName.trim().toUpperCase(), s]));
+  const byName = new Map(staff.map(s => [stripNameSuffix(s.fullName).toUpperCase(), s]));
 
   const assignments = [];
   const notFound = [];
@@ -64,17 +91,22 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
   let matchedRows = 0;
   let nextOrder = 0;
 
-  for (let r = 2; r <= ws.rowCount; r++) {
-    const row = ws.getRow(r).values.slice(1);
-    if (!row.length || !row[1]) continue; // row[1] = Name (row[0] = Employee ID, may be blank)
+  for (let i = headerRowIndex + 1; i < rows.length; i++) {
+    const row = rows[i];
+    const firstCell = row[0];
+    if (typeof firstCell === "string" && firstCell.trim().toLowerCase() === LEGEND_SENTINEL) break; // staff data ends here
+    const rawName = row[1];
+    if (!rawName || !String(rawName).trim()) continue; // blank spacer row between staff
 
-    const employeeId = row[0] ? String(row[0]).trim() : "";
-    const name = String(row[1]).trim();
+    const employeeId = row[3] ? String(row[3]).trim() : "";
+    const name = stripNameSuffix(rawName);
+    if (!name) continue;
     const dupKey = employeeId || name.toUpperCase();
+    const fileRowNum = i + 1; // back to a 1-indexed row number for messages
     if (seenInFile.has(dupKey)) {
-      duplicates.push(`${name} (row ${r}, first seen row ${seenInFile.get(dupKey)})`);
+      duplicates.push(`${name} (row ${fileRowNum}, first seen row ${seenInFile.get(dupKey)})`);
     } else {
-      seenInFile.set(dupKey, r);
+      seenInFile.set(dupKey, fileRowNum);
     }
 
     const match = (employeeId && byEmployeeId.get(employeeId)) || byName.get(name.toUpperCase());
@@ -83,8 +115,14 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
     sortOrders.push({ userId: match.id, order: nextOrder++ });
 
     for (let day = 1; day <= nDays; day++) {
-      const cell = row[LEADING_COLUMNS + day];
-      const code = cell ? String(cell).trim().toUpperCase() : "O";
+      const cell = row[LEADING_COLUMNS + day - 1];
+      // A cell holding only whitespace (real files use these as filler past
+      // where a person's data actually ends, e.g. someone who left mid-file)
+      // means the same as a genuinely blank cell — default to "O", don't
+      // report it as an unrecognized code.
+      const raw = cell ? String(cell).trim() : "";
+      if (!raw) { assignments.push({ userId: match.id, shiftDate: dateAt(monthKey, day), shiftCode: "O" }); continue; }
+      const code = raw.toUpperCase();
       if (!validCodes.has(code)) { invalidCodes.add(code); continue; }
       assignments.push({ userId: match.id, shiftDate: dateAt(monthKey, day), shiftCode: code });
     }

@@ -28,6 +28,59 @@ async function toExcelBuffer({ header, rows }, sheetName, title) {
   return wb.xlsx.writeBuffer();
 }
 
+// ── Roster Excel (the real Monthly Roster layout) ───────────────────────────
+//
+// A dedicated builder, not the generic toExcelBuffer above — the Monthly
+// Roster's actual file (see utils/rosterFileFormat.js) has a 4-row header
+// (title+dates, weekdays, a blank spacer, then column labels) and a
+// trailing shift-code legend, which the single-header-row/flat-rows shape
+// toExcelBuffer assumes can't represent. Consumes the same
+// {header, rows, meta} getRosterReportData/getRosterTemplateData produce —
+// meta.shiftDefs feeds the legend, meta.title the title cell.
+const DAY_ABBR = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
+const ROSTER_LEADING_COLUMNS = 4; // S/N, Staff Name, Designation, Staff ID
+
+async function toRosterExcelBuffer({ header, rows, meta }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "RosterPro";
+  wb.created = new Date();
+  const ws = wb.addWorksheet((meta?.monthKey ? `Roster ${meta.monthKey}` : "Roster").replace(/[\\/*?:[\]]/g, "").slice(0, 31));
+
+  const dayLabels = header.slice(ROSTER_LEADING_COLUMNS); // "YYYY-MM-DD" strings
+  const dayDates = dayLabels.map(d => new Date(`${d}T00:00:00Z`));
+
+  const titleRow = ws.addRow([meta?.title || "ROSTER", "", "", "", ...dayDates]);
+  titleRow.font = { bold: true };
+  dayDates.forEach((_, i) => { titleRow.getCell(ROSTER_LEADING_COLUMNS + 1 + i).numFmt = "dd-mmm-yyyy"; });
+
+  ws.addRow(["", "", "", "", ...dayDates.map(d => DAY_ABBR[d.getUTCDay()])]);
+  ws.addRow([]);
+
+  const labelRow = ws.addRow(["S/N", "Staff Name", "Designation", "Staff ID", ...dayLabels.map(() => "")]);
+  labelRow.eachCell(cell => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F2846" } };
+  });
+
+  for (const r of rows) ws.addRow(r);
+
+  ws.addRow([]);
+  const legendHeader = ws.addRow(["Legends", "Description", "Timings"]);
+  legendHeader.font = { bold: true };
+  for (const def of meta?.shiftDefs || []) {
+    ws.addRow([def.code, def.name, def.startTime && def.endTime ? `${def.startTime}-${def.endTime}` : "AS PER COMMENT"]);
+  }
+
+  ws.columns.forEach((col, i) => {
+    const headerLen = String(header[i] ?? "").length;
+    const maxLen = rows.reduce((m, r) => Math.max(m, String(r[i] ?? "").length), headerLen);
+    col.width = Math.min(Math.max(maxLen + 2, i < ROSTER_LEADING_COLUMNS ? 10 : 6), 40);
+  });
+  ws.views = [{ state: "frozen", xSplit: ROSTER_LEADING_COLUMNS, ySplit: 4 }]; // staff info + header stay visible when scrolling
+
+  return wb.xlsx.writeBuffer();
+}
+
 // ── CSV ───────────────────────────────────────────────────────────────────
 
 function toCsvBuffer({ header, rows }) {
@@ -89,4 +142,4 @@ function toPdfBuffer({ header, rows }, title) {
   });
 }
 
-module.exports = { toExcelBuffer, toCsvBuffer, toPdfBuffer };
+module.exports = { toExcelBuffer, toRosterExcelBuffer, toCsvBuffer, toPdfBuffer };
