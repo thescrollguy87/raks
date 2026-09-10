@@ -24,8 +24,8 @@ export function assignRoles(id, roles) {
   return api.post(`/api/users/${id}/roles`, { roles });
 }
 
-export function deleteStaff(id) {
-  return api.delete(`/api/users/${id}`);
+export function deleteStaff(id, { force = false } = {}) {
+  return api.delete(`/api/users/${id}`, force ? { force: "true" } : undefined);
 }
 
 export async function downloadEmployeeMasterTemplate() {

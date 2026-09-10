@@ -125,6 +125,22 @@ export default function StaffPage() {
       await staffApi.deleteStaff(s.id);
       load();
     } catch (err) {
+      // A 409 with details.forceable means the only things in the way are
+      // clearable (current shift pattern/staff group/departure links) —
+      // offer to clear them and delete anyway rather than just dead-ending
+      // the admin at "deactivate instead". A non-forceable 409 (compliance/
+      // audit-trail history) still just shows the message as-is.
+      if (err.details?.forceable && err.details?.blockers?.length) {
+        if (confirm(`${err.message}\n\nForce delete anyway? This will also clear: ${err.details.blockers.join(", ")}.`)) {
+          try {
+            await staffApi.deleteStaff(s.id, { force: true });
+            load();
+          } catch (err2) {
+            alert(`Failed: ${err2.message}`);
+          }
+        }
+        return;
+      }
       alert(`Failed: ${err.message}`);
     }
   }

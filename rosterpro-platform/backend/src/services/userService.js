@@ -142,11 +142,18 @@ async function assignRoles(id, roleNames, actor, req) {
 // removes the row; qualifications/licenses/trainings/authorizations/leaves/
 // shift assignments/notifications/roles/sessions go with it (see the
 // user_delete_cascades migration). A person who's ever raised a quality
-// audit finding or owns a CAPA can't be hard-deleted — those two tables
-// were left as-is (Quality module is deprecated but its historical rows
-// are kept per the earlier removal work) — caught below and turned into a
-// clear message rather than a raw foreign-key error.
-async function deleteStaff(id, actor, req) {
+// audit finding or owns a CAPA can't be hard-deleted, force or not — those
+// two tables were left as-is (Quality module is deprecated but its
+// historical rows are kept per the earlier removal work) — caught below
+// and turned into a clear message rather than a raw foreign-key error.
+//
+// `force: true` additionally clears the "clearable" blockers first (see
+// userRepository.findDeleteBlockers) — current shift-pattern/staff-group
+// config, and detaching (not deleting) this person from any departure
+// manpower assignment — so a caller who's confirmed they genuinely want
+// this person gone isn't stuck deactivating instead just because they were
+// once on a shift pattern. It never touches the permanent blockers.
+async function deleteStaff(id, actor, req, { force = false } = {}) {
   const user = await userRepo.findById(id);
   if (!user) throw ApiError.notFound("Staff member not found");
   await assertOwnStation(actor, user.stationId);
@@ -157,11 +164,21 @@ async function deleteStaff(id, actor, req) {
   // departure manpower assignment, or quality audit-finding/CAPA history
   // are all deliberately non-cascading, but they're five different things
   // and "some record exists somewhere" isn't actionable.
-  const blockers = await userRepo.findDeleteBlockers(id);
-  if (blockers.length) {
+  const { clearable, permanent } = await userRepo.findDeleteBlockers(id);
+  if (permanent.length) {
     throw ApiError.conflict(
-      `Cannot permanently delete ${user.fullName} — they still have ${blockers.join(", ")}. Deactivate instead to remove them from future scheduling, or reassign/remove those records first if they truly must be deleted.`
+      `Cannot permanently delete ${user.fullName} — they still have ${permanent.join(", ")}. This can't be overridden — reassign or remove those records first, or deactivate instead to remove them from future scheduling.`,
+      { forceable: false, blockers: permanent }
     );
+  }
+  if (clearable.length && !force) {
+    throw ApiError.conflict(
+      `Cannot permanently delete ${user.fullName} — they still have ${clearable.join(", ")}. Deactivate instead to remove them from future scheduling, or force delete to clear these and remove them anyway.`,
+      { forceable: true, blockers: clearable }
+    );
+  }
+  if (clearable.length && force) {
+    await userRepo.clearForceDeletableBlockers(id);
   }
 
   await auditTrail.recordDelete("User", id, user.stationId, actor, req);
@@ -173,12 +190,13 @@ async function deleteStaff(id, actor, req) {
       // findDeleteBlockers above (e.g. a new one added later and missed
       // here) — still a clean 409, never a raw 500.
       throw ApiError.conflict(
-        `Cannot permanently delete ${user.fullName} — they have other historical records tied to their account. Deactivate instead to remove them from future scheduling.`
+        `Cannot permanently delete ${user.fullName} — they have other historical records tied to their account. Deactivate instead to remove them from future scheduling.`,
+        { forceable: false }
       );
     }
     throw err;
   }
-  await auditTrail.logActivity("Staff deleted", user.fullName, user.stationId, actor, req);
+  await auditTrail.logActivity(force && clearable.length ? "Staff force-deleted" : "Staff deleted", user.fullName, user.stationId, actor, req);
   return { ok: true };
 }
 

@@ -171,6 +171,19 @@ function hardDelete(id) {
 // its own doesn't tell the caller WHICH one — this runs the same checks
 // up front so deleteStaff can name them specifically instead of just
 // "some historical record exists somewhere."
+//
+// Split into two kinds, because they're not equally serious:
+//   - clearable: current-state scheduling config (which shift pattern/
+//     cycle a person is on, which Rule Builder group they're in) or a
+//     detachable reference on someone else's record (a departure's
+//     releaser/support — the departure itself, date, and flight stay; only
+//     the now-deleted person's name on it is cleared, the same SetNull
+//     treatment tool issues/activity log already get elsewhere). A caller
+//     that explicitly asks to force-delete may clear these first.
+//   - permanent: real compliance/audit-trail records (a quality finding
+//     they raised, a CAPA they own) where losing who was responsible is a
+//     genuine traceability loss, not just tidying up config. Never
+//     force-cleared — the caller must reassign/remove these first.
 async function findDeleteBlockers(userId) {
   const [pattern, staffGroupCount, releaserCount, supportCount, auditFindingCount, capaCount] = await Promise.all([
     prisma.staffShiftAllocation.findUnique({ where: { userId } }),
@@ -180,14 +193,30 @@ async function findDeleteBlockers(userId) {
     prisma.auditFinding.count({ where: { raisedById: userId } }),
     prisma.capa.count({ where: { ownerId: userId } }),
   ]);
-  const blockers = [];
-  if (pattern) blockers.push("a Shift Pattern assignment");
-  if (staffGroupCount) blockers.push(`${staffGroupCount} Rule Builder staff group membership${staffGroupCount === 1 ? "" : "s"}`);
+  const clearable = [];
+  if (pattern) clearable.push("a Shift Pattern assignment");
+  if (staffGroupCount) clearable.push(`${staffGroupCount} Rule Builder staff group membership${staffGroupCount === 1 ? "" : "s"}`);
   const departureCount = releaserCount + supportCount;
-  if (departureCount) blockers.push(`${departureCount} departure manpower assignment${departureCount === 1 ? "" : "s"}`);
-  if (auditFindingCount) blockers.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised`);
-  if (capaCount) blockers.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own`);
-  return blockers;
+  if (departureCount) clearable.push(`${departureCount} departure manpower assignment${departureCount === 1 ? "" : "s"}`);
+
+  const permanent = [];
+  if (auditFindingCount) permanent.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised`);
+  if (capaCount) permanent.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own`);
+
+  return { clearable, permanent };
+}
+
+// Clears exactly the "clearable" blockers findDeleteBlockers identifies —
+// deletes the current-state config rows, detaches (never deletes) the
+// departure manpower assignments so that real operational history stays
+// intact. Only ever called after an explicit force-delete confirmation.
+async function clearForceDeletableBlockers(userId) {
+  await prisma.$transaction([
+    prisma.staffShiftAllocation.deleteMany({ where: { userId } }),
+    prisma.workloadRuleStaffGroupMember.deleteMany({ where: { userId } }),
+    prisma.departureManpowerAssignment.updateMany({ where: { releaserUserId: userId }, data: { releaserUserId: null } }),
+    prisma.departureManpowerAssignment.updateMany({ where: { supportUserId: userId }, data: { supportUserId: null } }),
+  ]);
 }
 
 // Lean, exhaustive (non-paginated) roster of one station's active staff —
@@ -210,5 +239,5 @@ module.exports = {
   setEmailVerifyToken, findByEmailVerifyToken, markEmailVerified,
   setMfaSecret, setMfaEnabled,
   flattenRolesAndPermissions, findContactsByRoleAtStation,
-  create, update, setActive, setRoles, addRole, hardDelete, findDeleteBlockers,
+  create, update, setActive, setRoles, addRole, hardDelete, findDeleteBlockers, clearForceDeletableBlockers,
 };
