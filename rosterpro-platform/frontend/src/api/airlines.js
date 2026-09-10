@@ -8,3 +8,7 @@ export function listAirlines() {
 export function createAirline(body) {
   return api.post("/api/airlines", body);
 }
+
+export function updateAirline(id, body) {
+  return api.patch(`/api/airlines/${id}`, body);
+}

@@ -5,16 +5,18 @@ const prisma = require("../config/prisma");
 // only their own airline's stations. A station-scoped user (most roles)
 // will get back a one-item list — the frontend uses that to decide whether
 // a switcher is even worth showing.
-// airline.name is included so a SUPER_ADMIN's switcher (which spans every
-// tenant) can group/label stations by airline — a plain airlineId is
-// meaningless in a dropdown otherwise (see AirlineSwitcher.jsx).
+// airline.name/logoUrl are included so a SUPER_ADMIN's switcher (which
+// spans every tenant) can group/label stations by airline — a plain
+// airlineId is meaningless in a dropdown otherwise (see
+// AirlineSwitcher.jsx) — and so the sidebar can show the currently active
+// tenant's own name/logo in place of the generic app mark (Sidebar.jsx).
 async function listStations({ airlineId, isSuperAdmin }) {
   const stations = await prisma.station.findMany({
     where: { deletedAt: null, isActive: true, ...(isSuperAdmin ? {} : { airlineId }) },
     orderBy: { name: "asc" },
-    select: { id: true, name: true, iataCode: true, airlineId: true, airline: { select: { name: true } } },
+    select: { id: true, name: true, iataCode: true, airlineId: true, airline: { select: { name: true, logoUrl: true } } },
   });
-  return stations.map(({ airline, ...s }) => ({ ...s, airlineName: airline.name }));
+  return stations.map(({ airline, ...s }) => ({ ...s, airlineName: airline.name, airlineLogoUrl: airline.logoUrl }));
 }
 
 // Lean lookup used purely for tenancy checks (utils/stationScope.js) — an

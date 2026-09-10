@@ -51,13 +51,19 @@ export default function Sidebar() {
         {collapsed ? "›" : "‹"}
       </button>
       <div className="s-logo">
-        {/* The airline's real name is the top-most line whenever there's more
-            than one to distinguish (SUPER_ADMIN/AIRLINE_ADMIN) — otherwise
-            a station-scoped user's own single airline never needs naming. */}
-        <span className="lm">
-          {currentStation?.airlineName || (currentStation ? `${currentStation.iataCode} · M&E` : "M&E")}
+        {/* The tenant airline's own name/logo is the prominent line — this
+            IS the product's branding for whoever's using it, not a generic
+            "RosterPro" mark. RosterPro itself is demoted to a small caption
+            above, same spot a "powered by" line would go. Falls back to
+            the generic mark only when there's no station/airline context
+            yet at all (e.g. still loading). */}
+        <span className="lm">✈ RosterPro</span>
+        <span className="ln s-logo-ln">
+          {currentStation?.airlineLogoUrl && (
+            <img className="s-logo-img" src={currentStation.airlineLogoUrl} alt="" />
+          )}
+          <span>{currentStation?.airlineName || (currentStation ? `${currentStation.iataCode} · M&E` : "RosterPro")}</span>
         </span>
-        <span className="ln">✈ RosterPro</span>
         <span className="ls">
           {collapsed ? "" : currentStation ? `${currentStation.iataCode} — ${currentStation.name} Line Maintenance` : "People • Planes • Performance"}
         </span>

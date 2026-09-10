@@ -21,4 +21,14 @@ const createAirlineSchema = z.object({
   }),
 });
 
-module.exports = { createAirlineSchema };
+// Rebranding an existing tenant — every field optional (a caller only
+// setting the logo shouldn't have to resend the name too). An explicit
+// null clears the logo back to the generic app mark.
+const updateAirlineSchema = z.object({
+  name: z.string().min(1).optional(),
+  icaoCode: z.string().min(2).max(10).optional(),
+  iataCode: z.string().min(2).max(5).nullable().optional(),
+  logoUrl: z.string().url().nullable().optional(),
+});
+
+module.exports = { createAirlineSchema, updateAirlineSchema };

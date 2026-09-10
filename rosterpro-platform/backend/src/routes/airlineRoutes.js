@@ -3,7 +3,7 @@ const ctrl = require("../controllers/airlineController");
 const { requireAuth } = require("../middleware/auth");
 const { requireRole } = require("../middleware/rbac");
 const { validate } = require("../middleware/validate");
-const { createAirlineSchema } = require("../validators/airlineValidators");
+const { createAirlineSchema, updateAirlineSchema } = require("../validators/airlineValidators");
 
 const router = express.Router();
 
@@ -16,5 +16,6 @@ const router = express.Router();
 // role, can see or use this.
 router.get("/", requireAuth, requireRole("SUPER_ADMIN"), ctrl.list);
 router.post("/", requireAuth, requireRole("SUPER_ADMIN"), validate(createAirlineSchema), ctrl.create);
+router.patch("/:id", requireAuth, requireRole("SUPER_ADMIN"), validate(updateAirlineSchema), ctrl.update);
 
 module.exports = router;

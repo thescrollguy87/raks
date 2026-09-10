@@ -31,4 +31,13 @@ async function createAirline(body, actor, req) {
   };
 }
 
-module.exports = { createAirline };
+async function updateAirline(id, body, actor, req) {
+  const before = await repo.findAirlineById(id);
+  if (!before) throw ApiError.notFound("Airline not found");
+
+  const after = await repo.updateAirline(id, body, actor.sub);
+  await auditTrail.recordUpdate("Airline", id, null, before, body, actor, req);
+  return after;
+}
+
+module.exports = { createAirline, updateAirline };

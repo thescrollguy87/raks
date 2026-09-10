@@ -100,6 +100,7 @@ model Airline {
   name        String
   icaoCode    String   @unique
   iataCode    String?
+  logoUrl     String?  // shown in the sidebar's top-left corner in place of the generic app mark
   isActive    Boolean  @default(true)
 
   createdById String?

@@ -11,4 +11,9 @@ const create = asyncHandler(async (req, res) => {
   res.status(201).json(result);
 });
 
-module.exports = { list, create };
+const update = asyncHandler(async (req, res) => {
+  const result = await airlineService.updateAirline(req.params.id, req.body, req.user, req);
+  res.json(result);
+});
+
+module.exports = { list, create, update };

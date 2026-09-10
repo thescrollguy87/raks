@@ -86,6 +86,10 @@ table{border-collapse:collapse}
 .s-logo .lm{font-size:9px;letter-spacing:3px}
 .s-logo .ln{font-size:16px;font-weight:800;margin-top:1px}
 .s-logo .ls{font-size:9px;margin-top:1px}
+/* Tenant airline's own name/logo, standing in for the generic app mark —
+   an inline-flex row so a wide/non-square logo image never distorts. */
+.s-logo-ln{display:flex!important;align-items:center;gap:7px}
+.s-logo-img{width:22px;height:22px;object-fit:contain;border-radius:5px;background:#fff;flex-shrink:0}
 .nav{flex:1;padding:8px 6px;overflow-y:auto}
 .nav-sl{font-size:8px;font-weight:700;letter-spacing:2px;color:var(--text-dim);padding:9px 8px 3px;text-transform:uppercase;opacity:.75}
 /* Left accent bar + a flat tint, not the old all-around-bordered gradient

@@ -33,9 +33,9 @@ async function ensureDefaultStation() {
   if (existing) return;
 
   const airline = await prisma.airline.upsert({
-    where: { icaoCode: "DEFAULT" },
+    where: { icaoCode: "AKJ" },
     update: {},
-    create: { name: "Default Airline", icaoCode: "DEFAULT", iataCode: "DF" },
+    create: { name: "Akasa Air", icaoCode: "AKJ", iataCode: "QP" },
   });
   const station = await prisma.station.create({
     data: { airlineId: airline.id, iataCode: "AMD", name: "Ahmedabad Line Maintenance" },

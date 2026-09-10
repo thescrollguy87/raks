@@ -12,7 +12,7 @@ async function listAirlines() {
     prisma.airline.findMany({
       where: { deletedAt: null },
       orderBy: { createdAt: "asc" },
-      select: { id: true, name: true, icaoCode: true, iataCode: true, isActive: true, createdAt: true },
+      select: { id: true, name: true, icaoCode: true, iataCode: true, logoUrl: true, isActive: true, createdAt: true },
     }),
     prisma.station.groupBy({
       by: ["airlineId"],
@@ -76,4 +76,24 @@ async function createAirlineWithAdmin({ airline, station, admin, passwordHash, a
   });
 }
 
-module.exports = { listAirlines, createAirlineWithAdmin };
+function findAirlineById(id) {
+  return prisma.airline.findFirst({ where: { id, deletedAt: null } });
+}
+
+// Renaming/rebranding an existing tenant (its own display name, ICAO/IATA
+// codes, and the logo shown in the sidebar) — separate from the
+// create-time-only fields (station/admin) createAirlineWithAdmin handles.
+function updateAirline(id, { name, icaoCode, iataCode, logoUrl }, actorId) {
+  return prisma.airline.update({
+    where: { id },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(icaoCode !== undefined ? { icaoCode: icaoCode.toUpperCase() } : {}),
+      ...(iataCode !== undefined ? { iataCode: iataCode ? iataCode.toUpperCase() : null } : {}),
+      ...(logoUrl !== undefined ? { logoUrl: logoUrl || null } : {}),
+      updatedById: actorId, version: { increment: 1 },
+    },
+  });
+}
+
+module.exports = { listAirlines, createAirlineWithAdmin, findAirlineById, updateAirline };
