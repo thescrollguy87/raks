@@ -36,6 +36,10 @@ const createLicense = asyncHandler(async (req, res) => {
 const updateLicense = asyncHandler(async (req, res) => {
   res.json(await svc.updateLicense(req.params.id, req.body, req.user, req));
 });
+const deleteLicense = asyncHandler(async (req, res) => {
+  await svc.deleteLicense(req.params.id, req.user, req, req.query.reason);
+  res.status(204).send();
+});
 const listLicenses = asyncHandler(async (req, res) => {
   await svc.assertActorSharesStationWith(req.user, req.params.userId);
   res.json(await svc.listLicensesForUser(req.params.userId));
@@ -50,6 +54,13 @@ const expiringLicenses = asyncHandler(async (req, res) => {
 const createTraining = asyncHandler(async (req, res) => {
   res.status(201).json(await svc.createTraining(req.body, req.user, req));
 });
+const updateTraining = asyncHandler(async (req, res) => {
+  res.json(await svc.updateTraining(req.params.id, req.body, req.user, req));
+});
+const deleteTraining = asyncHandler(async (req, res) => {
+  await svc.deleteTraining(req.params.id, req.user, req, req.query.reason);
+  res.status(204).send();
+});
 const listTraining = asyncHandler(async (req, res) => {
   await svc.assertActorSharesStationWith(req.user, req.params.userId);
   res.json(await svc.listTrainingForUser(req.params.userId));
@@ -58,6 +69,13 @@ const listTraining = asyncHandler(async (req, res) => {
 // Authorizations
 const createAuthorization = asyncHandler(async (req, res) => {
   res.status(201).json(await svc.createAuthorization(req.body, req.user, req));
+});
+const updateAuthorization = asyncHandler(async (req, res) => {
+  res.json(await svc.updateAuthorization(req.params.id, req.body, req.user, req));
+});
+const deleteAuthorization = asyncHandler(async (req, res) => {
+  await svc.deleteAuthorization(req.params.id, req.user, req, req.query.reason);
+  res.status(204).send();
 });
 const listAuthorizations = asyncHandler(async (req, res) => {
   await svc.assertActorSharesStationWith(req.user, req.params.userId);
@@ -72,8 +90,8 @@ const summary = asyncHandler(async (req, res) => {
 
 module.exports = {
   createQualification, updateQualification, deleteQualification, listQualifications, expiringQualifications,
-  createLicense, updateLicense, listLicenses, expiringLicenses,
-  createTraining, listTraining,
-  createAuthorization, listAuthorizations,
+  createLicense, updateLicense, deleteLicense, listLicenses, expiringLicenses,
+  createTraining, updateTraining, deleteTraining, listTraining,
+  createAuthorization, updateAuthorization, deleteAuthorization, listAuthorizations,
   summary,
 };

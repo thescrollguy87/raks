@@ -22,11 +22,20 @@ router.get("/licenses/expiring", requirePermission("license", "read"), ctrl.expi
 router.get("/licenses/:userId", requirePermission("license", "read"), ctrl.listLicenses);
 router.post("/licenses", requirePermission("license", "create"), validate(licenseSchema), ctrl.createLicense);
 router.patch("/licenses/:id", requirePermission("license", "update"), ctrl.updateLicense);
+router.delete("/licenses/:id", requirePermission("license", "update"), ctrl.deleteLicense);
 
 router.get("/trainings/:userId", requirePermission("training", "read"), ctrl.listTraining);
 router.post("/trainings", requirePermission("training", "create"), validate(trainingSchema), ctrl.createTraining);
+router.patch("/trainings/:id", requirePermission("training", "update"), ctrl.updateTraining);
+router.delete("/trainings/:id", requirePermission("training", "update"), ctrl.deleteTraining);
 
+// Authorizations reuse the "qualification" permission namespace, same as
+// their create/read routes already do — there's no separate "authorization"
+// resource in the RBAC matrix, and an authorization is conceptually the
+// same "can this person edit compliance records" grant as a qualification.
 router.get("/authorizations/:userId", requirePermission("qualification", "read"), ctrl.listAuthorizations);
 router.post("/authorizations", requirePermission("qualification", "create"), validate(authorizationSchema), ctrl.createAuthorization);
+router.patch("/authorizations/:id", requirePermission("qualification", "update"), ctrl.updateAuthorization);
+router.delete("/authorizations/:id", requirePermission("qualification", "update"), ctrl.deleteAuthorization);
 
 module.exports = router;

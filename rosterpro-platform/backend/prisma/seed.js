@@ -30,7 +30,7 @@ const PERMISSIONS = [
   ["leave", "read"], ["leave", "request"], ["leave", "approve"], ["leave", "approve_reports"],
   ["qualification", "read"], ["qualification", "create"], ["qualification", "update"],
   ["license", "read"], ["license", "create"], ["license", "update"],
-  ["training", "read"], ["training", "create"],
+  ["training", "read"], ["training", "create"], ["training", "update"],
   ["store", "read"], ["store", "issue"], ["store", "receive"],
   ["audit_finding", "read"], ["audit_finding", "create"], ["audit_finding", "update"],
   ["capa", "read"], ["capa", "create"], ["capa", "update"], ["capa", "close"],

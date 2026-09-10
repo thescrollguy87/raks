@@ -136,6 +136,14 @@ async function updateLicense(id, body, actor, req) {
   return updated;
 }
 
+async function deleteLicense(id, actor, req, reason) {
+  const existing = await repo.license.findById(id);
+  if (!existing) throw ApiError.notFound("License not found");
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
+  await repo.license.softDelete(id, actor.sub);
+  await auditTrail.recordDelete("License", id, stationId, actor, req, reason);
+}
+
 function listLicensesForUser(userId) {
   return repo.license.listForUser(userId)
     .then(rows => rows.map(r => ({ ...r, status: deriveStatus(r.expiryDate) })));
@@ -160,6 +168,35 @@ async function createTraining(body, actor, req) {
   return record;
 }
 
+async function updateTraining(id, body, actor, req) {
+  const existing = await repo.training.findById(id);
+  if (!existing) throw ApiError.notFound("Training record not found");
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
+  const data = {
+    courseName: body.courseName ?? existing.courseName,
+    provider: body.provider ?? existing.provider,
+    completedDate: body.completedDate ? toDate(body.completedDate) : existing.completedDate,
+    validUntil: body.validUntil ? toDate(body.validUntil) : existing.validUntil,
+    updatedById: actor.sub, version: { increment: 1 },
+  };
+  const updated = await repo.training.update(id, data);
+  await auditTrail.recordUpdate(
+    "Training", id, stationId,
+    { courseName: existing.courseName, validUntil: existing.validUntil?.toISOString() },
+    { courseName: updated.courseName, validUntil: updated.validUntil?.toISOString() },
+    actor, req
+  );
+  return updated;
+}
+
+async function deleteTraining(id, actor, req, reason) {
+  const existing = await repo.training.findById(id);
+  if (!existing) throw ApiError.notFound("Training record not found");
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
+  await repo.training.softDelete(id, actor.sub);
+  await auditTrail.recordDelete("Training", id, stationId, actor, req, reason);
+}
+
 function listTrainingForUser(userId) {
   return repo.training.listForUser(userId)
     .then(rows => rows.map(r => ({ ...r, status: r.validUntil ? deriveStatus(r.validUntil) : "VALID" })));
@@ -177,6 +214,35 @@ async function createAuthorization(body, actor, req) {
   const record = await repo.authorization.create(data);
   await auditTrail.recordCreate("StaffAuthorization", record.id, stationId, actor, req);
   return record;
+}
+
+async function updateAuthorization(id, body, actor, req) {
+  const existing = await repo.authorization.findById(id);
+  if (!existing) throw ApiError.notFound("Authorization not found");
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
+  const newExpiry = body.expiryDate !== undefined ? toDate(body.expiryDate) : existing.expiryDate;
+  const data = {
+    scope: body.scope ?? existing.scope,
+    grantedDate: body.grantedDate ? toDate(body.grantedDate) : existing.grantedDate,
+    expiryDate: newExpiry,
+    updatedById: actor.sub, version: { increment: 1 },
+  };
+  const updated = await repo.authorization.update(id, data);
+  await auditTrail.recordUpdate(
+    "StaffAuthorization", id, stationId,
+    { scope: existing.scope, expiryDate: existing.expiryDate?.toISOString() },
+    { scope: updated.scope, expiryDate: updated.expiryDate?.toISOString() },
+    actor, req
+  );
+  return updated;
+}
+
+async function deleteAuthorization(id, actor, req, reason) {
+  const existing = await repo.authorization.findById(id);
+  if (!existing) throw ApiError.notFound("Authorization not found");
+  const stationId = await assertActorSharesStationWith(actor, existing.userId);
+  await repo.authorization.softDelete(id, actor.sub);
+  await auditTrail.recordDelete("StaffAuthorization", id, stationId, actor, req, reason);
 }
 
 function listAuthorizationsForUser(userId) {
@@ -202,8 +268,8 @@ async function getComplianceSummary(userId) {
 module.exports = {
   deriveStatus, assertActorSharesStationWith,
   createQualification, updateQualification, deleteQualification, listQualificationsForUser, listExpiringQualifications,
-  createLicense, updateLicense, listLicensesForUser, listExpiringLicenses,
-  createTraining, listTrainingForUser,
-  createAuthorization, listAuthorizationsForUser,
+  createLicense, updateLicense, deleteLicense, listLicensesForUser, listExpiringLicenses,
+  createTraining, updateTraining, deleteTraining, listTrainingForUser,
+  createAuthorization, updateAuthorization, deleteAuthorization, listAuthorizationsForUser,
   getComplianceSummary,
 };
