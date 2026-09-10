@@ -7,6 +7,7 @@ import { useBillingReadOnly } from "../hooks/useBillingReadOnly.js";
 import * as rosterApi from "../api/roster.js";
 import * as workloadConfigApi from "../api/workloadConfig.js";
 import { getDashboardSummary } from "../api/dashboard.js";
+import { downloadReport } from "../api/reports.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
 import StaffDetailDrawer from "../components/roster/StaffDetailDrawer.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
@@ -54,7 +55,7 @@ export default function RosterPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [monthKey, setMonthKey] = useState(() => searchParams.get("month") || new Date().toISOString().slice(0, 7));
-  const [catFilter, setCatFilter] = useState("ALL");
+  const [catFilter, setCatFilter] = useState(() => searchParams.get("category") || "ALL");
   const [search, setSearch] = useState("");
   const [viewMode, setViewMode] = useState("month");
   const [shiftDefs, setShiftDefs] = useState([]);
@@ -67,9 +68,11 @@ export default function RosterPage() {
   const [editingCell, setEditingCell] = useState(null);
   const [selectedStaff, setSelectedStaff] = useState(null);
   const [showAllIssues, setShowAllIssues] = useState(false);
+  const [kpiDetail, setKpiDetail] = useState(null); // null | { type: "shift", bucket, label } | { type: "conflicts" }
   const [generating, setGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState(null); // null | "excel" | "pdf"
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const importInputRef = useRef(null);
 
@@ -84,6 +87,7 @@ export default function RosterPage() {
   const canPublish = hasPermission("roster", "publish") && !isReadOnly;
   const canUnpublish = hasPermission("roster", "unpublish") && !isReadOnly;
   const canGenerate = hasPermission("roster", "update") && !isReadOnly;
+  const canExport = hasPermission("reports", "export");
 
   const load = useCallback(async () => {
     if (!stationId) return;
@@ -97,10 +101,18 @@ export default function RosterPage() {
       // Dashboard summary + mandatory coverage rules feed the new KPI row,
       // Daily Coverage table, and Roster Validation card below with real
       // numbers already computed elsewhere in the app — never fabricated.
+      // Flight coverage must reflect the roster month actually being
+      // viewed, not always "the real current calendar month" (the
+      // summary endpoint's own default) — otherwise flipping to a past or
+      // future month here would keep showing this month's flight count.
+      const [y, m] = monthKey.split("-").map(Number);
+      const monthFrom = new Date(Date.UTC(y, m - 1, 1)).toISOString();
+      const monthTo = new Date(Date.UTC(y, m, 0, 23, 59, 59)).toISOString();
+
       const [defs, grid, summary, rules] = await Promise.all([
         rosterApi.getShiftDefinitions(stationId),
         rosterApi.getRosterGrid(stationId, monthKey),
-        getDashboardSummary(stationId).catch(() => null),
+        getDashboardSummary(stationId, { monthKey, from: monthFrom, to: monthTo }).catch(() => null),
         workloadConfigApi.listMandatoryCoverageRules(stationId).catch(() => []),
       ]);
       setShiftDefs(defs);
@@ -156,6 +168,17 @@ export default function RosterPage() {
     }
   }
 
+  async function handleExport(format) {
+    setExportingFormat(format);
+    try {
+      await downloadReport("roster", format, { stationId, monthKey });
+    } catch (err) {
+      alert(`Export failed: ${err.message}`);
+    } finally {
+      setExportingFormat(null);
+    }
+  }
+
   // actions is memoized because usePageHeader syncs it into context state on
   // every change — a fresh JSX element here on every render (this component
   // re-renders whenever the header context updates, since it subscribes to
@@ -164,6 +187,16 @@ export default function RosterPage() {
   const headerActions = useMemo(() => (
     <>
       <button className="btn btn-ghost" disabled={loading} onClick={load} title="Reload roster data">↻ Refresh</button>
+      {canExport && (
+        <>
+          <button className="btn btn-ghost" disabled={!!exportingFormat} onClick={() => handleExport("excel")}>
+            {exportingFormat === "excel" ? "Exporting…" : "⬇ Excel"}
+          </button>
+          <button className="btn btn-ghost" disabled={!!exportingFormat} onClick={() => handleExport("pdf")}>
+            {exportingFormat === "pdf" ? "Exporting…" : "⬇ PDF"}
+          </button>
+        </>
+      )}
       {canEdit && roster && !roster.isPublished && (
         <>
           <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleImportFile} />
@@ -185,7 +218,7 @@ export default function RosterPage() {
       )}
     </>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [canEdit, canGenerate, canPublish, canUnpublish, roster, generating, importing, loading, monthKey, stationId]);
+  ), [canEdit, canExport, canGenerate, canPublish, canUnpublish, roster, generating, importing, exportingFormat, loading, monthKey, stationId]);
 
   usePageHeader({
     title: "Shift Roster",
@@ -308,6 +341,25 @@ export default function RosterPage() {
 
   const violations = dashboardSummary?.rosterCoverage?.violations || [];
 
+  // Who's actually on duty today for a given shift bucket (M/A/N) — same
+  // computation the KPI counts and the in-grid Coverage rows already use,
+  // just returning the staff themselves instead of a count, for the
+  // "click a KPI to see who" detail popover.
+  function staffOnDutyToday(bucket) {
+    if (!isCurrentMonth) return [];
+    return staff
+      .map(s => {
+        const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayStr);
+        if (!a) return null;
+        const def = shiftDefByCode[a.shiftDef.code];
+        if (shiftBucket(a.shiftDef.code, def) !== bucket) return null;
+        const in1 = a.in1 || def?.startTime;
+        const out1 = a.out1 || def?.endTime;
+        return { id: s.id, fullName: s.fullName.split("(")[0].trim(), category: s.category || "NCS", code: a.shiftDef.code, time: in1 ? `${in1}–${out1}` : null };
+      })
+      .filter(Boolean);
+  }
+
   // Order matters here for the same reason as DashboardPage.jsx: check
   // stationLoading (still figuring out which station to use) before the
   // "no station" message, so a real stationId arriving doesn't briefly
@@ -353,10 +405,10 @@ export default function RosterPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
         <StatCard tone="sky" icon="👥" label="Total Staff" value={kpi.totalStaff} />
         <StatCard tone="sky" icon="✈️" label="Flights (this month)" value={kpi.flights} />
-        <StatCard tone="sky" icon="🌅" label="Morning Today" value={kpi.assignedToday.M} />
-        <StatCard tone="green" icon="☀️" label="Afternoon Today" value={kpi.assignedToday.A} />
-        <StatCard tone="purple" icon="🌙" label="Night Today" value={kpi.assignedToday.N} />
-        <StatCard tone={kpi.conflicts > 0 ? "red" : "neutral"} icon="⚠️" label="Conflicts" value={kpi.conflicts} />
+        <StatCard tone="sky" icon="🌅" label="Morning Today" value={kpi.assignedToday.M} onClick={() => setKpiDetail({ type: "shift", bucket: "M", label: "Morning" })} />
+        <StatCard tone="green" icon="☀️" label="Afternoon Today" value={kpi.assignedToday.A} onClick={() => setKpiDetail({ type: "shift", bucket: "A", label: "Afternoon" })} />
+        <StatCard tone="purple" icon="🌙" label="Night Today" value={kpi.assignedToday.N} onClick={() => setKpiDetail({ type: "shift", bucket: "N", label: "Night" })} />
+        <StatCard tone={kpi.conflicts > 0 ? "red" : "neutral"} icon="⚠️" label="Conflicts" value={kpi.conflicts} onClick={() => setKpiDetail({ type: "conflicts" })} />
         <StatCard tone={kpi.coveragePct >= 90 ? "green" : kpi.coveragePct >= 70 ? "amber" : "red"} icon="📈" label="Coverage" value={`${kpi.coveragePct}%`} />
       </div>
 
@@ -436,6 +488,61 @@ export default function RosterPage() {
           onEditToday={(s) => { setSelectedStaff(null); openCell(s, todayDayNum || 1); }}
         />
       )}
+
+      {kpiDetail?.type === "shift" && (
+        <KpiDetailModal title={`${kpiDetail.label} · On Duty Today`} onClose={() => setKpiDetail(null)}>
+          {(() => {
+            const rows = staffOnDutyToday(kpiDetail.bucket);
+            if (!rows.length) return <div className="empty-note">No one is on {kpiDetail.label.toLowerCase()} duty today.</div>;
+            return rows.map(r => (
+              <button
+                key={r.id} className="staff-name-btn" style={{ width: "100%" }}
+                onClick={() => { setKpiDetail(null); const s = staff.find(x => x.id === r.id); if (s) setSelectedStaff(s); }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                  <div>
+                    <div className="sn">{r.fullName}</div>
+                    <div className="sr">{r.time ? `${r.code} · ${r.time}` : r.code}</div>
+                  </div>
+                  <span className={`cat-tag cat-${r.category}`}>{r.category}</span>
+                </div>
+              </button>
+            ));
+          })()}
+        </KpiDetailModal>
+      )}
+
+      {kpiDetail?.type === "conflicts" && (
+        <KpiDetailModal title={`Conflicts (${violations.length})`} onClose={() => setKpiDetail(null)}>
+          {violations.length === 0 ? (
+            <div className="empty-note">✅ No conflicts this month.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              {violations.map((v, i) => (
+                <div key={i} className="alert-card red">
+                  <span>⚠</span>
+                  <div>
+                    <div className="alert-card-title">{v.date} · {v.shift}</div>
+                    <div className="alert-card-sub">{v.issue}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </KpiDetailModal>
+      )}
+    </div>
+  );
+}
+
+function KpiDetailModal({ title, onClose, children }) {
+  return (
+    <div className="modal-overlay open" onClick={onClose}>
+      <div className="popover-card" style={{ width: 420, maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+        <button className="modal-close" onClick={onClose}>✕</button>
+        <div className="card-title" style={{ marginBottom: 10 }}>{title}</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
+      </div>
     </div>
   );
 }
@@ -471,9 +578,14 @@ function relativeTime(date) {
   return `${mins} min ago`;
 }
 
-function StatCard({ tone, icon, label, value }) {
+function StatCard({ tone, icon, label, value, onClick }) {
   return (
-    <div className={`stat-card ${tone}`}>
+    <div
+      className={`stat-card ${tone}`}
+      onClick={onClick} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined}
+      style={onClick ? { cursor: "pointer" } : undefined}
+      title={onClick ? `View ${label.toLowerCase()} detail` : undefined}
+    >
       <div className="stat-label">{icon} {label}</div>
       <div className="stat-value" style={{ fontSize: 22 }}>{value}</div>
     </div>

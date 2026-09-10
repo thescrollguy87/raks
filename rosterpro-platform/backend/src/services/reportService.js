@@ -13,6 +13,11 @@ const REPORT_TYPES = {
     fetch: (p) => reportData.getRosterReportData(p.stationId, p.monthKey),
     filename: (p) => `roster_${p.monthKey}`,
   },
+  "roster-template": {
+    title: (p) => `Roster Import Template — ${p.monthKey}`,
+    fetch: (p) => reportData.getRosterTemplateData(p.stationId, p.monthKey),
+    filename: (p) => `roster_template_${p.monthKey}`,
+  },
   compliance: {
     title: () => "Compliance Status Report",
     fetch: (p) => reportData.getComplianceReportData(p.stationId),

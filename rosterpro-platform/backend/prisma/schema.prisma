@@ -284,6 +284,14 @@ model User {
   lastLoginAt       DateTime?
   lastLoginIp       String?
 
+  // Row position from the most recently imported Monthly Roster Excel file
+  // (see rosterImportService) — lets the Shift Roster grid show staff in
+  // the same order the station actually manages them in their own
+  // spreadsheet, instead of always alphabetical. Null for anyone never
+  // captured by a roster import (e.g. added directly via Staff Registry),
+  // who then sorts after everyone with a real position, by name.
+  rosterSortOrder   Int?
+
   createdById String?
   updatedById String?
   createdAt   DateTime @default(now())

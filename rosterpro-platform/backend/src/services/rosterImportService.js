@@ -60,7 +60,9 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
   const invalidCodes = new Set();
   const seenInFile = new Map();
   const duplicates = [];
+  const sortOrders = []; // { userId, order } — this row's position in the file, for matched staff only
   let matchedRows = 0;
+  let nextOrder = 0;
 
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r).values.slice(1);
@@ -78,6 +80,7 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
     const match = (employeeId && byEmployeeId.get(employeeId)) || byName.get(name.toUpperCase());
     if (!match) { notFound.push(name); continue; }
     matchedRows++;
+    sortOrders.push({ userId: match.id, order: nextOrder++ });
 
     for (let day = 1; day <= nDays; day++) {
       const cell = row[LEADING_COLUMNS + day];
@@ -86,6 +89,12 @@ async function importRoster(stationId, monthKey, buffer, actor, req) {
       assignments.push({ userId: match.id, shiftDate: dateAt(monthKey, day), shiftCode: code });
     }
   }
+
+  // Record the file's row order even for a re-import that changes nothing
+  // else (e.g. re-running the same file) — the Shift Roster grid reads this
+  // to show staff in the order the station actually manages them, not
+  // always alphabetical.
+  if (sortOrders.length) await rosterRepo.updateRosterSortOrders(sortOrders);
 
   if (!assignments.length) {
     return { staffUpdated: 0, assignmentCount: 0, notFound: [...new Set(notFound)], invalidCodes: [...invalidCodes], duplicates };

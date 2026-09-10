@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import * as flightsApi from "../api/flights.js";
+
+function todayMonthKey() { return new Date().toISOString().slice(0, 7); }
 
 const STATUS_STYLE = {
   SCHEDULED: { background: "rgba(148,163,184,.15)", color: "var(--text-dim)" },
@@ -25,6 +27,12 @@ export default function FlightsPage() {
   const [flights, setFlights] = useState(null);
   const [error, setError] = useState("");
   const canLogDelay = hasPermission("engineering_delay", "create");
+  const canImport = hasPermission("flight", "read");
+
+  const [importMonthKey, setImportMonthKey] = useState(todayMonthKey());
+  const [importBusy, setImportBusy] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const importInputRef = useRef(null);
 
   usePageHeader({ title: "Flights", subtitle: currentStation ? `${currentStation.iataCode} · Today's flights & engineering delays` : "" });
 
@@ -50,11 +58,61 @@ export default function FlightsPage() {
     }
   }
 
+  function handleImportFileChosen(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) handleImport(file);
+  }
+
+  async function handleImport(file) {
+    if (!stationId) return;
+    setImportBusy(true); setImportResult(null);
+    try {
+      const r = await flightsApi.importFlightSchedule(stationId, importMonthKey, file);
+      setImportResult({ tone: "green", text: `${r.created} created, ${r.updated} updated (${r.occurrenceCount} flight occurrences this month).` });
+      load();
+    } catch (err) {
+      setImportResult({ tone: "red", text: err.message });
+    } finally {
+      setImportBusy(false);
+    }
+  }
+
   if (error) return <div className="ab red">{error}</div>;
   if (!flights) return <div className="card">Loading flights…</div>;
 
   return (
-    <div className="card">
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {canImport && (
+        <div className="card">
+          <div className="card-title">⬆ Import Flight Schedule</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
+            A recurring monthly pattern ("Mon,Wed,Fri" or "Daily") expanded into individual flights for {currentStation?.name}. Re-importing the same file for the same month updates those flights instead of duplicating them — the numbers below and on the Dashboard/Shift Roster's Flight Coverage come straight from this.
+          </div>
+          <div className="fg" style={{ marginBottom: 10, maxWidth: 200 }}>
+            <label className="fl">Month</label>
+            <input className="fi" type="month" value={importMonthKey} onChange={(e) => setImportMonthKey(e.target.value)} />
+          </div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            <button className="btn btn-ghost" onClick={() => flightsApi.downloadFlightScheduleTemplate()}>⬇ Download Template</button>
+            <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleImportFileChosen} />
+            <button className="btn btn-primary" disabled={importBusy} onClick={() => importInputRef.current?.click()}>
+              {importBusy ? "Importing…" : "⬆ Import"}
+            </button>
+          </div>
+          {importResult && (
+            <div style={{
+              marginTop: 10, padding: "8px 11px", borderRadius: 7, fontSize: 11, fontWeight: 600,
+              background: importResult.tone === "red" ? "rgba(229,57,53,.12)" : "rgba(0,200,83,.1)",
+              color: importResult.tone === "red" ? "var(--rp-red)" : "var(--rp-green)",
+            }}>
+              {importResult.text}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="card">
       <div className="card-title">Today's Flights <span className="tag">{flights.length}</span></div>
       <table className="rt" style={{ width: "100%" }}>
         <thead>
@@ -91,6 +149,7 @@ export default function FlightsPage() {
           )}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

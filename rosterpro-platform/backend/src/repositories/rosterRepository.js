@@ -51,13 +51,17 @@ function unpublishRoster(id, actorId) {
 function getRosterGrid(stationId, rosterId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    orderBy: { fullName: "asc" },
+    // Staff the most recently imported Monthly Roster file actually
+    // captured (see rosterImportService) show in that file's own row
+    // order; anyone it never touched (added since, via Staff Registry)
+    // sorts after them, alphabetically.
+    orderBy: [{ rosterSortOrder: { sort: "asc", nulls: "last" } }, { fullName: "asc" }],
     select: {
       // No email here — this grid renders to everyone with roster:read
       // (potentially every active staff member at a station), and the
       // frontend never displays it; notifications are dispatched server-side
       // via a separate, purpose-built query (getActiveStaffContacts).
-      id: true, fullName: true, category: true, designation: true, department: true, employeeId: true,
+      id: true, fullName: true, category: true, designation: true, department: true, employeeId: true, rosterSortOrder: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
         select: {
@@ -68,6 +72,17 @@ function getRosterGrid(stationId, rosterId) {
       },
     },
   });
+}
+
+// Called once per roster import with each matched staff member's row
+// position in the file — a plain loop rather than one big query since
+// Prisma has no portable "update N rows to N different values" batch
+// primitive; roster files are staff-sized (tens to low hundreds of rows),
+// not a scale where this matters.
+async function updateRosterSortOrders(pairs) {
+  await Promise.all(pairs.map(({ userId, order }) =>
+    prisma.user.update({ where: { id: userId }, data: { rosterSortOrder: order } })
+  ));
 }
 
 // Contact info (id/email/phone/fullName) for everyone a roster-wide
@@ -87,7 +102,7 @@ function getActiveStaffContacts(stationId) {
 function getActiveStaffForGeneration(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    select: { id: true, fullName: true, category: true, employeeId: true },
+    select: { id: true, fullName: true, category: true, employeeId: true, designation: true, rosterSortOrder: true },
     orderBy: { fullName: "asc" },
   });
 }
@@ -209,7 +224,7 @@ function bulkUpsertAssignments(rows) {
 
 module.exports = {
   findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid,
-  listRostersForStation,
+  listRostersForStation, updateRosterSortOrders,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
   findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,
   findAssignment, upsertAssignment, bulkUpsertAssignments, findAssignmentsByStationDateShift,

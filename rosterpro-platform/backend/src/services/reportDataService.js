@@ -15,13 +15,20 @@ function dateLabel(monthKey, day) {
 
 // Same grouping order the Staff Registry and Roster grid UI both use —
 // B1, B2, CM, NCS, STO — so an exported file reads the same way the app
-// already does, not alphabetically by name.
+// already does. Within a category, staff sort by rosterSortOrder (their
+// row position in the most recently imported Monthly Roster file — see
+// rosterImportService) so a round-trip export/re-import doesn't reshuffle
+// anyone; alphabetical is only the fallback for staff no import has ever
+// captured an order for.
 const CATEGORY_ORDER = ["B1", "B2", "CM", "NCS", "STO"];
 function byCategoryThenName(staff) {
   return [...staff].sort((a, b) => {
     const ca = CATEGORY_ORDER.indexOf(a.category || "NCS");
     const cb = CATEGORY_ORDER.indexOf(b.category || "NCS");
     if (ca !== cb) return ca - cb;
+    const oa = a.rosterSortOrder ?? Infinity;
+    const ob = b.rosterSortOrder ?? Infinity;
+    if (oa !== ob) return oa - ob;
     return a.fullName.localeCompare(b.fullName);
   });
 }
@@ -54,6 +61,23 @@ async function getRosterReportData(stationId, monthKey) {
   });
 
   return { header, rows, meta: { stationId, monthKey, isPublished: roster.isPublished, staffCount: staff.length } };
+}
+
+// Blank starting point for the Monthly Roster import — same header/row
+// shape as getRosterReportData above (so it round-trips through Import
+// exactly the same way), but every day defaults to "O" rather than
+// reflecting real assignments, and it needs no roster to already exist for
+// the month (unlike the export, which 404s until someone has opened that
+// month's Shift Roster page at least once).
+async function getRosterTemplateData(stationId, monthKey) {
+  const staff = byCategoryThenName(await rosterRepo.getActiveStaffForGeneration(stationId));
+  const nDays = daysInMonth(monthKey);
+  const dayLabels = Array.from({ length: nDays }, (_, i) => dateLabel(monthKey, i + 1));
+
+  const header = ["Employee ID", "Name", "Category", "Designation", ...dayLabels];
+  const rows = staff.map(s => [s.employeeId || "", s.fullName, s.category || "", s.designation || "", ...dayLabels.map(() => "O")]);
+
+  return { header, rows, meta: { stationId, monthKey, staffCount: staff.length } };
 }
 
 // ── Compliance report ─────────────────────────────────────────────────────
@@ -101,4 +125,4 @@ async function getLeaveReportData(stationId, year) {
   return { header, rows, meta: { stationId, year, staffCount: staff.length } };
 }
 
-module.exports = { daysInMonth, dateLabel, getRosterReportData, getComplianceReportData, getLeaveReportData };
+module.exports = { daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getComplianceReportData, getLeaveReportData };

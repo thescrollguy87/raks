@@ -4,7 +4,6 @@ import { useStation } from "../store/StationContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import * as rosterApi from "../api/roster.js";
 import * as staffApi from "../api/staff.js";
-import * as flightsApi from "../api/flights.js";
 import { downloadReport, downloadBARoster } from "../api/reports.js";
 
 function todayMonthKey() { return new Date().toISOString().slice(0, 7); }
@@ -65,7 +64,6 @@ export default function ImportExportPage() {
   const canManageRoster = hasPermission("roster", "update");
   const canReadShift = hasPermission("shift", "read");
   const canUpdateStaff = hasPermission("staff", "update");
-  const canReadFlight = hasPermission("flight", "read");
   const canExport = hasPermission("reports", "export");
 
   // ── Shift Definitions ──────────────────────────────────────────────────
@@ -88,7 +86,20 @@ export default function ImportExportPage() {
   const [rosterMonthKey, setRosterMonthKey] = useState(todayMonthKey());
   const [rosterImportBusy, setRosterImportBusy] = useState(false);
   const [rosterExportBusy, setRosterExportBusy] = useState(false);
+  const [rosterTemplateBusy, setRosterTemplateBusy] = useState(false);
   const [rosterResult, setRosterResult] = useState(null);
+  async function handleRosterTemplate() {
+    if (!stationId) return;
+    setRosterTemplateBusy(true); setRosterResult(null);
+    try {
+      await downloadReport("roster-template", "excel", { stationId, monthKey: rosterMonthKey });
+      setRosterResult({ tone: "green", headline: "Template downloaded — fill in shift codes per day, then Import Roster below." });
+    } catch (err) {
+      setRosterResult({ tone: "red", headline: err.message });
+    } finally {
+      setRosterTemplateBusy(false);
+    }
+  }
   async function handleRosterImport(file) {
     if (!stationId) return;
     setRosterImportBusy(true); setRosterResult(null);
@@ -141,23 +152,6 @@ export default function ImportExportPage() {
       setEmpResult({ tone: "red", headline: err.message });
     } finally {
       setEmpBusy(false);
-    }
-  }
-
-  // ── Flight Schedule ──────────────────────────────────────────────────
-  const [flightMonthKey, setFlightMonthKey] = useState(todayMonthKey());
-  const [flightBusy, setFlightBusy] = useState(false);
-  const [flightResult, setFlightResult] = useState(null);
-  async function handleFlightImport(file) {
-    if (!stationId) return;
-    setFlightBusy(true); setFlightResult(null);
-    try {
-      const r = await flightsApi.importFlightSchedule(stationId, flightMonthKey, file);
-      setFlightResult({ tone: "green", headline: `${r.created} created, ${r.updated} updated (${r.occurrenceCount} flight occurrences this month).` });
-    } catch (err) {
-      setFlightResult({ tone: "red", headline: err.message, lists: [{ label: "Details", items: err.details || [] }] });
-    } finally {
-      setFlightBusy(false);
     }
   }
 
@@ -219,6 +213,14 @@ export default function ImportExportPage() {
         </div>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
           {canExport && (
+            <button
+              className="btn btn-ghost" disabled={rosterTemplateBusy} onClick={handleRosterTemplate}
+              title="Every active staff member for this month, one row each, every day blank (O) — fill in shift codes and re-import."
+            >
+              {rosterTemplateBusy ? "Downloading…" : "⬇ Download Template"}
+            </button>
+          )}
+          {canExport && (
             <button className="btn btn-ghost" disabled={rosterExportBusy} onClick={handleRosterExport}>
               {rosterExportBusy ? "Exporting…" : "⬇ Export Roster"}
             </button>
@@ -242,24 +244,6 @@ export default function ImportExportPage() {
             <FileImportButton label="⬆ Import" busy={empBusy} onFile={handleEmployeeMasterImport} />
           </div>
           <ResultBanner result={empResult} />
-        </div>
-      )}
-
-      {canReadFlight && (
-        <div className="card">
-          <div className="card-title">✈️ Flight Schedule</div>
-          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            A recurring monthly pattern ("Mon,Wed,Fri" or "Daily") expanded into individual flights for {currentStation?.name}. Re-importing the same file for the same month updates those flights instead of duplicating them.
-          </div>
-          <div className="fg" style={{ marginBottom: 10, maxWidth: 200 }}>
-            <label className="fl">Month</label>
-            <input className="fi" type="month" value={flightMonthKey} onChange={(e) => setFlightMonthKey(e.target.value)} />
-          </div>
-          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-            <button className="btn btn-ghost" onClick={() => flightsApi.downloadFlightScheduleTemplate()}>⬇ Download Template</button>
-            <FileImportButton label="⬆ Import" busy={flightBusy} onFile={handleFlightImport} />
-          </div>
-          <ResultBanner result={flightResult} />
         </div>
       )}
 
