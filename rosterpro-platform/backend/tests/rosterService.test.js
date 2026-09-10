@@ -139,6 +139,42 @@ describe("rosterService.upsertShift", () => {
   });
 });
 
+describe("rosterService.bulkUpsertShifts", () => {
+  beforeEach(() => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue(roster);
+    rosterRepo.findAllShiftDefs.mockResolvedValue([{ id: "def-M", code: "M" }, { id: "def-O", code: "O" }]);
+    rosterRepo.bulkUpsertAssignments.mockResolvedValue([{ id: "sa-1" }]);
+  });
+
+  it("refuses to bulk-edit a published roster", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ ...roster, isPublished: true });
+    await expect(rosterService.bulkUpsertShifts({ stationId: "station-1", monthKey: "2026-09", assignments: [] }, actor, {}))
+      .rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("rejects unknown shift codes", async () => {
+    await expect(rosterService.bulkUpsertShifts({
+      stationId: "station-1", monthKey: "2026-09",
+      assignments: [{ userId: "staff-1", shiftDate: "2026-09-05", shiftCode: "ZZZ" }],
+    }, actor, {})).rejects.toMatchObject({ statusCode: 400 });
+  });
+
+  // Grid copy/paste needs a cell's actual per-day time overrides to carry
+  // through the bulk path too, not just its shift code — this is what a
+  // paste of a custom Break Shift split (or a Delete-key clear back to "O")
+  // relies on.
+  it("passes per-day time overrides through to the repository bulk upsert", async () => {
+    await rosterService.bulkUpsertShifts({
+      stationId: "station-1", monthKey: "2026-09",
+      assignments: [{ userId: "staff-1", shiftDate: "2026-09-05", shiftCode: "M", in1: "07:00", out1: "11:00", in2: "14:00", out2: "18:00" }],
+    }, actor, {});
+
+    expect(rosterRepo.bulkUpsertAssignments).toHaveBeenCalledWith([
+      expect.objectContaining({ in1: "07:00", out1: "11:00", in2: "14:00", out2: "18:00" }),
+    ]);
+  });
+});
+
 describe("rosterService.publishRoster", () => {
   it("rejects publishing an already-published roster", async () => {
     rosterRepo.findRosterById.mockResolvedValue({ ...roster, isPublished: true });

@@ -76,6 +76,15 @@ export default function RosterPage() {
   const [lastSavedAt, setLastSavedAt] = useState(null);
   const importInputRef = useRef(null);
 
+  // Excel-style grid selection/clipboard — a Set of "userId|day" keys for
+  // whichever cells are currently selected, the anchor cell a shift-click
+  // range is measured from, and an in-memory clipboard (this app's grid
+  // isn't text, so the OS clipboard doesn't apply — Ctrl+C/X/V just move
+  // values between cells the same way Excel does within one sheet).
+  const [selectedCells, setSelectedCells] = useState(() => new Set());
+  const [selectionAnchor, setSelectionAnchor] = useState(null); // { userId, day } | null
+  const [clipboard, setClipboard] = useState(null); // { cells: [{rowOffset,colOffset,shiftCode,in1,out1,in2,out2}], isCut, sourceKeys } | null
+
   const { isReadOnly } = useBillingReadOnly();
   // Folded into the SAME flags every write control already checks, rather
   // than adding a parallel set of `!isReadOnly &&` conditions at every call
@@ -275,12 +284,183 @@ export default function RosterPage() {
     await load();
   }
 
+  const cellKey = (userId, day) => `${userId}|${day}`;
+
+  // Single click selects (Excel-style) — a separate, explicit double-click
+  // opens the full edit modal (openCell) for setting times/notes. Shift+click
+  // extends the current selection into a rectangle between the anchor and
+  // the clicked cell, measured in row/column position so it's the visible
+  // rectangle the user is looking at, same as an Excel range-select.
+  function handleCellSelect(s, day, e) {
+    if (!canEdit) return;
+    if (e.shiftKey && selectionAnchor) {
+      const rows = flatStaffOrder.map(st => st.id);
+      const r1 = rows.indexOf(selectionAnchor.userId), r2 = rows.indexOf(s.id);
+      const c1 = dayRange.indexOf(selectionAnchor.day), c2 = dayRange.indexOf(day);
+      if (r1 === -1 || r2 === -1 || c1 === -1 || c2 === -1) return;
+      const [rLo, rHi] = [Math.min(r1, r2), Math.max(r1, r2)];
+      const [cLo, cHi] = [Math.min(c1, c2), Math.max(c1, c2)];
+      const next = new Set();
+      for (let r = rLo; r <= rHi; r++) {
+        for (let c = cLo; c <= cHi; c++) next.add(cellKey(rows[r], dayRange[c]));
+      }
+      setSelectedCells(next);
+    } else {
+      setSelectionAnchor({ userId: s.id, day });
+      setSelectedCells(new Set([cellKey(s.id, day)]));
+    }
+  }
+
+  function assignmentFor(s, day) {
+    const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
+    return s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+  }
+
+  async function writeCells(assignments) {
+    if (!assignments.length) return;
+    await rosterApi.bulkUpsertShifts(stationId, monthKey, assignments);
+    setLastSavedAt(new Date());
+    await load();
+  }
+
+  // Delete/Backspace — clears every selected cell back to "O", the same
+  // "no assignment" state a brand-new cell starts in.
+  async function handleClearSelected() {
+    if (!canEdit || !selectedCells.size) return;
+    if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
+    const assignments = [...selectedCells].map(key => {
+      const [userId, dayStr] = key.split("|");
+      return { userId, shiftDate: dateAt(monthKey, Number(dayStr)).toISOString().slice(0, 10), shiftCode: "O" };
+    });
+    try {
+      await writeCells(assignments);
+    } catch (err) {
+      alert(`Clear failed: ${err.message}`);
+    }
+  }
+
+  // Ctrl+C/Ctrl+X — snapshots each selected cell's current code + any time
+  // overrides, stored relative to the selection's own top-left corner so a
+  // paste elsewhere can reproduce the same shape starting at a new anchor.
+  function handleCopy(isCut) {
+    if (!selectedCells.size) return;
+    const rows = flatStaffOrder.map(st => st.id);
+    const cells = [...selectedCells].map(key => {
+      const [userId, dayStr] = key.split("|");
+      const day = Number(dayStr);
+      const s = flatStaffOrder.find(st => st.id === userId);
+      const a = s && assignmentFor(s, day);
+      return {
+        rowIndex: rows.indexOf(userId), colIndex: dayRange.indexOf(day),
+        shiftCode: a?.shiftDef.code || "O",
+        in1: a?.in1 || null, out1: a?.out1 || null, in2: a?.in2 || null, out2: a?.out2 || null,
+      };
+    });
+    const minRow = Math.min(...cells.map(c => c.rowIndex));
+    const minCol = Math.min(...cells.map(c => c.colIndex));
+    setClipboard({
+      cells: cells.map(c => ({ rowOffset: c.rowIndex - minRow, colOffset: c.colIndex - minCol, shiftCode: c.shiftCode, in1: c.in1, out1: c.out1, in2: c.in2, out2: c.out2 })),
+      isCut, sourceKeys: isCut ? [...selectedCells] : null,
+    });
+  }
+
+  // Ctrl+V — pastes anchored at the current selection's top-left corner.
+  // Copying one cell and pasting into a multi-cell selection fills every
+  // selected cell with that value (Excel's "copy one, paste into a range"
+  // behavior); otherwise the copied shape is replicated starting at the
+  // anchor, clipped to the grid's actual rows/columns. A pending cut only
+  // clears its source cells once the paste has actually landed.
+  async function handlePaste() {
+    if (!clipboard || !selectedCells.size || !canEdit) return;
+    if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
+    const rows = flatStaffOrder.map(st => st.id);
+    const selCells = [...selectedCells].map(key => {
+      const [userId, dayStr] = key.split("|");
+      const day = Number(dayStr);
+      return { userId, day, rowIndex: rows.indexOf(userId), colIndex: dayRange.indexOf(day) };
+    });
+    const anchorRow = Math.min(...selCells.map(c => c.rowIndex));
+    const anchorCol = Math.min(...selCells.map(c => c.colIndex));
+
+    let targets;
+    if (clipboard.cells.length === 1 && selCells.length > 1) {
+      targets = selCells.map(sc => ({ userId: sc.userId, day: sc.day, ...clipboard.cells[0] }));
+    } else {
+      targets = [];
+      for (const rc of clipboard.cells) {
+        const rowIndex = anchorRow + rc.rowOffset;
+        const colIndex = anchorCol + rc.colOffset;
+        if (rowIndex < 0 || rowIndex >= rows.length || colIndex < 0 || colIndex >= dayRange.length) continue;
+        targets.push({ userId: rows[rowIndex], day: dayRange[colIndex], ...rc });
+      }
+    }
+    if (!targets.length) return;
+
+    const assignments = targets.map(t => ({
+      userId: t.userId, shiftDate: dateAt(monthKey, t.day).toISOString().slice(0, 10),
+      shiftCode: t.shiftCode, in1: t.in1, out1: t.out1, in2: t.in2, out2: t.out2,
+    }));
+
+    try {
+      await writeCells(assignments);
+      if (clipboard.isCut && clipboard.sourceKeys) {
+        const targetKeys = new Set(targets.map(t => cellKey(t.userId, t.day)));
+        const toClear = clipboard.sourceKeys.filter(k => !targetKeys.has(k));
+        if (toClear.length) {
+          await writeCells(toClear.map(key => {
+            const [userId, dayStr] = key.split("|");
+            return { userId, shiftDate: dateAt(monthKey, Number(dayStr)).toISOString().slice(0, 10), shiftCode: "O" };
+          }));
+        }
+        setClipboard(null);
+      }
+    } catch (err) {
+      alert(`Paste failed: ${err.message}`);
+    }
+  }
+
+  // Keyboard shortcuts only act while a cell is selected and focus isn't
+  // inside a text input elsewhere on the page (the search box, a modal's
+  // own fields) — otherwise Ctrl+C/X/V and Delete keep their normal
+  // browser/OS meaning everywhere else in the app.
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (editingCell || !selectedCells.size) return;
+      const tag = document.activeElement?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        handleClearSelected();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+        e.preventDefault();
+        handleCopy(false);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "x") {
+        e.preventDefault();
+        handleCopy(true);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") {
+        e.preventDefault();
+        handlePaste();
+      } else if (e.key === "Escape") {
+        setClipboard(null);
+        setSelectedCells(new Set());
+      }
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  });
+
   const q = search.trim().toLowerCase();
   const visibleStaff = staff
     .filter(s => catFilter === "ALL" || (s.category || "NCS") === catFilter)
     .filter(s => !q || s.fullName.toLowerCase().includes(q) || (s.designation || "").toLowerCase().includes(q));
   const byCategory = CATEGORIES.map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
     .filter(g => g.staff.length > 0);
+
+  // Same row order the grid actually renders (grouped by category, same as
+  // byCategory above) — selection/copy/paste measure "row N" against THIS,
+  // not the unsorted staff list, so a shift-click range and a paste anchor
+  // land on the row the user is actually looking at.
+  const flatStaffOrder = byCategory.flatMap(g => g.staff);
 
   const dayRange = useMemo(() => {
     if (viewMode === "day") return [todayDayNum || 1];
@@ -430,7 +610,9 @@ export default function RosterPage() {
 
       <div className="ab info" style={{ marginBottom: 9 }}>
         ℹ {monthKey} · {visibleStaff.length} staff shown · {dayRange.length} day{dayRange.length === 1 ? "" : "s"} visible
-        {canEdit ? " · Click any shift cell to edit, click a staff name for details" : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
+        {canEdit
+          ? ` · Click to select (shift+click for a range), double-click to edit · Delete clears · Ctrl+C/X/V copy/cut/paste${selectedCells.size ? ` · ${selectedCells.size} selected${clipboard ? (clipboard.isCut ? " · cut pending" : " · copied") : ""}` : ""}`
+          : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
 
       <div className="roster-wrap">
@@ -453,8 +635,9 @@ export default function RosterPage() {
             {byCategory.map(group => (
               <RosterCategoryGroup
                 key={group.cat} group={group} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
-                shiftDefByCode={shiftDefByCode} onCellClick={openCell} onStaffClick={setSelectedStaff}
+                shiftDefByCode={shiftDefByCode} onCellClick={handleCellSelect} onCellDoubleClick={openCell} onStaffClick={setSelectedStaff}
                 todayDayNum={todayDayNum} showTotals={viewMode === "month"}
+                selectedCells={selectedCells} cutPendingKeys={clipboard?.isCut ? clipboard.sourceKeys : null} cellKey={cellKey}
               />
             ))}
             <CoverageRows staff={visibleStaff} dayRange={dayRange} monthKey={monthKey} todayDayNum={todayDayNum} showTotals={viewMode === "month"} nDays={nDays} />
@@ -592,7 +775,7 @@ function StatCard({ tone, icon, label, value, onClick }) {
   );
 }
 
-function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode, onCellClick, onStaffClick, todayDayNum, showTotals }) {
+function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode, onCellClick, onCellDoubleClick, onStaffClick, todayDayNum, showTotals, selectedCells, cutPendingKeys, cellKey }) {
   return (
     <>
       <tr>
@@ -637,10 +820,15 @@ function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode,
               const def = shiftDefByCode[code];
               const in1 = a?.in1 || def?.startTime;
               const out1 = a?.out1 || def?.endTime;
+              const key = cellKey(s.id, day);
+              const isSelected = selectedCells?.has(key);
+              const isCutPending = cutPendingKeys?.includes(key);
               return (
                 <td key={day} className={dayCellClasses(monthKey, day, todayDayNum)}>
                   <div
-                    className="sp" onClick={() => onCellClick(s, day)}
+                    className={`sp${isSelected ? " cell-selected" : ""}${isCutPending ? " cell-cut" : ""}`}
+                    onClick={(e) => onCellClick(s, day, e)}
+                    onDoubleClick={() => onCellDoubleClick(s, day)}
                     title={def ? `${def.name}${in1 ? `: ${in1}–${out1}${a?.in2 && a?.out2 ? `, ${a.in2}–${a.out2}` : ""}` : ""}` : code}
                     style={{ background: def?.color || "rgba(180,180,180,.1)", color: "#000" }}
                   >

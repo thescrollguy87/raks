@@ -230,6 +230,11 @@ table{border-collapse:collapse}
 .sp:hover{filter:brightness(1.05);box-shadow:0 0 0 2px rgba(15,23,42,.35),0 2px 5px rgba(0,0,0,.18);z-index:10}
 .sp.expired-lock{opacity:.7;cursor:not-allowed;background:rgba(220,38,38,.09)!important;border:1px solid rgba(220,38,38,.3)!important}
 .sp.expired-lock::after{content:"🔒";position:absolute;top:-2px;right:-2px;font-size:8px}
+/* Excel-style grid selection/clipboard state — a solid ring for the
+   current selection, a dashed one for cells a Ctrl+X cut is still pending
+   on (cleared only once a paste actually lands, same as real Excel). */
+.sp.cell-selected{box-shadow:0 0 0 2px var(--sky),0 2px 5px rgba(0,0,0,.18)!important;z-index:11}
+.sp.cell-cut{outline:2px dashed var(--text-dim);outline-offset:-1px;opacity:.6}
 .sc-code{font-weight:800;font-size:10.5px;line-height:1.15;letter-spacing:.2px}
 .sc-time{font-size:8px;color:#000;opacity:1;font-family:var(--mono);font-weight:800;white-space:nowrap}
 .s-M{background:rgba(3,105,161,.12);border:1px solid rgba(3,105,161,.3);color:#0369A1}

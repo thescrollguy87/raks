@@ -215,11 +215,17 @@ function bulkUpsertAssignments(rows) {
   // Prisma has no native bulk-upsert, so this runs as one transaction of
   // individual upserts — still a single round-trip commit, and small enough
   // (capped at 2000 rows by the validator) not to need a raw-SQL alternative.
-  return prisma.$transaction(rows.map(r => prisma.shiftAssignment.upsert({
-    where: { rosterId_userId_shiftDate: { rosterId: r.rosterId, userId: r.userId, shiftDate: r.shiftDate } },
-    update: { shiftDefId: r.shiftDefId, note: r.note || null, updatedById: r.actorId, version: { increment: 1 } },
-    create: { rosterId: r.rosterId, userId: r.userId, shiftDate: r.shiftDate, shiftDefId: r.shiftDefId, note: r.note || null, createdById: r.actorId, updatedById: r.actorId },
-  })));
+  return prisma.$transaction(rows.map(r => {
+    // Same per-day time overrides upsertAssignment (the single-cell path)
+    // carries — needed so a grid copy/paste of a cell with a custom split
+    // (e.g. Break Shift) round-trips its actual times, not just the code.
+    const overrides = { in1: r.in1 || null, out1: r.out1 || null, in2: r.in2 || null, out2: r.out2 || null };
+    return prisma.shiftAssignment.upsert({
+      where: { rosterId_userId_shiftDate: { rosterId: r.rosterId, userId: r.userId, shiftDate: r.shiftDate } },
+      update: { shiftDefId: r.shiftDefId, note: r.note || null, ...overrides, updatedById: r.actorId, version: { increment: 1 } },
+      create: { rosterId: r.rosterId, userId: r.userId, shiftDate: r.shiftDate, shiftDefId: r.shiftDefId, note: r.note || null, ...overrides, createdById: r.actorId, updatedById: r.actorId },
+    });
+  }));
 }
 
 module.exports = {

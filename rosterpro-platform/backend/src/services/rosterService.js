@@ -163,6 +163,7 @@ async function bulkUpsertShifts({ stationId, monthKey, assignments }, actor, req
     rosterId: roster.id, userId: a.userId,
     shiftDate: new Date(a.shiftDate + "T00:00:00.000Z"),
     shiftDefId: codeToId[a.shiftCode], note: a.note, actorId: actor.sub,
+    in1: a.in1, out1: a.out1, in2: a.in2, out2: a.out2,
   }));
 
   const results = await rosterRepo.bulkUpsertAssignments(rows);
