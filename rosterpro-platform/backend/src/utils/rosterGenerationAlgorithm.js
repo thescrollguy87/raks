@@ -68,6 +68,21 @@ function isNight(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode
 function isLeaveType(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "leave"; }
 function isDutyType(code, shiftDefsByCode) { return shiftType(code, shiftDefsByCode) === "duty"; }
 
+// Which Mandatory Coverage family (if any) a shift code belongs to — the
+// classification other coverage checks (dashboardService's roster
+// validation/coverage widgets) should use too, so "M1"/"MS"/"AS" etc. count
+// toward the same Morning/Afternoon bucket a plain "M"/"A" does instead of
+// each variant code needing its own B1/B2, and General/Break/Flexi-type
+// codes (not in either fixed list, not night) correctly need no mandatory
+// coverage check at all — same as this file's own coverage pass below,
+// which only ever populates M/A/N buckets.
+function shiftFamily(code, shiftDefsByCode) {
+  if (isNight(code, shiftDefsByCode)) return "N";
+  if (isMorn(code)) return "M";
+  if (isAft(code)) return "A";
+  return null;
+}
+
 // Default Mandatory Minimum Coverage: every shift needs >=1 B1, Night also
 // needs >=1 B2 — exactly the hardcoded behavior this port had before the
 // config became adjustable, preserved as the default so existing callers
@@ -228,4 +243,4 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily };

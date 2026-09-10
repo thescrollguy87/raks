@@ -4,6 +4,7 @@ const flightRepo = require("../repositories/flightRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
 const ApiError = require("../utils/ApiError");
+const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
 
 // ── 1. Qualification expiry ──────────────────────────────────────────────
 
@@ -62,8 +63,14 @@ async function rosterCoverageWidget(stationId, monthKey) {
   for (const s of staff) {
     for (const sa of s.shiftAssignments) {
       if (sa.shiftDef.type !== "duty" && sa.shiftDef.type !== "night") continue;
+      // Morning/Afternoon variant codes (M1, MS, AS, ...) fold into the same
+      // M/A bucket as the plain code — a B1 on "M1" fulfills the Morning
+      // requirement same as one on "M". General/Break/Flexi-type codes
+      // (shiftFamily returns null) need no mandatory coverage check at all,
+      // same as the roster generator's own coverage pass.
+      const shiftKey = shiftFamily(sa.shiftDef.code, sa.shiftDef.type);
+      if (!shiftKey) continue;
       const dateStr = new Date(sa.shiftDate).toISOString().slice(0, 10);
-      const shiftKey = sa.shiftDef.type === "night" ? "N" : sa.shiftDef.code; // M/A codes as-is, any night-type code counts as N
       byDate[dateStr] ??= {};
       byDate[dateStr][shiftKey] ??= { B1: 0, B2: 0, total: 0 };
       byDate[dateStr][shiftKey].total++;
@@ -180,9 +187,12 @@ async function todayWidget(stationId) {
       if (!todayShift || (todayShift.shiftDef.type !== "duty" && todayShift.shiftDef.type !== "night")) continue;
       onDutyToday++;
       if (s.category) byCategory[s.category] = (byCategory[s.category] || 0) + 1;
-      const shiftKey = todayShift.shiftDef.type === "night" ? "N" : todayShift.shiftDef.code;
-      if (onDutyByShift[shiftKey] && s.category === "B1") onDutyByShift[shiftKey].B1++;
-      if (onDutyByShift[shiftKey] && s.category === "B2") onDutyByShift[shiftKey].B2++;
+      // Morning/Afternoon variant codes (M1, MS, AS, ...) fold into the same
+      // M/A bucket — General/Break/Flexi-type codes (shiftFamily returns
+      // null) don't have a bucket at all, so they're correctly never checked.
+      const shiftKey = shiftFamily(todayShift.shiftDef.code, todayShift.shiftDef.type);
+      if (shiftKey && s.category === "B1") onDutyByShift[shiftKey].B1++;
+      if (shiftKey && s.category === "B2") onDutyByShift[shiftKey].B2++;
     }
 
     for (const [shiftKey, counts] of Object.entries(onDutyByShift)) {

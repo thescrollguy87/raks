@@ -37,6 +37,29 @@ describe("dashboardService.rosterCoverageWidget", () => {
     // Morning shift on day 1 had a B1 present — must NOT be flagged.
     expect(coverage.violations.some(v => v.date === "2026-09-01" && v.shift === "M")).toBe(false);
   });
+
+  it("folds Morning/Afternoon variant codes into one bucket and never checks General shifts", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: true });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      // B1 covers Morning via the "M1" variant code, not plain "M" — should
+      // still satisfy the Morning requirement, not be reported as uncovered.
+      { id: "s1", fullName: "B1 Engineer", category: "B1", shiftAssignments: [
+        { shiftDate: new Date("2026-09-02"), shiftDef: { code: "M1", type: "duty" } },
+      ]},
+      // No B1 anywhere on General/Break/Flexi shifts that same day — these
+      // must never be flagged, mandatory coverage doesn't apply to them.
+      { id: "s2", fullName: "NCS Tech", category: "NCS", shiftAssignments: [
+        { shiftDate: new Date("2026-09-02"), shiftDef: { code: "G", type: "duty" } },
+      ]},
+      { id: "s3", fullName: "STO Clerk", category: "STO", shiftAssignments: [
+        { shiftDate: new Date("2026-09-02"), shiftDef: { code: "BS", type: "duty" } },
+      ]},
+    ]);
+
+    const coverage = await dashboardService.rosterCoverageWidget("station-1", "2026-09");
+
+    expect(coverage.violations).toHaveLength(0);
+  });
 });
 
 describe("dashboardService.staffWorkloadWidget", () => {
