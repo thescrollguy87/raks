@@ -57,16 +57,20 @@ table{border-collapse:collapse}
 .rb-viewer{background:rgba(0,200,83,.1);color:var(--green);border:1px solid rgba(0,200,83,.25)}
 
 /* SIDEBAR */
-/* Stays dark navy while the rest of the app is now a light workspace — done
-   by locally redeclaring the SAME variable names the rest of this file's
-   sidebar rules already reference (--navy-mid/--border/--text-dim/--white/
-   --glass/--shadow-card), so .s-logo/.nav-sl/.ni/.u-card/etc. below need no
-   changes at all: within .sidebar's subtree those variables resolve to
-   these dark values via normal CSS custom-property scoping; everywhere
-   else in the app they resolve to the light :root values above. */
+/* Stays a solid color while the rest of the app is now a light workspace —
+   done by locally redeclaring the SAME variable names the rest of this
+   file's sidebar rules already reference (--navy-mid/--border/--text-dim/
+   --white/--glass/--shadow-card), so .s-logo/.nav-sl/.ni/.u-card/etc. below
+   need no changes at all: within .sidebar's subtree those variables
+   resolve to these values via normal CSS custom-property scoping;
+   everywhere else in the app they resolve to the light :root values above.
+   --navy-mid/--navy-lite are Akasa Air's own brand purple (sampled from
+   their logo) rather than the original navy — --text-dim is lightened to
+   a pale lavender to keep secondary nav text readable against it (the
+   original muted gray fell below AA contrast on this brighter background). */
 .sidebar{
-  --navy-mid:#0B1220;--navy-lite:#141B2C;--white:#F1F5F9;--text-dim:#8B96AB;
-  --border:rgba(255,255,255,.08);--glass:rgba(255,255,255,.05);
+  --navy-mid:#5710D8;--navy-lite:#6819E0;--white:#F1F5F9;--text-dim:#C6C9DE;
+  --border:rgba(255,255,255,.14);--glass:rgba(255,255,255,.08);
   --shadow-card:none;
   /* Redefining the custom properties above only affects rules that
      freshly reference var(...) at or below this element — it does NOT
