@@ -60,6 +60,18 @@ const archiveQuerySchema = z.object({
   stationId: z.string().uuid(),
 });
 
+// ─── Roster versioning (Roster History panel) ────────────────────────────────
+const createVersionSchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey: monthKey,
+  reason: z.string().max(200).optional(),
+});
+
+const compareVersionsQuerySchema = z.object({
+  fromVersionId: z.string().uuid(),
+  toVersionId: z.string().uuid(),
+});
+
 // ─── Shift definition single-row CRUD (Shift Definitions tab) ───────────────
 const shiftDefTypes = z.enum(["duty", "night", "off", "leave", "other"]);
 const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM (24-hour)");
@@ -122,6 +134,7 @@ const manpowerPlanQuerySchema = z.object({
 module.exports = {
   createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
   publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
+  createVersionSchema, compareVersionsQuerySchema,
   upsertShiftDefSchema,
   upsertShiftPatternSchema, patternQuerySchema,
   upsertAllocationSchema,

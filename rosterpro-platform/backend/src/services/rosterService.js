@@ -3,6 +3,7 @@ const userRepo = require("../repositories/userRepository");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const notificationService = require("./notificationService");
+const rosterVersionService = require("./rosterVersionService");
 const { assertOwnStation, resolveAirlineId } = require("../utils/stationScope");
 
 async function getOrCreateRoster(stationId, monthKey, actor) {
@@ -26,6 +27,10 @@ async function publishRoster(rosterId, actor, req) {
   if (!roster) throw ApiError.notFound("Roster not found");
   await assertOwnStation(actor, roster.stationId);
   if (roster.isPublished) throw ApiError.conflict("Roster is already published");
+
+  // Checkpoint whatever's about to go live — the one version anyone can
+  // always restore back to, since it's exactly what staff saw as published.
+  await rosterVersionService.createVersion(rosterId, "Published", actor, req, { isPublishedSnapshot: true });
 
   const updated = await rosterRepo.publishRoster(rosterId, actor.sub);
   await auditTrail.recordUpdate(
@@ -130,10 +135,15 @@ async function upsertShift({ stationId, monthKey, userId, shiftDate, shiftCode, 
     || (before.in2 || null) !== (in2 || null) || (before.out2 || null) !== (out2 || null);
   const changed = !before || before.shiftDefId !== shiftDef.id || timesChanged;
   if (changed) {
+    // Human-readable "A — 13:30-21:30" style label, not the raw shiftDefId
+    // UUID, so the audit trail reads the way the spec's own example does —
+    // resolve the previous shift's def (if any) purely for its code+time.
+    const beforeDef = before?.shiftDefId ? await rosterRepo.findShiftDefById(airlineId, before.shiftDefId) : null;
+    const label = (def, i1, o1) => def ? `${def.code} — ${i1 || def.startTime || "?"}–${o1 || def.endTime || "?"}` : "—";
     await auditTrail.recordUpdate(
       "ShiftAssignment", updated.id, stationId,
-      { shiftDefId: before?.shiftDefId || "—", in1: before?.in1 || null, out1: before?.out1 || null, in2: before?.in2 || null, out2: before?.out2 || null },
-      { shiftDefId: shiftDef.id, in1: in1 || null, out1: out1 || null, in2: in2 || null, out2: out2 || null },
+      { shift: label(beforeDef, before?.in1, before?.out1) },
+      { shift: label(shiftDef, in1, out1) },
       actor, req, reason
     );
 
@@ -184,4 +194,4 @@ function listRostersForStation(stationId) {
   return rosterRepo.listRostersForStation(stationId);
 }
 
-module.exports = { getRosterGrid, publishRoster, unpublishRoster, upsertShift, bulkUpsertShifts, listShiftDefinitions, listRostersForStation };
+module.exports = { getOrCreateRoster, getRosterGrid, publishRoster, unpublishRoster, upsertShift, bulkUpsertShifts, listShiftDefinitions, listRostersForStation };

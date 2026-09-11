@@ -5,6 +5,7 @@ const complianceService = require("./complianceService");
 const workloadConfigService = require("./workloadConfigService");
 const ruleBuilderService = require("./ruleBuilderService");
 const flightScheduleService = require("./flightScheduleService");
+const rosterVersionService = require("./rosterVersionService");
 const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
 const { buildRosterAssignments } = require("../utils/rosterGenerationAlgorithm");
@@ -380,6 +381,13 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   let roster = existingRoster;
   if (!roster) roster = await rosterRepo.createRoster(stationId, monthKey, actor.sub);
   if (roster.isPublished) throw ApiError.forbidden("Roster is published — unpublish before regenerating");
+
+  // Checkpoint whatever the roster held before the generated plan overwrites
+  // it — only meaningful when regenerating an existing roster that may
+  // already have real (hand-edited or previously generated) shifts on it.
+  if (existingRoster) {
+    await rosterVersionService.createVersion(roster.id, "Before auto-generated roster applied", actor, req);
+  }
 
   const rows = assignments.map(a => ({
     rosterId: roster.id, userId: a.userId, shiftDate: dateAt(monthKey, a.day),

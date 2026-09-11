@@ -1,6 +1,7 @@
 const rosterService = require("../services/rosterService");
 const rosterGenerationService = require("../services/rosterGenerationService");
 const rosterImportService = require("../services/rosterImportService");
+const rosterVersionService = require("../services/rosterVersionService");
 const shiftDefinitionService = require("../services/shiftDefinitionService");
 const rosterPlanningService = require("../services/rosterPlanningService");
 const asyncHandler = require("../utils/asyncHandler");
@@ -53,6 +54,37 @@ const generate = asyncHandler(async (req, res) => {
 
 const archive = asyncHandler(async (req, res) => {
   const result = await rosterService.listRostersForStation(req.query.stationId);
+  res.json(result);
+});
+
+// ─── Roster versioning (Roster History panel) ────────────────────────────────
+const listVersions = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const roster = await rosterService.getOrCreateRoster(stationId, monthKey, req.user);
+  const result = await rosterVersionService.listVersions(roster.id, req.user);
+  res.json(result);
+});
+
+const getVersion = asyncHandler(async (req, res) => {
+  const result = await rosterVersionService.getVersion(req.params.versionId, req.user);
+  res.json(result);
+});
+
+const compareVersionsCtrl = asyncHandler(async (req, res) => {
+  const { fromVersionId, toVersionId } = req.query;
+  const result = await rosterVersionService.compareVersions(fromVersionId, toVersionId, req.user);
+  res.json(result);
+});
+
+const createVersionCtrl = asyncHandler(async (req, res) => {
+  const { stationId, monthKey, reason } = req.body;
+  const roster = await rosterService.getOrCreateRoster(stationId, monthKey, req.user);
+  const result = await rosterVersionService.createVersion(roster.id, reason || "Manual checkpoint", req.user, req);
+  res.json(result);
+});
+
+const restoreVersionCtrl = asyncHandler(async (req, res) => {
+  const result = await rosterVersionService.restoreVersion(req.params.versionId, req.user, req);
   res.json(result);
 });
 
@@ -136,6 +168,7 @@ const manpowerPlan = asyncHandler(async (req, res) => {
 
 module.exports = {
   getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
+  listVersions, getVersion, compareVersionsCtrl, createVersionCtrl, restoreVersionCtrl,
   shiftDefinitionsTemplate, shiftDefinitionsExport, importShiftDefinitions,
   upsertShiftDefinition, deactivateShiftDefinition,
   listPatterns, upsertPattern, deletePattern,

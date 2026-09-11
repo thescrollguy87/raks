@@ -7,6 +7,7 @@ const { validate, validateQuery } = require("../middleware/validate");
 const { requireOwnStation } = require("../utils/stationScope");
 const {
   upsertShiftSchema, bulkUpsertShiftSchema, publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
+  createVersionSchema, compareVersionsQuerySchema,
   upsertShiftDefSchema, upsertShiftPatternSchema, patternQuerySchema, upsertAllocationSchema, upsertWorkloadItemSchema, manpowerPlanQuerySchema,
 } = require("../validators/rosterValidators");
 
@@ -54,6 +55,16 @@ router.post("/shift/bulk", requirePermission("roster", "update"), validateQuery(
 router.post("/generate", requirePermission("roster", "update"), validate(generateRosterSchema), requireOwnStation("body"), ctrl.generate);
 
 router.get("/archive", requirePermission("roster", "read"), validateQuery(archiveQuerySchema), requireOwnStation("query"), ctrl.archive);
+
+// ─── Roster versioning (Roster History panel) ────────────────────────────────
+// Ownership for the two single-version routes below is enforced inside
+// rosterVersionService itself (resolved from the version's own roster's
+// stationId), since the route only carries a versionId, not a stationId.
+router.get("/versions", requirePermission("roster", "read"), validateQuery(rosterQuerySchema), requireOwnStation("query"), ctrl.listVersions);
+router.get("/versions/compare", requirePermission("roster", "read"), validateQuery(compareVersionsQuerySchema), ctrl.compareVersionsCtrl);
+router.get("/versions/:versionId", requirePermission("roster", "read"), ctrl.getVersion);
+router.post("/versions", requirePermission("roster", "update"), validate(createVersionSchema), requireOwnStation("body"), ctrl.createVersionCtrl);
+router.post("/versions/:versionId/restore", requirePermission("roster", "publish"), ctrl.restoreVersionCtrl);
 
 router.post("/import", requirePermission("roster", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), upload.single("file"), ctrl.importRoster);
 

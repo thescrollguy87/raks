@@ -244,6 +244,7 @@ model Station {
   workloadRules   WorkloadRule[]
   dailyOperationalAdjustments DailyOperationalAdjustment[]
   departureManpowerAssignments DepartureManpowerAssignment[]
+  importJobs      ImportJob[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -861,9 +862,117 @@ model Roster {
   version     Int      @default(1)
 
   assignments ShiftAssignment[]
+  versions    RosterVersion[]
 
   @@unique([stationId, monthKey])
   @@map("rosters")
+}
+
+// Immutable snapshot of a Roster's ShiftAssignment rows at a point in time —
+// created before publish, before an auto-generated roster is applied, before
+// an Excel import commits, before a restore, or manually via "Create Version".
+// Deliberately NOT created per single cell edit (see RosterVersionItem) —
+// that would make every roster accumulate thousands of near-identical
+// versions for no real benefit; versions mark meaningful checkpoints only.
+model RosterVersion {
+  id          String   @id @default(uuid())
+  rosterId    String
+  roster      Roster   @relation(fields: [rosterId], references: [id])
+  versionNumber Int    // sequential per roster: 1, 2, 3, ...
+  reason      String?  // "Published", "Before auto-generated roster applied", "Restored from Version 10", ...
+  isPublishedSnapshot Boolean @default(false)
+  // Set only when this version was itself created BY a restore — points at
+  // the version that was restored (not a version this one restores FROM
+  // being restored again later, which would just be a normal reason string).
+  restoredFromVersionId String?
+
+  createdById   String?
+  createdByName String? // denormalized snapshot, same convention as AuditTrail.changedByName
+  createdAt     DateTime @default(now())
+
+  items RosterVersionItem[]
+
+  @@unique([rosterId, versionNumber])
+  @@index([rosterId])
+  @@map("roster_versions")
+}
+
+// One staff member's one day, as it stood at the moment this version was
+// snapshotted. shiftCode is denormalized (not just shiftDefId) so a version
+// stays readable even if the shift definition it pointed to is later
+// renamed, deactivated, or (in principle) deleted.
+model RosterVersionItem {
+  id         String   @id @default(uuid())
+  versionId  String
+  version    RosterVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  userId     String
+  shiftDate  DateTime @db.Date
+  shiftDefId String
+  shiftCode  String
+  note       String?
+  in1        String?
+  out1       String?
+  in2        String?
+  out2       String?
+
+  @@index([versionId])
+  @@map("roster_version_items")
+}
+
+// One Excel roster import attempt, from validate through commit — exists so
+// "validate" can report real counts/errors without writing anything, and a
+// later "commit" call can act on exactly what was validated (validatedPayload)
+// without re-parsing the original file. Also the natural home for a
+// downloadable error report and the audit trail's "Excel import completed"
+// entry (file name, counts, timestamp, result).
+model ImportJob {
+  id        String   @id @default(uuid())
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  importType String  // "roster" — the only type this pass produces; kept generic for future reuse
+  monthKey  String
+  fileName  String
+  status    String   // VALIDATED | COMMITTED | FAILED
+  totalRows Int
+  validRows Int
+  warningRows Int
+  errorRows Int
+  createdCount   Int @default(0)
+  updatedCount   Int @default(0)
+  unchangedCount Int @default(0)
+  // The resolved, valid assignments from the validate step (plain JSON array
+  // of {userId, shiftDate, shiftCode, ...}) — lets commit act on exactly what
+  // was already validated and shown to the user, without re-uploading or
+  // re-parsing the file, and without the parse-vs-commit result ever drifting.
+  validatedPayload Json?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  committedAt DateTime?
+
+  errors ImportError[]
+
+  @@index([stationId])
+  @@index([createdAt])
+  @@map("import_jobs")
+}
+
+// One validation problem found in an import job's source file — persisted
+// (not just returned in the HTTP response) so the "Download Error Report"
+// step can regenerate the same list later without needing the file again.
+model ImportError {
+  id       String @id @default(uuid())
+  jobId    String
+  job      ImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rowNumber Int
+  field    String?
+  value    String?
+  message  String
+  suggestion String?
+  severity String // ERROR | WARNING
+
+  @@index([jobId])
+  @@map("import_errors")
 }
 
 model ShiftAssignment {

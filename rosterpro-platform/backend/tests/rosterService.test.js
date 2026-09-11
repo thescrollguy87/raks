@@ -1,9 +1,11 @@
 jest.mock("../src/repositories/rosterRepository");
+jest.mock("../src/repositories/rosterVersionRepository");
 jest.mock("../src/repositories/userRepository");
 jest.mock("../src/utils/auditTrail");
 jest.mock("../src/services/notificationService");
 
 const rosterRepo = require("../src/repositories/rosterRepository");
+const rosterVersionRepo = require("../src/repositories/rosterVersionRepository");
 const userRepo = require("../src/repositories/userRepository");
 const auditTrail = require("../src/utils/auditTrail");
 const notificationService = require("../src/services/notificationService");
@@ -23,6 +25,14 @@ beforeEach(() => {
   rosterRepo.findStationById.mockResolvedValue({ name: "Ahmedabad Line Maintenance" });
   rosterRepo.getActiveStaffContacts.mockResolvedValue([]);
   userRepo.findById.mockResolvedValue({ id: "staff-1", email: "staff@amd.example" });
+
+  // publishRoster snapshots a version before flipping isPublished — these
+  // defaults let that pass through transparently for tests that aren't
+  // specifically exercising versioning.
+  rosterVersionRepo.findRosterById.mockResolvedValue(roster);
+  rosterVersionRepo.liveSnapshotItems.mockResolvedValue([]);
+  rosterVersionRepo.nextVersionNumber.mockResolvedValue(1);
+  rosterVersionRepo.createVersion.mockResolvedValue({ id: "version-1", versionNumber: 1 });
 });
 
 describe("rosterService.getRosterGrid", () => {
@@ -67,17 +77,21 @@ describe("rosterService.upsertShift", () => {
       .rejects.toBeInstanceOf(ApiError);
   });
 
-  it("writes an audit trail entry when the shift actually changes", async () => {
+  it("writes a human-readable audit trail entry when the shift actually changes", async () => {
     rosterRepo.findAssignment.mockResolvedValue({ id: "sa-1", shiftDefId: "def-OLD" });
     rosterRepo.upsertAssignment.mockResolvedValue({ id: "sa-1", shiftDefId: "def-M" });
+    rosterRepo.findShiftDefById.mockResolvedValue({ code: "N", startTime: "21:00", endTime: "07:00" });
+    rosterRepo.findShiftDefByCode.mockResolvedValue({ id: "def-M", code: "M", startTime: "06:00", endTime: "14:00" });
 
     const result = await rosterService.upsertShift(baseInput, actor, { ip: "1.2.3.4" });
 
     expect(result.changed).toBe(true);
+    // Logs the readable "CODE — start–end" label (not the raw shiftDefId
+    // UUID) so the change history reads like the spec's own example.
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
       "ShiftAssignment", "sa-1", "station-1",
-      { shiftDefId: "def-OLD", in1: null, out1: null, in2: null, out2: null },
-      { shiftDefId: "def-M", in1: null, out1: null, in2: null, out2: null },
+      { shift: "N — 21:00–07:00" },
+      { shift: "M — 06:00–14:00" },
       actor, expect.any(Object), undefined
     );
   });
