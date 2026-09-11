@@ -6,6 +6,7 @@ import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useBillingReadOnly } from "../hooks/useBillingReadOnly.js";
 import * as rosterApi from "../api/roster.js";
 import * as workloadConfigApi from "../api/workloadConfig.js";
+import * as flightScheduleApi from "../api/flightSchedule.js";
 import { getDashboardSummary } from "../api/dashboard.js";
 import { downloadReport } from "../api/reports.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
@@ -584,7 +585,7 @@ export default function RosterPage() {
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 14 }}>
         <StatCard tone="sky" icon="👥" label="Total Staff" value={kpi.totalStaff} />
-        <StatCard tone="sky" icon="✈️" label="Flights (this month)" value={kpi.flights} />
+        <StatCard tone="sky" icon="✈️" label="Flights (this month)" value={kpi.flights} onClick={() => setKpiDetail({ type: "flights" })} />
         <StatCard tone="sky" icon="🌅" label="Morning Today" value={kpi.assignedToday.M} onClick={() => setKpiDetail({ type: "shift", bucket: "M", label: "Morning" })} />
         <StatCard tone="green" icon="☀️" label="Afternoon Today" value={kpi.assignedToday.A} onClick={() => setKpiDetail({ type: "shift", bucket: "A", label: "Afternoon" })} />
         <StatCard tone="purple" icon="🌙" label="Night Today" value={kpi.assignedToday.N} onClick={() => setKpiDetail({ type: "shift", bucket: "N", label: "Night" })} />
@@ -695,6 +696,12 @@ export default function RosterPage() {
         </KpiDetailModal>
       )}
 
+      {kpiDetail?.type === "flights" && (
+        <KpiDetailModal title="Flights (this month) · Day by Day" onClose={() => setKpiDetail(null)} width={480}>
+          <FlightsKpiDetail stationId={stationId} monthKey={monthKey} onGoToImport={() => navigate("/flight-schedule")} />
+        </KpiDetailModal>
+      )}
+
       {kpiDetail?.type === "conflicts" && (
         <KpiDetailModal title={`Conflicts (${violations.length})`} onClose={() => setKpiDetail(null)}>
           {violations.length === 0 ? (
@@ -718,15 +725,80 @@ export default function RosterPage() {
   );
 }
 
-function KpiDetailModal({ title, onClose, children }) {
+function KpiDetailModal({ title, onClose, children, width = 420 }) {
   return (
     <div className="modal-overlay open" onClick={onClose}>
-      <div className="popover-card" style={{ width: 420, maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+      <div className="popover-card" style={{ width, maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
         <div className="card-title" style={{ marginBottom: 10 }}>{title}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{children}</div>
       </div>
     </div>
+  );
+}
+
+const WEEKDAY_SHORT_KPI = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Day-by-day breakdown behind the "Flights (this month)" KPI — reuses the
+// same GET /api/flight-schedule the Flight Schedule tab's own day view
+// already reads (FlightScheduleManager.jsx), just a compact list here
+// instead of that page's full import UI, since this popover is a "show me
+// what makes up that number" drill-down, not another place to import from.
+function FlightsKpiDetail({ stationId, monthKey, onGoToImport }) {
+  const [schedule, setSchedule] = useState(null);
+  const [error, setError] = useState("");
+  const [expandedDay, setExpandedDay] = useState(null);
+  const [year, month] = monthKey.split("-").map(Number);
+
+  useEffect(() => {
+    if (!stationId) return;
+    setSchedule(null);
+    setError("");
+    flightScheduleApi.getFlightSchedule(stationId, year, month).then(setSchedule).catch(err => setError(err.message));
+  }, [stationId, year, month]);
+
+  if (error) return <div className="empty-note">{error}</div>;
+  if (!schedule) return <div className="empty-note">Loading…</div>;
+  if (!schedule.imported) {
+    return (
+      <div className="empty-note">
+        No Flight Schedule imported for {monthLabel(monthKey)} yet.
+        <button className="btn btn-ghost btn-sm" style={{ marginTop: 8, display: "block" }} onClick={onGoToImport}>
+          Go to Flight Schedule →
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 4 }}>
+        {schedule.summary.totalMovements} total movement{schedule.summary.totalMovements === 1 ? "" : "s"} · {schedule.summary.operatingDays} operating day{schedule.summary.operatingDays === 1 ? "" : "s"} of {schedule.daysInMonth} · click a day to expand
+      </div>
+      {Array.from({ length: schedule.daysInMonth }, (_, i) => i + 1).map(d => {
+        const weekday = WEEKDAY_SHORT_KPI[new Date(year, month - 1, d).getDay()];
+        const flights = schedule.byDay[d] || [];
+        const isOpen = expandedDay === d;
+        return (
+          <div key={d} style={{ borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 2px", cursor: "pointer" }} onClick={() => setExpandedDay(isOpen ? null : d)}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--cyan)" }}>{isOpen ? "▼" : "▶"} Day {d} ({weekday})</span>
+              <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{flights.length} flight{flights.length === 1 ? "" : "s"}</span>
+            </div>
+            {isOpen && (
+              <div style={{ paddingLeft: 14, paddingBottom: 6 }}>
+                {flights.length === 0 ? <div style={{ fontSize: 9, color: "var(--text-dim)" }}>No flights this day.</div> : flights.map((f, i) => (
+                  <div key={i} style={{ fontSize: 9, color: "var(--text-dim)", display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                    <span>{f.type === "Turn" ? "🔄" : "🛩"} {f.flightRef} <span>{f.route}</span></span>
+                    <span>{f.arr !== "-" ? `Arr ${f.arr}` : ""} {f.dep !== "-" ? `Dep ${f.dep}` : ""}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </>
   );
 }
 
