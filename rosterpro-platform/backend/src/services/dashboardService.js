@@ -1,10 +1,13 @@
 const rosterRepo = require("../repositories/rosterRepository");
 const complianceRepo = require("../repositories/complianceRepository");
 const flightRepo = require("../repositories/flightRepository");
+const userRepo = require("../repositories/userRepository");
+const stationRepo = require("../repositories/stationRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
 const flightScheduleService = require("./flightScheduleService");
 const ApiError = require("../utils/ApiError");
+const { isAirlineWide } = require("../utils/stationScope");
 const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
 
 // ── 1. Qualification expiry ──────────────────────────────────────────────
@@ -83,16 +86,24 @@ async function rosterCoverageWidget(stationId, monthKey) {
   const violations = [];
   for (const [dateStr, shifts] of Object.entries(byDate)) {
     for (const [shiftKey, counts] of Object.entries(shifts)) {
-      if (counts.B1 === 0) violations.push({ date: dateStr, shift: shiftKey, issue: "No B1 AME assigned" });
-      if (shiftKey === "N" && counts.B2 === 0) violations.push({ date: dateStr, shift: shiftKey, issue: "No B2 AME assigned on Night" });
+      if (counts.B1 === 0) violations.push({ date: dateStr, shift: shiftKey, issue: "No B1 AME assigned", severity: "critical" });
+      if (shiftKey === "N" && counts.B2 === 0) violations.push({ date: dateStr, shift: shiftKey, issue: "No B2 AME assigned on Night", severity: "warning" });
     }
   }
+
+  const updatedBy = roster.updatedById ? await userRepo.findById(roster.updatedById) : null;
 
   return {
     monthKey, isPublished: roster.isPublished,
     daysWithData: Object.keys(byDate).length,
-    violationCount: violations.length, violations,
+    violationCount: violations.length,
+    criticalCount: violations.filter(v => v.severity === "critical").length,
+    violations,
     dailyBreakdown: byDate,
+    // Roster Status card fields — real columns already on the Roster row,
+    // just not previously surfaced to the dashboard.
+    createdAt: roster.createdAt, updatedAt: roster.updatedAt,
+    updatedByName: updatedBy?.fullName || null,
   };
 }
 
@@ -191,6 +202,12 @@ async function todayWidget(stationId) {
   const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
   const todayStr = new Date().toISOString().slice(0, 10);
   const byCategory = { B1: 0, B2: 0, CM: 0, NCS: 0, STO: 0 };
+  // Every code in use today, bucketed for the Shift Distribution donut —
+  // Morning/Afternoon/Night hold shiftFamily's own M/A/N buckets (which
+  // already fold variant codes like M1/MS/AS in); "Others" is everything
+  // shiftFamily doesn't classify (General/Break/Flexi/etc.) but that's
+  // still a real on-duty assignment, not a gap in the data.
+  const byShift = { M: 0, A: 0, N: 0, Others: 0 };
   let onDutyToday = 0;
   const gaps = [];
 
@@ -207,20 +224,91 @@ async function todayWidget(stationId) {
       // M/A bucket — General/Break/Flexi-type codes (shiftFamily returns
       // null) don't have a bucket at all, so they're correctly never checked.
       const shiftKey = shiftFamily(todayShift.shiftDef.code, todayShift.shiftDef.type);
+      byShift[shiftKey || "Others"]++;
       if (shiftKey && s.category === "B1") onDutyByShift[shiftKey].B1++;
       if (shiftKey && s.category === "B2") onDutyByShift[shiftKey].B2++;
     }
 
+    // Missing B1 coverage blocks a mandatory sign-off on every shift, so
+    // it's flagged critical; missing B2 only matters (and is only checked)
+    // on Night per the same rule rosterCoverageWidget enforces monthly.
     for (const [shiftKey, counts] of Object.entries(onDutyByShift)) {
-      if (counts.B1 === 0) gaps.push({ shift: shiftKey, issue: "No B1 AME assigned" });
-      if (shiftKey === "N" && counts.B2 === 0) gaps.push({ shift: shiftKey, issue: "No B2 AME assigned on Night" });
+      if (counts.B1 === 0) gaps.push({ shift: shiftKey, issue: "No B1 AME assigned", severity: "critical" });
+      if (shiftKey === "N" && counts.B2 === 0) gaps.push({ shift: shiftKey, issue: "No B2 AME assigned on Night", severity: "warning" });
     }
   }
 
-  return { date: todayStr, totalStaff, onDutyToday, byCategory, gaps };
+  return { date: todayStr, totalStaff, onDutyToday, byCategory, byShift, gaps };
+}
+
+// ── 8. Staff workload trend (next N days) ─────────────────────────────────
+// Day-by-day on-duty vs on-leave headcount starting today — the "Staff
+// Workload" bar chart's real data source. Spans a month boundary correctly
+// (fetches whichever roster(s) the window actually touches); a day with no
+// roster generated yet for its month simply reports 0/0, not an error, so
+// the chart still renders for the days that do have data.
+async function workloadTrendWidget(stationId, days = 14) {
+  const today = new Date();
+  const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+  const dayList = Array.from({ length: days }, (_, i) => {
+    const d = new Date(start);
+    d.setUTCDate(d.getUTCDate() + i);
+    return d;
+  });
+  const monthKeys = [...new Set(dayList.map(d => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`))];
+
+  const rosters = await Promise.all(monthKeys.map(mk => rosterRepo.findRosterByStationAndMonth(stationId, mk)));
+  const gridByMonth = {};
+  await Promise.all(rosters.map(async (roster, i) => {
+    if (roster) gridByMonth[monthKeys[i]] = await rosterRepo.getRosterGrid(stationId, roster.id);
+  }));
+
+  const trend = dayList.map(d => {
+    const monthKey = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const dateStr = d.toISOString().slice(0, 10);
+    const grid = gridByMonth[monthKey] || [];
+    let onDuty = 0, onLeave = 0;
+    for (const s of grid) {
+      const sa = s.shiftAssignments.find(x => new Date(x.shiftDate).toISOString().slice(0, 10) === dateStr);
+      if (!sa) continue;
+      if (sa.shiftDef.type === "duty" || sa.shiftDef.type === "night") onDuty++;
+      else if (sa.shiftDef.type === "leave") onLeave++;
+    }
+    return { date: dateStr, onDuty, onLeave };
+  });
+
+  return { days, trend };
+}
+
+// ── 9. Stations overview ──────────────────────────────────────────────────
+// Per-station snapshot for an airline-wide role's dashboard (Airline
+// Admin / Super Admin) — a station-scoped caller (Station Manager and
+// everyone else) simply sees their own one station, same list reused,
+// never a separate code path to keep in sync.
+async function stationsOverviewWidget(actor) {
+  const wide = isAirlineWide(actor);
+  const allStations = await stationRepo.listStations({ airlineId: actor.airlineId, isSuperAdmin: actor.roles?.includes("SUPER_ADMIN") });
+  const stations = wide ? allStations : allStations.filter(s => s.id === actor.stationId);
+
+  const now = new Date();
+  const rows = await Promise.all(stations.map(async (s) => {
+    const [snapshot, schedule] = await Promise.all([
+      todayWidget(s.id),
+      flightScheduleService.getFlightScheduleView(s.id, now.getUTCFullYear(), now.getUTCMonth() + 1).catch(() => null),
+    ]);
+    return {
+      stationId: s.id, iataCode: s.iataCode, name: s.name,
+      staffCount: snapshot.totalStaff, onDutyToday: snapshot.onDutyToday,
+      flightsThisMonth: schedule?.imported ? schedule.summary.totalMovements : 0,
+      coveragePct: snapshot.totalStaff > 0 ? Math.round((snapshot.onDutyToday / snapshot.totalStaff) * 100) : 0,
+    };
+  }));
+
+  return { stations: rows };
 }
 
 module.exports = {
   qualificationExpiryWidget, leaveBalanceWidget, rosterCoverageWidget,
   flightCoverageWidget, dgcaComplianceWidget, staffWorkloadWidget, todayWidget,
+  workloadTrendWidget, stationsOverviewWidget,
 };

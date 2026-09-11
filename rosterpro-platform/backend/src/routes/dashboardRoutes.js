@@ -7,7 +7,14 @@ const { requireOwnStation } = require("../utils/stationScope");
 const router = express.Router();
 router.use(requireAuth);
 router.use(requirePermission("reports", "read"));
-// Every route here takes :stationId in the URL — a Station Manager (or
+
+// Not station-scoped by URL param — looks across every station the caller
+// can see (filtered down to their own station server-side if they aren't
+// airline-wide). Declared before the "/:stationId" prefix below so Express
+// doesn't try to match "stations-overview" as a :stationId value.
+router.get("/stations-overview", ctrl.stationsOverview);
+
+// Every route below takes :stationId in the URL — a Station Manager (or
 // anyone else not airline-wide) must not be able to read another
 // station's dashboard just by changing the ID in the request. Mounted on
 // the "/:stationId" prefix (not a bare .use()) specifically so Express
@@ -23,5 +30,6 @@ router.get("/:stationId/flight-coverage", ctrl.flightCoverage);
 router.get("/:stationId/dgca-compliance", ctrl.dgcaCompliance);
 router.get("/:stationId/staff-workload", ctrl.staffWorkload);
 router.get("/:stationId/today", ctrl.today);
+router.get("/:stationId/workload-trend", ctrl.workloadTrend);
 
 module.exports = router;
