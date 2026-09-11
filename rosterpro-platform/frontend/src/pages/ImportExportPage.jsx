@@ -5,6 +5,7 @@ import { useAuth } from "../store/AuthContext.jsx";
 import * as rosterApi from "../api/roster.js";
 import * as staffApi from "../api/staff.js";
 import { downloadReport, downloadBARoster } from "../api/reports.js";
+import RosterImportWizard from "../components/roster/RosterImportWizard.jsx";
 
 function todayMonthKey() { return new Date().toISOString().slice(0, 7); }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -84,10 +85,10 @@ export default function ImportExportPage() {
   // ── Monthly Roster (reuses the existing import/export from the Roster
   // page — this just makes both reachable from one place, clearly labeled) ──
   const [rosterMonthKey, setRosterMonthKey] = useState(todayMonthKey());
-  const [rosterImportBusy, setRosterImportBusy] = useState(false);
   const [rosterExportBusy, setRosterExportBusy] = useState(false);
   const [rosterTemplateBusy, setRosterTemplateBusy] = useState(false);
   const [rosterResult, setRosterResult] = useState(null);
+  const [showRosterWizard, setShowRosterWizard] = useState(false);
   async function handleRosterTemplate() {
     if (!stationId) return;
     setRosterTemplateBusy(true); setRosterResult(null);
@@ -98,23 +99,6 @@ export default function ImportExportPage() {
       setRosterResult({ tone: "red", headline: err.message });
     } finally {
       setRosterTemplateBusy(false);
-    }
-  }
-  async function handleRosterImport(file) {
-    if (!stationId) return;
-    setRosterImportBusy(true); setRosterResult(null);
-    try {
-      const r = await rosterApi.importRoster(stationId, rosterMonthKey, file);
-      const lists = [
-        { label: "Not matched to any staff at this station", items: r.notFound },
-        { label: "Unrecognized shift codes (skipped)", items: r.invalidCodes },
-        { label: "Duplicate rows in file (last one used)", items: r.duplicates },
-      ];
-      setRosterResult({ tone: "green", headline: `Imported: ${r.staffUpdated} staff updated, ${r.assignmentCount} shifts.`, lists });
-    } catch (err) {
-      setRosterResult({ tone: "red", headline: err.message });
-    } finally {
-      setRosterImportBusy(false);
     }
   }
   async function handleRosterExport() {
@@ -226,10 +210,17 @@ export default function ImportExportPage() {
             </button>
           )}
           {canManageRoster && (
-            <FileImportButton label="⬆ Import Roster" busy={rosterImportBusy} onFile={handleRosterImport} />
+            <button className="btn btn-primary" onClick={() => setShowRosterWizard(true)}>⬆ Import Roster</button>
           )}
         </div>
         <ResultBanner result={rosterResult} />
+        {showRosterWizard && (
+          <RosterImportWizard
+            stationId={stationId} monthKey={rosterMonthKey}
+            onClose={() => setShowRosterWizard(false)}
+            onImported={() => { setShowRosterWizard(false); setRosterResult({ tone: "green", headline: "Roster import committed — see Shift Roster for the updated grid, or Roster History to view the checkpoint." }); }}
+          />
+        )}
       </div>
 
       {canUpdateStaff && (

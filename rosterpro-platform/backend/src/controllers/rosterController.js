@@ -1,6 +1,7 @@
 const rosterService = require("../services/rosterService");
 const rosterGenerationService = require("../services/rosterGenerationService");
 const rosterImportService = require("../services/rosterImportService");
+const rosterImportValidationService = require("../services/rosterImportValidationService");
 const rosterVersionService = require("../services/rosterVersionService");
 const shiftDefinitionService = require("../services/shiftDefinitionService");
 const rosterPlanningService = require("../services/rosterPlanningService");
@@ -95,6 +96,24 @@ const importRoster = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+// ─── Excel import wizard (validate-before-insert) ────────────────────────────
+const validateImport = asyncHandler(async (req, res) => {
+  if (!req.file) throw ApiError.badRequest("No file uploaded");
+  const { stationId, monthKey } = req.query;
+  const result = await rosterImportValidationService.validateRosterImport(stationId, monthKey, req.file.buffer, req.file.originalname, req.user, req);
+  res.json(result);
+});
+
+const downloadImportErrors = asyncHandler(async (req, res) => {
+  const buffer = await rosterImportValidationService.getImportErrorsWorkbook(req.params.jobId, req.user);
+  sendXlsx(res, buffer, "Import_Errors.xlsx");
+});
+
+const commitImport = asyncHandler(async (req, res) => {
+  const result = await rosterImportValidationService.commitRosterImport(req.params.jobId, req.user, req);
+  res.json(result);
+});
+
 const shiftDefinitionsTemplate = asyncHandler(async (req, res) => {
   const buffer = await shiftDefinitionService.generateTemplate();
   sendXlsx(res, buffer, "Shift_Definitions_Template.xlsx");
@@ -168,6 +187,7 @@ const manpowerPlan = asyncHandler(async (req, res) => {
 
 module.exports = {
   getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
+  validateImport, downloadImportErrors, commitImport,
   listVersions, getVersion, compareVersionsCtrl, createVersionCtrl, restoreVersionCtrl,
   shiftDefinitionsTemplate, shiftDefinitionsExport, importShiftDefinitions,
   upsertShiftDefinition, deactivateShiftDefinition,

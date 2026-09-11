@@ -15,6 +15,7 @@ import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
 import StaffDetailDrawer from "../components/roster/StaffDetailDrawer.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
 import RosterVersionsPanel from "../components/roster/RosterVersionsPanel.jsx";
+import RosterImportWizard from "../components/roster/RosterImportWizard.jsx";
 import { shiftNetHours, shiftBucket } from "../utils/shiftHours.js";
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
@@ -96,10 +97,9 @@ export default function RosterPage() {
   const [kpiDetail, setKpiDetail] = useState(null); // null | { type: "shift", bucket, label } | { type: "conflicts" }
   const [generating, setGenerating] = useState(false);
   const [generationResult, setGenerationResult] = useState(null);
-  const [importing, setImporting] = useState(false);
   const [exportingFormat, setExportingFormat] = useState(null); // null | "excel" | "pdf"
   const [showVersions, setShowVersions] = useState(false);
-  const importInputRef = useRef(null);
+  const [showImportWizard, setShowImportWizard] = useState(false);
 
   // Excel-style grid selection/clipboard — a Set of "userId|day" keys for
   // whichever cells are currently selected, the anchor cell a shift-click
@@ -181,27 +181,6 @@ export default function RosterPage() {
     }
   }
 
-  async function handleImportFile(e) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same filename later
-    if (!file) return;
-    if (!confirm(`Import "${file.name}" into ${monthKey}? This will overwrite existing shifts for every matched staff member in this month.`)) return;
-    setImporting(true);
-    try {
-      const result = await rosterApi.importRoster(stationId, monthKey, file);
-      let msg = `Imported: ${result.staffUpdated} staff updated, ${result.assignmentCount} shifts.`;
-      if (result.notFound.length) msg += `\n\n${result.notFound.length} name(s) in the file don't match any staff at this station (add them via Staff Registry first): ${result.notFound.slice(0, 5).join(", ")}${result.notFound.length > 5 ? "…" : ""}`;
-      if (result.invalidCodes.length) msg += `\n\nUnrecognized shift code(s), skipped: ${result.invalidCodes.join(", ")}`;
-      if (result.duplicates.length) msg += `\n\n${result.duplicates.length} duplicate row(s) in the file — only the last occurrence of each was used.`;
-      alert(msg);
-      await load();
-    } catch (err) {
-      alert(`Import failed: ${err.message}`);
-    } finally {
-      setImporting(false);
-    }
-  }
-
   async function handleExport(format) {
     setExportingFormat(format);
     try {
@@ -235,12 +214,7 @@ export default function RosterPage() {
         </>
       )}
       {canEdit && roster && !roster.isPublished && (
-        <>
-          <input ref={importInputRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={handleImportFile} />
-          <button className="btn btn-ghost" disabled={importing} onClick={() => importInputRef.current?.click()}>
-            {importing ? "Importing…" : "⬆ Import"}
-          </button>
-        </>
+        <button className="btn btn-ghost" onClick={() => setShowImportWizard(true)}>⬆ Import</button>
       )}
       {canGenerate && roster && !roster.isPublished && (
         <button className="btn btn-ghost" disabled={generating} onClick={handleGenerate}>
@@ -255,7 +229,7 @@ export default function RosterPage() {
       )}
     </>
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [canEdit, canExport, canGenerate, canPublish, canUnpublish, roster, generating, importing, exportingFormat, loading, monthKey, stationId]);
+  ), [canEdit, canExport, canGenerate, canPublish, canUnpublish, roster, generating, exportingFormat, loading, monthKey, stationId]);
 
   usePageHeader({
     title: "Shift Roster",
@@ -845,9 +819,17 @@ export default function RosterPage() {
 
       {showVersions && roster && (
         <RosterVersionsPanel
-          stationId={stationId} monthKey={monthKey} roster={roster}
+          stationId={stationId} monthKey={monthKey}
           onClose={() => setShowVersions(false)}
           onRestored={async () => { setShowVersions(false); await load(); }}
+        />
+      )}
+
+      {showImportWizard && (
+        <RosterImportWizard
+          stationId={stationId} monthKey={monthKey}
+          onClose={() => setShowImportWizard(false)}
+          onImported={async () => { setShowImportWizard(false); await load(); }}
         />
       )}
 

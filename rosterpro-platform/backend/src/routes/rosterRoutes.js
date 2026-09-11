@@ -68,6 +68,12 @@ router.post("/versions/:versionId/restore", requirePermission("roster", "publish
 
 router.post("/import", requirePermission("roster", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), upload.single("file"), ctrl.importRoster);
 
+// ─── Excel import wizard (validate-before-insert) — the original single-
+// step /import route above stays exactly as-is for backward compatibility.
+router.post("/import/validate", requirePermission("roster", "update"), validateQuery(rosterQuerySchema), requireOwnStation("query"), upload.single("file"), ctrl.validateImport);
+router.get("/import/:jobId/errors/download", requirePermission("roster", "update"), ctrl.downloadImportErrors);
+router.post("/import/:jobId/commit", requirePermission("roster", "update"), ctrl.commitImport);
+
 router.post("/publish", requirePermission("roster", "publish"), validate(publishRosterSchema), ctrl.publish);
 
 router.post("/unpublish", requirePermission("roster", "unpublish"), validate(unpublishRosterSchema), ctrl.unpublish);

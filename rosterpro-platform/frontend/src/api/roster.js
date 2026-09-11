@@ -41,6 +41,14 @@ export function restoreVersion(versionId) {
   return api.post(`/api/roster/versions/${versionId}/restore`, {});
 }
 
+// ─── Excel import wizard (validate-before-insert) ────────────────────────────
+// The validate step is a multipart upload (like importRoster below), so it
+// goes straight through api.upload rather than living here — see
+// RosterImportWizard.jsx.
+export function commitRosterImport(jobId) {
+  return api.post(`/api/roster/import/${jobId}/commit`, {});
+}
+
 export function importRoster(stationId, monthKey, file) {
   return api.upload("/api/roster/import", { stationId, monthKey }, file);
 }
