@@ -3,6 +3,7 @@ const complianceRepo = require("../repositories/complianceRepository");
 const flightRepo = require("../repositories/flightRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
+const flightScheduleService = require("./flightScheduleService");
 const ApiError = require("../utils/ApiError");
 const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
 
@@ -106,9 +107,24 @@ async function flightCoverageWidget(stationId, from, to) {
   const totalDelayMinutes = delays.reduce((sum, d) => sum + d.minutes, 0);
   const flightsWithDelay = new Set(delays.map(d => d.flightId)).size;
 
+  // "Total Flights" reflects the real Flight Schedule (Turn Report +
+  // Charter import) a station actually uses to plan departure manpower —
+  // not the separate ad-hoc Flight/Engineering-Delay log below (on-time
+  // rate, delay minutes), which nothing in the app currently bulk-imports
+  // into and is realistically always empty. `from`/`to` are always a single
+  // calendar month's start/end here (both callers below construct them that
+  // way), so the month they fall in is the schedule month to look up.
+  const fromDate = new Date(from);
+  const scheduleYear = fromDate.getUTCFullYear();
+  const scheduleMonth = fromDate.getUTCMonth() + 1;
+  const schedule = await flightScheduleService
+    .getFlightScheduleView(stationId, scheduleYear, scheduleMonth)
+    .catch(() => null);
+  const totalFlights = schedule?.imported ? schedule.summary.totalMovements : flights.length;
+
   return {
     from, to,
-    totalFlights: flights.length,
+    totalFlights,
     delayedFlights: flightsWithDelay,
     onTimeRate: flights.length > 0 ? Math.round(((flights.length - flightsWithDelay) / flights.length) * 100) : 100,
     totalEngineeringDelayMinutes: totalDelayMinutes,

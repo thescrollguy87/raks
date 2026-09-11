@@ -3,10 +3,12 @@ jest.mock("../src/repositories/complianceRepository");
 jest.mock("../src/repositories/flightRepository");
 jest.mock("../src/services/complianceService");
 jest.mock("../src/services/leaveService");
+jest.mock("../src/services/flightScheduleService");
 
 const rosterRepo = require("../src/repositories/rosterRepository");
 const flightRepo = require("../src/repositories/flightRepository");
 const complianceService = require("../src/services/complianceService");
+const flightScheduleService = require("../src/services/flightScheduleService");
 const dashboardService = require("../src/services/dashboardService");
 
 describe("dashboardService.rosterCoverageWidget", () => {
@@ -94,6 +96,10 @@ describe("dashboardService.dgcaComplianceWidget", () => {
 });
 
 describe("dashboardService.flightCoverageWidget", () => {
+  beforeEach(() => {
+    flightScheduleService.getFlightScheduleView.mockResolvedValue({ imported: false });
+  });
+
   it("counts unique delayed flights (not delay records) and computes on-time rate", async () => {
     flightRepo.listFlightsForStation.mockResolvedValue([{ id: "f1" }, { id: "f2" }, { id: "f3" }, { id: "f4" }]);
     flightRepo.listDelaysForStation.mockResolvedValue([
@@ -105,5 +111,31 @@ describe("dashboardService.flightCoverageWidget", () => {
     expect(result.delayedFlights).toBe(1);
     expect(result.onTimeRate).toBe(75);
     expect(result.totalEngineeringDelayMinutes).toBe(45);
+  });
+
+  it("falls back to the Flight log's own count when no Flight Schedule has been imported for the month", async () => {
+    flightRepo.listFlightsForStation.mockResolvedValue([{ id: "f1" }, { id: "f2" }]);
+    flightRepo.listDelaysForStation.mockResolvedValue([]);
+
+    const result = await dashboardService.flightCoverageWidget("station-1", "2026-09-01", "2026-09-30");
+
+    expect(result.totalFlights).toBe(2);
+  });
+
+  // The Roster page's "Flights (this month)" KPI should reflect the real
+  // Turn Report/Charter import a station actually uses — not the separate,
+  // realistically-never-populated ad-hoc Flight log (still used for
+  // on-time rate/delay minutes above).
+  it("uses the imported Flight Schedule's total movements when one exists for the month", async () => {
+    flightRepo.listFlightsForStation.mockResolvedValue([]); // ad-hoc Flight log empty, as it usually is
+    flightRepo.listDelaysForStation.mockResolvedValue([]);
+    flightScheduleService.getFlightScheduleView.mockResolvedValue({
+      imported: true, summary: { totalMovements: 47 },
+    });
+
+    const result = await dashboardService.flightCoverageWidget("station-1", "2026-09-01T00:00:00.000Z", "2026-09-30T23:59:59.000Z");
+
+    expect(result.totalFlights).toBe(47);
+    expect(flightScheduleService.getFlightScheduleView).toHaveBeenCalledWith("station-1", 2026, 9);
   });
 });
