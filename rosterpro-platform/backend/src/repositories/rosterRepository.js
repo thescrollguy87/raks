@@ -74,6 +74,30 @@ function getRosterGrid(stationId, rosterId) {
   });
 }
 
+// Same shape as getRosterGrid, WITH email — deliberately a separate query
+// rather than adding email there: getRosterGrid renders to everyone with
+// roster:read (potentially every active staff member at a station, and the
+// frontend never displays it there), while this one backs the BA Roster
+// export, gated by the more privileged reports:export permission, whose
+// output format has a required "Email ID" column (see baRosterService.js).
+function getRosterGridForExport(stationId, rosterId) {
+  return prisma.user.findMany({
+    where: { stationId, isActive: true, deletedAt: null },
+    orderBy: [{ rosterSortOrder: { sort: "asc", nulls: "last" } }, { fullName: "asc" }],
+    select: {
+      id: true, fullName: true, email: true, category: true, designation: true, department: true, employeeId: true, rosterSortOrder: true,
+      shiftAssignments: {
+        where: { rosterId, deletedAt: null },
+        select: {
+          shiftDate: true, shiftDefId: true,
+          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } },
+          note: true, in1: true, out1: true, in2: true, out2: true,
+        },
+      },
+    },
+  });
+}
+
 // Called once per roster import with each matched staff member's row
 // position in the file — a plain loop rather than one big query since
 // Prisma has no portable "update N rows to N different values" batch
@@ -229,7 +253,7 @@ function bulkUpsertAssignments(rows) {
 }
 
 module.exports = {
-  findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid,
+  findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid, getRosterGridForExport,
   listRostersForStation, updateRosterSortOrders,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
   findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,

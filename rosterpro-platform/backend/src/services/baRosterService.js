@@ -50,7 +50,7 @@ async function buildBARosterRows(stationId, dateStr) {
     throw ApiError.notFound(`No roster exists for ${monthKey} yet — generate or create it first.`);
   }
 
-  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
+  const staff = byCategoryThenName(await rosterRepo.getRosterGridForExport(stationId, roster.id));
   const rows = [];
 
   for (const s of staff) {
