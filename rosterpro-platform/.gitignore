@@ -5,3 +5,9 @@ dist/
 build/
 *.log
 .DS_Store
+
+# Playwright e2e — generated at test-run time, never committed
+frontend/e2e/.seed-output.json
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
