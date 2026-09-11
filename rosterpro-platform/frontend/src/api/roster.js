@@ -20,6 +20,27 @@ export function listArchive(stationId) {
   return api.get("/api/roster/archive", { stationId });
 }
 
+// ─── Roster versioning (Roster History panel) ────────────────────────────────
+export function listVersions(stationId, monthKey) {
+  return api.get("/api/roster/versions", { stationId, monthKey });
+}
+
+export function getVersion(versionId) {
+  return api.get(`/api/roster/versions/${versionId}`);
+}
+
+export function compareVersions(fromVersionId, toVersionId) {
+  return api.get("/api/roster/versions/compare", { fromVersionId, toVersionId });
+}
+
+export function createVersion(stationId, monthKey, reason) {
+  return api.post("/api/roster/versions", { stationId, monthKey, reason });
+}
+
+export function restoreVersion(versionId) {
+  return api.post(`/api/roster/versions/${versionId}/restore`, {});
+}
+
 export function importRoster(stationId, monthKey, file) {
   return api.upload("/api/roster/import", { stationId, monthKey }, file);
 }

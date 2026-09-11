@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useBillingReadOnly } from "../hooks/useBillingReadOnly.js";
+import { usePendingSaveQueue } from "../hooks/usePendingSaveQueue.js";
 import * as rosterApi from "../api/roster.js";
 import * as workloadConfigApi from "../api/workloadConfig.js";
 import * as flightScheduleApi from "../api/flightSchedule.js";
@@ -12,11 +14,19 @@ import { downloadReport } from "../api/reports.js";
 import ShiftEditModal from "../components/roster/ShiftEditModal.jsx";
 import StaffDetailDrawer from "../components/roster/StaffDetailDrawer.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
+import RosterVersionsPanel from "../components/roster/RosterVersionsPanel.jsx";
 import { shiftNetHours, shiftBucket } from "../utils/shiftHours.js";
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
+
+// A roster this size (staff count, not day count — see the plan's scope
+// note on column virtualization) is where rendering every row up front
+// starts to cost real frame time; below it, virtualizing would only add
+// overhead (spacer-row bookkeeping) for no benefit, so small/typical
+// rosters render exactly as they always have.
+const VIRTUALIZE_STAFF_THRESHOLD = 50;
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -50,6 +60,20 @@ function weekBlocks(nDays) {
   return blocks;
 }
 
+// Dev-only render instrumentation — logs every time a row/cell component
+// actually renders, so "did my one-cell edit re-render the whole grid" is
+// directly checkable in the console instead of just assumed. Free in
+// production (import.meta.env.DEV is statically replaced by Vite, so the
+// whole branch is dead-code-eliminated from the prod bundle).
+function useRenderCount(label) {
+  const countRef = useRef(0);
+  if (import.meta.env.DEV) {
+    countRef.current += 1;
+    // eslint-disable-next-line no-console
+    console.debug(`[render] ${label} #${countRef.current}`);
+  }
+}
+
 export default function RosterPage() {
   const { hasPermission } = useAuth();
   const { stationId, loading: stationLoading, currentStation } = useStation();
@@ -74,7 +98,7 @@ export default function RosterPage() {
   const [generationResult, setGenerationResult] = useState(null);
   const [importing, setImporting] = useState(false);
   const [exportingFormat, setExportingFormat] = useState(null); // null | "excel" | "pdf"
-  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [showVersions, setShowVersions] = useState(false);
   const importInputRef = useRef(null);
 
   // Excel-style grid selection/clipboard — a Set of "userId|day" keys for
@@ -98,6 +122,8 @@ export default function RosterPage() {
   const canUnpublish = hasPermission("roster", "unpublish") && !isReadOnly;
   const canGenerate = hasPermission("roster", "update") && !isReadOnly;
   const canExport = hasPermission("reports", "export");
+
+  const saveQueue = usePendingSaveQueue();
 
   const load = useCallback(async () => {
     if (!stationId) return;
@@ -147,7 +173,6 @@ export default function RosterPage() {
     try {
       const result = await rosterApi.generateRoster(stationId, monthKey);
       setGenerationResult(result);
-      setLastSavedAt(new Date());
       await load();
     } catch (err) {
       alert(`Generate failed: ${err.message}`);
@@ -169,7 +194,6 @@ export default function RosterPage() {
       if (result.invalidCodes.length) msg += `\n\nUnrecognized shift code(s), skipped: ${result.invalidCodes.join(", ")}`;
       if (result.duplicates.length) msg += `\n\n${result.duplicates.length} duplicate row(s) in the file — only the last occurrence of each was used.`;
       alert(msg);
-      setLastSavedAt(new Date());
       await load();
     } catch (err) {
       alert(`Import failed: ${err.message}`);
@@ -197,6 +221,9 @@ export default function RosterPage() {
   const headerActions = useMemo(() => (
     <>
       <button className="btn btn-ghost" disabled={loading} onClick={load} title="Reload roster data">↻ Refresh</button>
+      {roster && (
+        <button className="btn btn-ghost" onClick={() => setShowVersions(true)} title="View, compare, and restore previous versions of this roster">🕘 History</button>
+      )}
       {canExport && (
         <>
           <button className="btn btn-ghost" disabled={!!exportingFormat} onClick={() => handleExport("excel")}>
@@ -243,7 +270,7 @@ export default function RosterPage() {
   const todayDayNum = isCurrentMonth ? Number(todayStr.slice(8, 10)) : null;
 
   async function handlePublish() {
-    if (!confirm(`Publish the ${monthKey} roster? Staff will be notified by email.`)) return;
+    if (!confirm(`Publish the ${monthKey} roster? Staff will be notified by email. A version checkpoint of the current roster is created automatically.`)) return;
     try {
       await rosterApi.publishRoster(roster.id);
       await load();
@@ -263,8 +290,61 @@ export default function RosterPage() {
     }
   }
 
-  function openCell(s, day) {
+  // O(1) lookup by id — every cell/click handler below resolves the staff
+  // object it needs (fullName, shiftAssignments, ...) through this instead
+  // of `staff.find(...)`, and passes only the userId down through
+  // render props, so a row/cell's own props stay primitive and shallow-
+  // comparable (see RosterRow/RosterCell below).
+  const staffById = useMemo(() => new Map(staff.map(s => [s.id, s])), [staff]);
+  // Same "read through a ref so a stable callback doesn't have to change
+  // identity every edit" trick as flatStaffOrderRef below — staffById is a
+  // brand-new Map every time `staff`'s top-level array reference changes
+  // (i.e. on every single edit), so openCell/setSelectedStaffId read the
+  // CURRENT map via this ref rather than depending on staffById directly.
+  const staffByIdRef = useRef(staffById);
+  useEffect(() => { staffByIdRef.current = staffById; }, [staffById]);
+
+  // Builds the client-side shape of a ShiftAssignment row (same fields the
+  // API returns, incl. the nested shiftDef the grid renders from) so an
+  // edit can be reflected on screen the instant it's made, without waiting
+  // for the round-trip this used to `await load()` for.
+  const buildOptimisticAssignment = useCallback((dateStr, shiftCode, in1, out1, in2, out2, note) => {
+    const def = shiftDefByCode[shiftCode];
+    return {
+      shiftDate: `${dateStr}T00:00:00.000Z`,
+      shiftDefId: def?.id || null,
+      shiftDef: def
+        ? { code: def.code, name: def.name, color: def.color, type: def.type, startTime: def.startTime, endTime: def.endTime, breakMin: def.breakMin }
+        : { code: shiftCode, name: shiftCode, color: "#B4B4B4", type: "other", startTime: null, endTime: null, breakMin: 0 },
+      note: note || null, in1: in1 || null, out1: out1 || null, in2: in2 || null, out2: out2 || null,
+    };
+  }, [shiftDefByCode]);
+
+  // The one place `staff` is ever mutated after the initial load. Replaces
+  // ONLY the touched staff member's own object (and therefore only their
+  // `shiftAssignments` array) — every other staff object in the array
+  // keeps the exact same reference it had before, which is what actually
+  // lets RosterRow's memoization work: React.memo's shallow prop compare
+  // sees unchanged references for every row but this one, so only that
+  // one row's cells re-render, not the other ~200.
+  const applyAssignmentToStaff = useCallback((userId, dateStr, assignment) => {
+    setStaff(prev => prev.map(s => {
+      if (s.id !== userId) return s;
+      const kept = s.shiftAssignments.filter(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) !== dateStr);
+      return { ...s, shiftAssignments: assignment ? [...kept, assignment] : kept };
+    }));
+  }, []);
+
+  // useCallback'd (not a plain function) so its reference stays stable
+  // across RosterPage re-renders that have nothing to do with the grid
+  // (the save-status pill flipping, a KPI modal opening, ...) — passed
+  // straight down to every RosterRow as onCellDoubleClick, a plain
+  // function here would get a new identity every render and silently
+  // defeat RosterRow's React.memo on every one of those unrelated renders.
+  const openCell = useCallback((userId, day) => {
     if (!canEdit) return;
+    const s = staffByIdRef.current.get(userId);
+    if (!s) return;
     const dateObj = dateAt(monthKey, day);
     const dateStr = dateObj.toISOString().slice(0, 10);
     const assignment = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
@@ -275,28 +355,86 @@ export default function RosterPage() {
       currentIn1: assignment?.in1 || null, currentOut1: assignment?.out1 || null,
       currentIn2: assignment?.in2 || null, currentOut2: assignment?.out2 || null,
     });
-  }
+  }, [canEdit, monthKey]);
 
+  // Same stability requirement as openCell above — passed down as
+  // onStaffClick to every row.
+  const setSelectedStaffId = useCallback((userId) => {
+    const s = staffByIdRef.current.get(userId);
+    if (s) setSelectedStaff(s);
+  }, []);
+
+  // Optimistic + queued, NOT awaited by the modal beyond this function
+  // returning — the modal closes immediately (see ShiftEditModal's
+  // handleSave, which awaits this promise and then calls onClose), and the
+  // actual PATCH request runs in the background through the save queue,
+  // with its own retry/status surfaced by the shared pill rather than a
+  // per-modal error. The single-cell endpoint is kept (not folded into the
+  // bulk one) specifically so this still gets its own audit-trail entry
+  // with `reason`, exactly as before.
   async function saveCell({ shiftCode, reason, in1, out1, in2, out2 }) {
-    await rosterApi.upsertShift(stationId, monthKey, {
-      userId: editingCell.userId, shiftDate: editingCell.dateStr, shiftCode, reason, in1, out1, in2, out2,
-    });
-    setLastSavedAt(new Date());
-    await load();
+    const { userId, dateStr } = editingCell;
+    applyAssignmentToStaff(userId, dateStr, buildOptimisticAssignment(dateStr, shiftCode, in1, out1, in2, out2));
+    saveQueue.enqueue(`single:${userId}:${dateStr}`, () =>
+      rosterApi.upsertShift(stationId, monthKey, { userId, shiftDate: dateStr, shiftCode, reason, in1, out1, in2, out2 })
+    );
   }
 
-  const cellKey = (userId, day) => `${userId}|${day}`;
+  const cellKey = useCallback((userId, day) => `${userId}|${day}`, []);
+
+  // Same row order the grid actually renders (grouped by category, same as
+  // byCategory below) — selection/copy/paste measure "row N" against THIS,
+  // not the unsorted staff list, so a shift-click range and a paste anchor
+  // land on the row the user is actually looking at.
+  const q = search.trim().toLowerCase();
+  const visibleStaff = useMemo(() => staff
+    .filter(s => catFilter === "ALL" || (s.category || "NCS") === catFilter)
+    .filter(s => !q || s.fullName.toLowerCase().includes(q) || (s.designation || "").toLowerCase().includes(q)),
+  [staff, catFilter, q]);
+
+  const byCategory = useMemo(() => CATEGORIES
+    .map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
+    .filter(g => g.staff.length > 0),
+  [visibleStaff]);
+
+  const flatStaffOrder = useMemo(() => byCategory.flatMap(g => g.staff), [byCategory]);
+
+  const dayRange = useMemo(() => {
+    if (viewMode === "day") return [todayDayNum || 1];
+    if (viewMode === "week") {
+      const base = todayDayNum || 1;
+      const dow = dateAt(monthKey, base).getUTCDay();
+      const mondayOffset = (dow + 6) % 7;
+      const start = Math.max(1, base - mondayOffset);
+      const days = [];
+      for (let d = start; d <= Math.min(start + 6, nDays); d++) days.push(d);
+      return days;
+    }
+    return Array.from({ length: nDays }, (_, i) => i + 1);
+  }, [viewMode, nDays, todayDayNum, monthKey]);
 
   // Single click selects (Excel-style) — a separate, explicit double-click
   // opens the full edit modal (openCell) for setting times/notes. Shift+click
   // extends the current selection into a rectangle between the anchor and
   // the clicked cell, measured in row/column position so it's the visible
   // rectangle the user is looking at, same as an Excel range-select.
-  function handleCellSelect(s, day, e) {
+  // flatStaffOrder gets a brand-new array reference on every edit (it's
+  // derived from `staff`, which `applyAssignmentToStaff` always replaces
+  // with a new top-level array even though individual staff objects keep
+  // their references — see that function's own comment). Reading it
+  // through a ref, instead of closing over it directly, keeps
+  // handleCellSelect's own identity from changing on every edit — if it
+  // were a dep here, every RosterRow's onCellClick prop would change
+  // reference on every save, defeating React.memo for the whole grid even
+  // though only one row's data actually changed.
+  const flatStaffOrderRef = useRef(flatStaffOrder);
+  useEffect(() => { flatStaffOrderRef.current = flatStaffOrder; }, [flatStaffOrder]);
+
+  const handleCellSelect = useCallback((userId, day, e) => {
     if (!canEdit) return;
     if (e.shiftKey && selectionAnchor) {
-      const rows = flatStaffOrder.map(st => st.id);
-      const r1 = rows.indexOf(selectionAnchor.userId), r2 = rows.indexOf(s.id);
+      const rows = flatStaffOrderRef.current.map(st => st.id);
+      const r1 = rows.indexOf(selectionAnchor.userId), r2 = rows.indexOf(userId);
       const c1 = dayRange.indexOf(selectionAnchor.day), c2 = dayRange.indexOf(day);
       if (r1 === -1 || r2 === -1 || c1 === -1 || c2 === -1) return;
       const [rLo, rHi] = [Math.min(r1, r2), Math.max(r1, r2)];
@@ -307,37 +445,41 @@ export default function RosterPage() {
       }
       setSelectedCells(next);
     } else {
-      setSelectionAnchor({ userId: s.id, day });
-      setSelectedCells(new Set([cellKey(s.id, day)]));
+      setSelectionAnchor({ userId, day });
+      setSelectedCells(new Set([cellKey(userId, day)]));
     }
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canEdit, selectionAnchor, dayRange, cellKey]);
 
   function assignmentFor(s, day) {
     const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
     return s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
   }
 
-  async function writeCells(assignments) {
+  // Optimistic + queued as ONE bulk job (same as today's single bulk
+  // network call) — every affected cell is applied to local state
+  // immediately, then one `bulkUpsertShifts` request is enqueued to persist
+  // all of them together. Not awaited by callers beyond this returning;
+  // failures surface via the shared save-status pill, not a blocking alert.
+  function writeCells(assignments) {
     if (!assignments.length) return;
-    await rosterApi.bulkUpsertShifts(stationId, monthKey, assignments);
-    setLastSavedAt(new Date());
-    await load();
+    for (const a of assignments) {
+      applyAssignmentToStaff(a.userId, a.shiftDate, a.shiftCode === "O" ? null : buildOptimisticAssignment(a.shiftDate, a.shiftCode, a.in1, a.out1, a.in2, a.out2));
+    }
+    const jobId = `bulk:${Date.now()}:${Math.random().toString(36).slice(2)}`;
+    saveQueue.enqueue(jobId, () => rosterApi.bulkUpsertShifts(stationId, monthKey, assignments));
   }
 
   // Delete/Backspace — clears every selected cell back to "O", the same
   // "no assignment" state a brand-new cell starts in.
-  async function handleClearSelected() {
+  function handleClearSelected() {
     if (!canEdit || !selectedCells.size) return;
     if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
     const assignments = [...selectedCells].map(key => {
       const [userId, dayStr] = key.split("|");
       return { userId, shiftDate: dateAt(monthKey, Number(dayStr)).toISOString().slice(0, 10), shiftCode: "O" };
     });
-    try {
-      await writeCells(assignments);
-    } catch (err) {
-      alert(`Clear failed: ${err.message}`);
-    }
+    writeCells(assignments);
   }
 
   // Ctrl+C/Ctrl+X — snapshots each selected cell's current code + any time
@@ -349,7 +491,7 @@ export default function RosterPage() {
     const cells = [...selectedCells].map(key => {
       const [userId, dayStr] = key.split("|");
       const day = Number(dayStr);
-      const s = flatStaffOrder.find(st => st.id === userId);
+      const s = staffById.get(userId);
       const a = s && assignmentFor(s, day);
       return {
         rowIndex: rows.indexOf(userId), colIndex: dayRange.indexOf(day),
@@ -370,8 +512,10 @@ export default function RosterPage() {
   // selected cell with that value (Excel's "copy one, paste into a range"
   // behavior); otherwise the copied shape is replicated starting at the
   // anchor, clipped to the grid's actual rows/columns. A pending cut only
-  // clears its source cells once the paste has actually landed.
-  async function handlePaste() {
+  // clears its source cells once the paste has actually landed (applied
+  // locally — not waiting on the network, same optimistic model as
+  // everything else here).
+  function handlePaste() {
     if (!clipboard || !selectedCells.size || !canEdit) return;
     if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
     const rows = flatStaffOrder.map(st => st.id);
@@ -402,21 +546,17 @@ export default function RosterPage() {
       shiftCode: t.shiftCode, in1: t.in1, out1: t.out1, in2: t.in2, out2: t.out2,
     }));
 
-    try {
-      await writeCells(assignments);
-      if (clipboard.isCut && clipboard.sourceKeys) {
-        const targetKeys = new Set(targets.map(t => cellKey(t.userId, t.day)));
-        const toClear = clipboard.sourceKeys.filter(k => !targetKeys.has(k));
-        if (toClear.length) {
-          await writeCells(toClear.map(key => {
-            const [userId, dayStr] = key.split("|");
-            return { userId, shiftDate: dateAt(monthKey, Number(dayStr)).toISOString().slice(0, 10), shiftCode: "O" };
-          }));
-        }
-        setClipboard(null);
+    writeCells(assignments);
+    if (clipboard.isCut && clipboard.sourceKeys) {
+      const targetKeys = new Set(targets.map(t => cellKey(t.userId, t.day)));
+      const toClear = clipboard.sourceKeys.filter(k => !targetKeys.has(k));
+      if (toClear.length) {
+        writeCells(toClear.map(key => {
+          const [userId, dayStr] = key.split("|");
+          return { userId, shiftDate: dateAt(monthKey, Number(dayStr)).toISOString().slice(0, 10), shiftCode: "O" };
+        }));
       }
-    } catch (err) {
-      alert(`Paste failed: ${err.message}`);
+      setClipboard(null);
     }
   }
 
@@ -449,33 +589,6 @@ export default function RosterPage() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   });
-
-  const q = search.trim().toLowerCase();
-  const visibleStaff = staff
-    .filter(s => catFilter === "ALL" || (s.category || "NCS") === catFilter)
-    .filter(s => !q || s.fullName.toLowerCase().includes(q) || (s.designation || "").toLowerCase().includes(q));
-  const byCategory = CATEGORIES.map(cat => ({ cat, staff: visibleStaff.filter(s => (s.category || "NCS") === cat) }))
-    .filter(g => g.staff.length > 0);
-
-  // Same row order the grid actually renders (grouped by category, same as
-  // byCategory above) — selection/copy/paste measure "row N" against THIS,
-  // not the unsorted staff list, so a shift-click range and a paste anchor
-  // land on the row the user is actually looking at.
-  const flatStaffOrder = byCategory.flatMap(g => g.staff);
-
-  const dayRange = useMemo(() => {
-    if (viewMode === "day") return [todayDayNum || 1];
-    if (viewMode === "week") {
-      const base = todayDayNum || 1;
-      const dow = dateAt(monthKey, base).getUTCDay();
-      const mondayOffset = (dow + 6) % 7;
-      const start = Math.max(1, base - mondayOffset);
-      const days = [];
-      for (let d = start; d <= Math.min(start + 6, nDays); d++) days.push(d);
-      return days;
-    }
-    return Array.from({ length: nDays }, (_, i) => i + 1);
-  }, [viewMode, nDays, todayDayNum, monthKey]);
 
   // Legend: only the shift codes actually assigned somewhere this month, in
   // their configured display order — not a hardcoded M/A/N/L/O/FS list,
@@ -541,6 +654,33 @@ export default function RosterPage() {
       .filter(Boolean);
   }
 
+  // Row virtualization (staff count only — see VIRTUALIZE_STAFF_THRESHOLD)
+  // renders a flat list of "either a category header or a staff row" so one
+  // virtualizer can window across category groups. Below the threshold this
+  // is entirely unused — `.roster-wrap` keeps its original (no-overflow,
+  // page-scrolls) layout and every row renders directly, unchanged from
+  // before this pass.
+  const shouldVirtualize = flatStaffOrder.length > VIRTUALIZE_STAFF_THRESHOLD;
+  const renderItems = useMemo(() => {
+    const items = [];
+    for (const group of byCategory) {
+      items.push({ type: "header", key: `h-${group.cat}`, cat: group.cat, count: group.staff.length });
+      for (const s of group.staff) items.push({ type: "row", key: s.id, staffId: s.id, cat: group.cat });
+    }
+    return items;
+  }, [byCategory]);
+
+  const scrollElRef = useRef(null);
+  const rowVirtualizer = useVirtualizer({
+    count: renderItems.length,
+    getScrollElement: () => scrollElRef.current,
+    estimateSize: (i) => (renderItems[i]?.type === "header" ? 26 : 36),
+    overscan: 10,
+    enabled: shouldVirtualize,
+  });
+
+  const totalCols = 2 + dayRange.length + (viewMode === "month" ? weekBlocks(nDays).length + 1 : 0);
+
   // Order matters here for the same reason as DashboardPage.jsx: check
   // stationLoading (still figuring out which station to use) before the
   // "no station" message, so a real stationId arriving doesn't briefly
@@ -550,6 +690,10 @@ export default function RosterPage() {
   if (loading) return <div className="card">Loading roster…</div>;
   if (error) return <div className="ab" style={{ background: "rgba(229,57,53,.12)", color: "var(--rp-red)" }}>{error}</div>;
 
+  const virtualRows = shouldVirtualize ? rowVirtualizer.getVirtualItems() : [];
+  const paddingTop = virtualRows.length ? virtualRows[0].start : 0;
+  const paddingBottom = virtualRows.length ? rowVirtualizer.getTotalSize() - virtualRows[virtualRows.length - 1].end : 0;
+
   return (
     <div>
       {generationResult && (
@@ -557,7 +701,8 @@ export default function RosterPage() {
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
-        <StatusPill roster={roster} lastSavedAt={lastSavedAt} />
+        <StatusPill roster={roster} />
+        <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} onRetry={saveQueue.retry} />
       </div>
 
       {/* Toolbar: month / station-scoped category / search / view density */}
@@ -616,7 +761,7 @@ export default function RosterPage() {
           : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
 
-      <div className="roster-wrap">
+      <div className="roster-wrap" ref={scrollElRef} style={shouldVirtualize ? { maxHeight: "min(72vh, 780px)", overflow: "auto" } : undefined}>
         <table className="rt">
           <thead>
             <tr>
@@ -633,14 +778,39 @@ export default function RosterPage() {
             </tr>
           </thead>
           <tbody>
-            {byCategory.map(group => (
-              <RosterCategoryGroup
-                key={group.cat} group={group} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
-                shiftDefByCode={shiftDefByCode} onCellClick={handleCellSelect} onCellDoubleClick={openCell} onStaffClick={setSelectedStaff}
-                todayDayNum={todayDayNum} showTotals={viewMode === "month"}
-                selectedCells={selectedCells} cutPendingKeys={clipboard?.isCut ? clipboard.sourceKeys : null} cellKey={cellKey}
-              />
-            ))}
+            {shouldVirtualize ? (
+              <>
+                {paddingTop > 0 && <tr aria-hidden="true"><td style={{ height: paddingTop, padding: 0, border: 0 }} colSpan={totalCols} /></tr>}
+                {virtualRows.map(vi => {
+                  const item = renderItems[vi.index];
+                  if (item.type === "header") {
+                    return <CategoryHeaderRow key={item.key} cat={item.cat} count={item.count} colSpan={totalCols} />;
+                  }
+                  const s = staffById.get(item.staffId);
+                  if (!s) return null;
+                  return (
+                    <RosterRow
+                      key={item.key} userId={s.id} fullName={s.fullName} designation={s.designation} cat={item.cat}
+                      shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
+                      shiftDefByCode={shiftDefByCode} showTotals={viewMode === "month"}
+                      selectedCells={selectedCells} cutPendingKeys={clipboard?.isCut ? clipboard.sourceKeys : null}
+                      cellKey={cellKey} onCellClick={handleCellSelect} onCellDoubleClick={openCell} onStaffClick={setSelectedStaffId}
+                      todayDayNum={todayDayNum}
+                    />
+                  );
+                })}
+                {paddingBottom > 0 && <tr aria-hidden="true"><td style={{ height: paddingBottom, padding: 0, border: 0 }} colSpan={totalCols} /></tr>}
+              </>
+            ) : (
+              byCategory.map(group => (
+                <RosterCategoryGroup
+                  key={group.cat} group={group} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
+                  shiftDefByCode={shiftDefByCode} onCellClick={handleCellSelect} onCellDoubleClick={openCell} onStaffClick={setSelectedStaffId}
+                  todayDayNum={todayDayNum} showTotals={viewMode === "month"}
+                  selectedCells={selectedCells} cutPendingKeys={clipboard?.isCut ? clipboard.sourceKeys : null} cellKey={cellKey}
+                />
+              ))
+            )}
             <CoverageRows staff={visibleStaff} dayRange={dayRange} monthKey={monthKey} todayDayNum={todayDayNum} showTotals={viewMode === "month"} nDays={nDays} />
           </tbody>
         </table>
@@ -669,7 +839,15 @@ export default function RosterPage() {
         <StaffDetailDrawer
           staff={selectedStaff} monthKey={monthKey} nDays={nDays} shiftDefByCode={shiftDefByCode}
           onClose={() => setSelectedStaff(null)}
-          onEditToday={(s) => { setSelectedStaff(null); openCell(s, todayDayNum || 1); }}
+          onEditToday={(s) => { setSelectedStaff(null); openCell(s.id, todayDayNum || 1); }}
+        />
+      )}
+
+      {showVersions && roster && (
+        <RosterVersionsPanel
+          stationId={stationId} monthKey={monthKey} roster={roster}
+          onClose={() => setShowVersions(false)}
+          onRestored={async () => { setShowVersions(false); await load(); }}
         />
       )}
 
@@ -816,21 +994,33 @@ function dayCellClasses(monthKey, day, todayDayNum) {
   return classes.join(" ") || undefined;
 }
 
-function StatusPill({ roster, lastSavedAt }) {
+function StatusPill({ roster }) {
   if (!roster) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-dim)" }}>
       <span style={{ width: 7, height: 7, borderRadius: "50%", background: roster.isPublished ? "var(--green)" : "var(--amber)", display: "inline-block" }} />
-      {roster.isPublished ? "Published" : lastSavedAt ? `Draft saved ${relativeTime(lastSavedAt)}` : "Draft"}
+      {roster.isPublished ? "Published" : "Draft"}
     </div>
   );
 }
 
-function relativeTime(date) {
-  const secs = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
-  if (secs < 60) return "just now";
-  const mins = Math.round(secs / 60);
-  return `${mins} min ago`;
+// The smart-autosave status indicator — reflects usePendingSaveQueue's
+// shared state, not any single edit, since every cell edit on this page
+// (single or bulk) now goes through that one queue.
+function SaveStatusPill({ status, pendingCount, onRetry }) {
+  if (status === "idle") return null;
+  if (status === "saving") {
+    return <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-dim)" }}>🟡 Saving{pendingCount ? `… (${pendingCount})` : "…"}</div>;
+  }
+  if (status === "error") {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--rp-red)" }}>
+        🔴 Unable to save changes — kept locally.
+        <button className="btn btn-ghost btn-sm" onClick={onRetry}>Retry</button>
+      </div>
+    );
+  }
+  return <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--rp-green)" }}>🟢 Saved</div>;
 }
 
 function StatCard({ tone, icon, label, value, onClick }) {
@@ -847,82 +1037,134 @@ function StatCard({ tone, icon, label, value, onClick }) {
   );
 }
 
+function CategoryHeaderRow({ cat, count, colSpan }) {
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        style={{ padding: "5px 7px", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", background: "rgba(15,23,42,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
+      >
+        <span className={`cat-tag cat-${cat}`}>{cat}</span> {CAT_LABELS[cat]} · {count} staff
+      </td>
+    </tr>
+  );
+}
+
+// Non-virtualized path (small/typical rosters) — same header-then-rows
+// shape as the virtualized path above, just rendering every row directly.
 function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode, onCellClick, onCellDoubleClick, onStaffClick, todayDayNum, showTotals, selectedCells, cutPendingKeys, cellKey }) {
+  const colSpan = dayRange.length + 2 + (showTotals ? weekBlocks(nDays).length + 1 : 0);
   return (
     <>
-      <tr>
-        <td
-          colSpan={dayRange.length + 2 + (showTotals ? weekBlocks(nDays).length + 1 : 0)}
-          style={{ padding: "5px 7px", fontSize: 9, fontWeight: 700, color: "var(--text-dim)", background: "rgba(15,23,42,.025)", borderTop: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}
-        >
-          <span className={`cat-tag cat-${group.cat}`}>{group.cat}</span> {CAT_LABELS[group.cat]} · {group.staff.length} staff
-        </td>
-      </tr>
-      {group.staff.map(s => {
-        // Resolve every day of the MONTH (not just the visible dayRange) so
-        // the weekly-hour totals stay correct even while Week/Day view is
-        // only rendering a subset of day columns.
-        const assignmentsByDay = Array.from({ length: nDays }, (_, i) => {
-          const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
-          return s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
-        });
-        const blocks = weekBlocks(nDays);
-        const weekHours = blocks.map(([from, to]) => {
-          let hrs = 0;
-          for (let day = from; day <= to; day++) {
-            const a = assignmentsByDay[day - 1];
-            hrs += shiftNetHours(shiftDefByCode[a?.shiftDef.code || "O"], a);
-          }
-          return hrs;
-        });
-        const totalHours = weekHours.reduce((a, b) => a + b, 0);
-
-        return (
-          <tr key={s.id}>
-            <td className="sc">
-              <button className="staff-name-btn" onClick={() => onStaffClick(s)} title="View staff details">
-                <div className="sn">{s.fullName.split("(")[0].trim().substring(0, 20)}</div>
-                <div className="sr">{s.designation}</div>
-              </button>
-            </td>
-            <td className="sc2"><span className={`cat-tag cat-${group.cat}`}>{group.cat}</span></td>
-            {dayRange.map(day => {
-              const a = assignmentsByDay[day - 1];
-              const code = a?.shiftDef.code || "O";
-              const def = shiftDefByCode[code];
-              const in1 = a?.in1 || def?.startTime;
-              const out1 = a?.out1 || def?.endTime;
-              const key = cellKey(s.id, day);
-              const isSelected = selectedCells?.has(key);
-              const isCutPending = cutPendingKeys?.includes(key);
-              return (
-                <td key={day} className={dayCellClasses(monthKey, day, todayDayNum)}>
-                  <div
-                    className={`sp${isSelected ? " cell-selected" : ""}${isCutPending ? " cell-cut" : ""}`}
-                    onClick={(e) => onCellClick(s, day, e)}
-                    onDoubleClick={() => onCellDoubleClick(s, day)}
-                    title={def ? `${def.name}${in1 ? `: ${in1}–${out1}${a?.in2 && a?.out2 ? `, ${a.in2}–${a.out2}` : ""}` : ""}` : code}
-                    style={{ background: def?.color || "rgba(180,180,180,.1)", color: "#000" }}
-                  >
-                    <span className="sc-code">{code}</span>
-                    {in1 && <span className="sc-time">{in1}–{out1}</span>}
-                    {a?.in2 && a?.out2 && <span className="sc-time">{a.in2}–{a.out2}</span>}
-                  </div>
-                </td>
-              );
-            })}
-            {showTotals && weekHours.map((hrs, i) => (
-              <td key={i}>
-                <span className={hrs > 48 ? "hrs-over" : hrs > 42 ? "hrs-warn" : "hrs-ok"}>{hrs.toFixed(1)}</span>
-              </td>
-            ))}
-            {showTotals && <td><span className={totalHours > 200 ? "hrs-warn" : "hrs-ok"}>{totalHours.toFixed(1)}</span></td>}
-          </tr>
-        );
-      })}
+      <CategoryHeaderRow cat={group.cat} count={group.staff.length} colSpan={colSpan} />
+      {group.staff.map(s => (
+        <RosterRow
+          key={s.id} userId={s.id} fullName={s.fullName} designation={s.designation} cat={group.cat}
+          shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
+          shiftDefByCode={shiftDefByCode} showTotals={showTotals}
+          selectedCells={selectedCells} cutPendingKeys={cutPendingKeys} cellKey={cellKey}
+          onCellClick={onCellClick} onCellDoubleClick={onCellDoubleClick} onStaffClick={onStaffClick}
+          todayDayNum={todayDayNum}
+        />
+      ))}
     </>
   );
 }
+
+// One staff member's full row — the unit React.memo actually protects.
+// `shiftAssignments` is the ONE prop here that changes reference when this
+// staff member's own data changes (see applyAssignmentToStaff above); every
+// other prop is either a primitive or a stable (useCallback'd / module-
+// level) reference, so an edit to staff member X only ever re-renders X's
+// own RosterRow — everyone else's `shiftAssignments` array kept its old
+// reference and memo bails out before touching their DOM at all.
+const RosterRow = memo(function RosterRow({
+  userId, fullName, designation, cat, shiftAssignments, nDays, dayRange, monthKey, shiftDefByCode,
+  showTotals, selectedCells, cutPendingKeys, cellKey, onCellClick, onCellDoubleClick, onStaffClick, todayDayNum,
+}) {
+  useRenderCount(`RosterRow:${userId}`);
+
+  // Resolve every day of the MONTH (not just the visible dayRange) so the
+  // weekly-hour totals stay correct even while Week/Day view is only
+  // rendering a subset of day columns.
+  const assignmentsByDay = Array.from({ length: nDays }, (_, i) => {
+    const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
+    return shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+  });
+  const blocks = weekBlocks(nDays);
+  const weekHours = blocks.map(([from, to]) => {
+    let hrs = 0;
+    for (let day = from; day <= to; day++) {
+      const a = assignmentsByDay[day - 1];
+      hrs += shiftNetHours(shiftDefByCode[a?.shiftDef.code || "O"], a);
+    }
+    return hrs;
+  });
+  const totalHours = weekHours.reduce((a, b) => a + b, 0);
+
+  return (
+    <tr>
+      <td className="sc">
+        <button className="staff-name-btn" onClick={() => onStaffClick(userId)} title="View staff details">
+          <div className="sn">{fullName.split("(")[0].trim().substring(0, 20)}</div>
+          <div className="sr">{designation}</div>
+        </button>
+      </td>
+      <td className="sc2"><span className={`cat-tag cat-${cat}`}>{cat}</span></td>
+      {dayRange.map(day => {
+        const a = assignmentsByDay[day - 1];
+        const code = a?.shiftDef.code || "O";
+        const def = shiftDefByCode[code];
+        const in1 = a?.in1 || def?.startTime || null;
+        const out1 = a?.out1 || def?.endTime || null;
+        const in2 = a?.in2 || null;
+        const out2 = a?.out2 || null;
+        const key = cellKey(userId, day);
+        const isSelected = !!selectedCells?.has(key);
+        const isCutPending = !!cutPendingKeys?.includes(key);
+        const title = def ? `${def.name}${in1 ? `: ${in1}–${out1}${in2 && out2 ? `, ${in2}–${out2}` : ""}` : ""}` : code;
+        return (
+          <RosterCell
+            key={day} userId={userId} day={day} code={code} colorHex={def?.color || "rgba(180,180,180,.1)"}
+            title={title} in1={in1} out1={out1} in2={in2} out2={out2}
+            isSelected={isSelected} isCutPending={isCutPending}
+            dayClass={dayCellClasses(monthKey, day, todayDayNum)}
+            onCellClick={onCellClick} onCellDoubleClick={onCellDoubleClick}
+          />
+        );
+      })}
+      {showTotals && weekHours.map((hrs, i) => (
+        <td key={i}>
+          <span className={hrs > 48 ? "hrs-over" : hrs > 42 ? "hrs-warn" : "hrs-ok"}>{hrs.toFixed(1)}</span>
+        </td>
+      ))}
+      {showTotals && <td><span className={totalHours > 200 ? "hrs-warn" : "hrs-ok"}>{totalHours.toFixed(1)}</span></td>}
+    </tr>
+  );
+});
+
+// One day's cell — leaf-level memo receiving only primitives, so a
+// shallow prop compare is a real equality check, not a reference check
+// that always fails (which is what would happen if the parent still
+// passed whole `assignment`/`shiftDef` objects down here).
+const RosterCell = memo(function RosterCell({ userId, day, code, colorHex, title, in1, out1, in2, out2, isSelected, isCutPending, dayClass, onCellClick, onCellDoubleClick }) {
+  useRenderCount(`RosterCell:${userId}:${day}`);
+  return (
+    <td className={dayClass}>
+      <div
+        className={`sp${isSelected ? " cell-selected" : ""}${isCutPending ? " cell-cut" : ""}`}
+        onClick={(e) => onCellClick(userId, day, e)}
+        onDoubleClick={() => onCellDoubleClick(userId, day)}
+        title={title}
+        style={{ background: colorHex, color: "#000" }}
+      >
+        <span className="sc-code">{code}</span>
+        {in1 && <span className="sc-time">{in1}–{out1}</span>}
+        {in2 && out2 && <span className="sc-time">{in2}–{out2}</span>}
+      </div>
+    </td>
+  );
+});
 
 // Mirrors the prototype's coverage rows — per-day count of staff on each
 // shift, so gaps are visible at a glance without opening the dashboard.
