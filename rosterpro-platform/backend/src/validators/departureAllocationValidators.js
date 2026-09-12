@@ -7,12 +7,6 @@ const dayQuerySchema = z.object({
   day: z.coerce.number().int().min(1).max(31),
 });
 
-const monthQuerySchema = z.object({
-  stationId: z.string().uuid(),
-  year: z.coerce.number().int().min(2000).max(2100),
-  month: z.coerce.number().int().min(1).max(12),
-});
-
 const manualAssignSchema = z.object({
   stationId: z.string().uuid(),
   year: z.coerce.number().int().min(2000).max(2100),
@@ -26,4 +20,4 @@ const manualAssignSchema = z.object({
   supportUserId: z.string().uuid().nullable().optional(),
 });
 
-module.exports = { dayQuerySchema, monthQuerySchema, manualAssignSchema };
+module.exports = { dayQuerySchema, manualAssignSchema };

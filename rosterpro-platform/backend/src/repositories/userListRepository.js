@@ -15,7 +15,7 @@ async function listPaginated({ page = 1, pageSize = 20, stationId, airlineId }) 
       orderBy: { fullName: "asc" },
       select: {
         id: true, fullName: true, email: true, employeeId: true, category: true, designation: true,
-        isActive: true, stationId: true, airlineId: true, lastLoginAt: true, createdAt: true,
+        isActive: true, stationId: true, airlineId: true, lastLoginAt: true,
         reportsToId: true, reportsTo: { select: { id: true, fullName: true } },
         roles: { select: { role: { select: { name: true } } } },
       },

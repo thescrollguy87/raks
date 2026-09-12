@@ -247,44 +247,4 @@ async function manualAssign(input, actor, req) {
   return row;
 }
 
-// Whole-month manpower coverage, for the Flight Schedule page's KPI row —
-// reuses getDayAllocation (the exact same real roster-resolved pools and
-// fill status the day-by-day panel shows) for every day of the month
-// rather than a separate, easier-to-drift computation. A day with zero
-// departures contributes nothing to the coverage ratio (there was nothing
-// to staff), but is still reported in byDay for a complete calendar.
-async function getMonthManpowerSummary(stationId, year, month, actor) {
-  await assertOwnStation(actor, stationId);
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  const perDay = await Promise.all(
-    Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => getDayAllocation(stationId, year, month, day, actor))
-  );
-
-  let totalDepartures = 0, releaserFilled = 0, supportFilled = 0;
-  let fullyCoveredDays = 0, partialDays = 0, uncoveredDays = 0, daysWithDepartures = 0;
-  const byDay = perDay.map((deps, idx) => {
-    const day = idx + 1;
-    if (deps.length === 0) return { day, departures: 0, releaserFilled: 0, supportFilled: 0 };
-    daysWithDepartures++;
-    const rf = deps.filter(d => d.releaser).length;
-    const sf = deps.filter(d => d.support).length;
-    totalDepartures += deps.length;
-    releaserFilled += rf;
-    supportFilled += sf;
-    if (rf === deps.length && sf === deps.length) fullyCoveredDays++;
-    else if (rf === 0 && sf === 0) uncoveredDays++;
-    else partialDays++;
-    return { day, departures: deps.length, releaserFilled: rf, supportFilled: sf };
-  });
-
-  const totalSlots = totalDepartures * 2;
-  const filledSlots = releaserFilled + supportFilled;
-  const coveragePct = totalSlots > 0 ? Math.round((filledSlots / totalSlots) * 100) : null;
-
-  return {
-    daysInMonth, daysWithDepartures, totalDepartures, releaserFilled, supportFilled,
-    fullyCoveredDays, partialDays, uncoveredDays, coveragePct, byDay,
-  };
-}
-
-module.exports = { getDayAllocation, autoAllocateDay, manualAssign, getMonthManpowerSummary };
+module.exports = { getDayAllocation, autoAllocateDay, manualAssign };
