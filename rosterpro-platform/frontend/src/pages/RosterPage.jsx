@@ -765,6 +765,7 @@ export default function RosterPage() {
                   return (
                     <RosterRow
                       key={item.key} userId={s.id} fullName={s.fullName} designation={s.designation} cat={item.cat}
+                      isBlocked={!!s.isBlocked} blockReason={(s.blockReasons || []).join("; ")}
                       shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
                       shiftDefByCode={shiftDefByCode} showTotals={viewMode === "month"}
                       selectedCells={selectedCells} cutPendingKeys={clipboard?.isCut ? clipboard.sourceKeys : null}
@@ -1042,6 +1043,7 @@ function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode,
       {group.staff.map(s => (
         <RosterRow
           key={s.id} userId={s.id} fullName={s.fullName} designation={s.designation} cat={group.cat}
+          isBlocked={!!s.isBlocked} blockReason={(s.blockReasons || []).join("; ")}
           shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
           shiftDefByCode={shiftDefByCode} showTotals={showTotals}
           selectedCells={selectedCells} cutPendingKeys={cutPendingKeys} cellKey={cellKey}
@@ -1061,7 +1063,7 @@ function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode,
 // own RosterRow — everyone else's `shiftAssignments` array kept its old
 // reference and memo bails out before touching their DOM at all.
 const RosterRow = memo(function RosterRow({
-  userId, fullName, designation, cat, shiftAssignments, nDays, dayRange, monthKey, shiftDefByCode,
+  userId, fullName, designation, cat, isBlocked, blockReason, shiftAssignments, nDays, dayRange, monthKey, shiftDefByCode,
   showTotals, selectedCells, cutPendingKeys, cellKey, onCellClick, onCellDoubleClick, onStaffClick, todayDayNum,
 }) {
   useRenderCount(`RosterRow:${userId}`);
@@ -1088,7 +1090,12 @@ const RosterRow = memo(function RosterRow({
     <tr>
       <td className="sc">
         <button className="staff-name-btn" onClick={() => onStaffClick(userId)} title="View staff details">
-          <div className="sn">{fullName.split("(")[0].trim().substring(0, 20)}</div>
+          <div className="sn">
+            {fullName.split("(")[0].trim().substring(0, 20)}
+            {isBlocked && (
+              <span title={`Blocked from duty — ${blockReason || "expired qualification, license, or authorization"}`} style={{ marginLeft: 4, color: "var(--rp-red)" }}>🔒</span>
+            )}
+          </div>
           <div className="sr">{designation}</div>
         </button>
       </td>

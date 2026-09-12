@@ -4,6 +4,7 @@ const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const notificationService = require("./notificationService");
 const rosterVersionService = require("./rosterVersionService");
+const complianceService = require("./complianceService");
 const { assertOwnStation, resolveAirlineId } = require("../utils/stationScope");
 
 async function getOrCreateRoster(stationId, monthKey, actor) {
@@ -18,8 +19,20 @@ async function getOrCreateRoster(stationId, monthKey, actor) {
 
 async function getRosterGrid(stationId, monthKey, actor) {
   const roster = await getOrCreateRoster(stationId, monthKey, actor);
-  const grid = await rosterRepo.getRosterGrid(stationId, roster.id);
-  return { roster, staff: grid };
+  const [grid, blockedMap] = await Promise.all([
+    rosterRepo.getRosterGrid(stationId, roster.id),
+    complianceService.getBlockedStaffMap(stationId),
+  ]);
+  // Flags every staff row with an expired qualification/license/
+  // authorization — so a station manager sees who can't actually be
+  // rostered right on the grid, not only after opening a shift's edit
+  // popover for that one person.
+  const staff = grid.map(s => ({
+    ...s,
+    isBlocked: !!blockedMap[s.id],
+    blockReasons: blockedMap[s.id] || [],
+  }));
+  return { roster, staff };
 }
 
 async function publishRoster(rosterId, actor, req) {

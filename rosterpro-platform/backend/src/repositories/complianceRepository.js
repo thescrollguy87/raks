@@ -86,4 +86,30 @@ const authorization = {
   },
 };
 
-module.exports = { qualification, license, training, authorization };
+// Bulk "who at this station is currently blocked, and why" — three plain
+// queries regardless of staff count, instead of running the equivalent of
+// getComplianceSummary (4 queries each) once per staff member. Built for
+// the Shift Roster grid, which needs this for every staff row on every
+// load and can't afford an N+1 there. Filters on the raw expiryDate
+// (same rule complianceService.deriveStatus uses), not the persisted
+// Qualification.status column, so it can't drift from what a scheduled
+// status-refresh job has or hasn't caught up on yet.
+function bulkExpiredForStation(stationId) {
+  const now = new Date();
+  return Promise.all([
+    prisma.qualification.findMany({
+      where: { deletedAt: null, expiryDate: { lt: now }, user: { stationId } },
+      select: { userId: true, qualCode: true },
+    }),
+    prisma.license.findMany({
+      where: { deletedAt: null, expiryDate: { lt: now }, user: { stationId } },
+      select: { userId: true, licenseNo: true, category: true },
+    }),
+    prisma.staffAuthorization.findMany({
+      where: { deletedAt: null, expiryDate: { not: null, lt: now }, user: { stationId } },
+      select: { userId: true, scope: true },
+    }),
+  ]).then(([qualifications, licenses, authorizations]) => ({ qualifications, licenses, authorizations }));
+}
+
+module.exports = { qualification, license, training, authorization, bulkExpiredForStation };

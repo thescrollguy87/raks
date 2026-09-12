@@ -270,11 +270,26 @@ async function getComplianceSummary(userId) {
   return { qualifications: quals, licenses, trainings, authorizations, isBlocked: hasExpired };
 }
 
+// Station-wide "who's blocked and why", built from three bulk queries
+// (see complianceRepository.bulkExpiredForStation) rather than N calls to
+// getComplianceSummary — for callers like the Shift Roster grid that need
+// this for every staff member on every load. Returns { [userId]: reasons[] };
+// a userId absent from the map is not blocked.
+async function getBlockedStaffMap(stationId) {
+  const { qualifications, licenses, authorizations } = await repo.bulkExpiredForStation(stationId);
+  const map = {};
+  const add = (userId, reason) => { (map[userId] || (map[userId] = [])).push(reason); };
+  qualifications.forEach(q => add(q.userId, `Qualification ${q.qualCode} expired`));
+  licenses.forEach(l => add(l.userId, `License ${l.licenseNo} (${l.category}) expired`));
+  authorizations.forEach(a => add(a.userId, `Authorization ${a.scope} expired`));
+  return map;
+}
+
 module.exports = {
   deriveStatus, assertActorSharesStationWith,
   createQualification, updateQualification, deleteQualification, listQualificationsForUser, listExpiringQualifications,
   createLicense, updateLicense, deleteLicense, listLicensesForUser, listExpiringLicenses,
   createTraining, updateTraining, deleteTraining, listTrainingForUser,
   createAuthorization, updateAuthorization, deleteAuthorization, listAuthorizationsForUser,
-  getComplianceSummary,
+  getComplianceSummary, getBlockedStaffMap,
 };
