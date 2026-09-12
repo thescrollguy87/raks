@@ -66,7 +66,7 @@ export default function ShiftEditModal({ cell, shiftDefs, staff, monthKey, manda
     if (compliance === null) {
       rows.push({ level: "warn", text: "Checking qualification status…" });
     } else if (compliance.isBlocked) {
-      rows.push({ level: "crit", text: "Qualification issue — one or more required quals/licenses have expired" });
+      rows.push({ level: "crit", text: "Qualification issue — one or more required quals/licenses/authorizations have expired" });
     } else {
       rows.push({ level: "ok", text: "Qualified for duty" });
     }

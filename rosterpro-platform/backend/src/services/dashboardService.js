@@ -13,9 +13,10 @@ const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
 // ── 1. Qualification expiry ──────────────────────────────────────────────
 
 async function qualificationExpiryWidget(stationId, windowDays = 30) {
-  const [quals, licenses] = await Promise.all([
+  const [quals, licenses, authorizations] = await Promise.all([
     complianceRepo.qualification.listExpiringWithin(windowDays, { stationId }),
     complianceRepo.license.listExpiringWithin(windowDays, { stationId }),
+    complianceRepo.authorization.listExpiringWithin(windowDays, { stationId }),
   ]);
 
   const now = new Date();
@@ -27,6 +28,11 @@ async function qualificationExpiryWidget(stationId, windowDays = 30) {
   return {
     qualifications: { ...countByStatus(quals), items: quals },
     licenses: { ...countByStatus(licenses), items: licenses },
+    // An expired authorization blocks full-scope duty the same way an
+    // expired qualification/license does (see complianceService.
+    // getComplianceSummary) — it belongs in the same expiry picture, not
+    // a separate one a caller could forget to check.
+    authorizations: { ...countByStatus(authorizations), items: authorizations },
     windowDays,
   };
 }
@@ -152,11 +158,27 @@ async function dgcaComplianceWidget(stationId) {
   const staff = await rosterRepo.getActiveStaffContacts(stationId);
   const summaries = await Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id)));
 
-  const blockedStaff = staff.filter((s, i) => summaries[i].isBlocked);
+  // Real reasons, not just a name — every expired qualification/license/
+  // authorization that caused the block (same three record types
+  // complianceService.getComplianceSummary itself checks), so a caller can
+  // show what's actually wrong instead of just "blocked".
+  const blockedStaff = staff
+    .map((s, i) => {
+      const sum = summaries[i];
+      if (!sum.isBlocked) return null;
+      const reasons = [
+        ...sum.qualifications.filter(q => q.status === "EXPIRED").map(q => `Qualification ${q.qualCode} expired`),
+        ...sum.licenses.filter(l => l.status === "EXPIRED").map(l => `License ${l.licenseNo} (${l.category}) expired`),
+        ...sum.authorizations.filter(a => a.status === "EXPIRED").map(a => `Authorization ${a.scope} expired`),
+      ];
+      return { id: s.id, fullName: s.fullName, reasons };
+    })
+    .filter(Boolean);
+
   return {
     totalActiveStaff: staff.length,
     blockedStaffCount: blockedStaff.length,
-    blockedStaff: blockedStaff.map((s, i) => ({ id: s.id, fullName: s.fullName })),
+    blockedStaff,
     complianceRate: staff.length > 0 ? Math.round(((staff.length - blockedStaff.length) / staff.length) * 100) : 100,
   };
 }

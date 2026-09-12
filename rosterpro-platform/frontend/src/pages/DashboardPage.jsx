@@ -97,13 +97,16 @@ export default function DashboardPage() {
   const expiredItems = [
     ...qualificationExpiry.qualifications.items.filter(q => new Date(q.expiryDate) < new Date()).map(q => ({ primary: q.user.fullName, secondary: `${q.qualCode} — expired ${fmtDate(q.expiryDate)}`, tone: "red" })),
     ...qualificationExpiry.licenses.items.filter(l => new Date(l.expiryDate) < new Date()).map(l => ({ primary: l.user.fullName, secondary: `License ${l.licenseNo} (${l.category}) — expired ${fmtDate(l.expiryDate)}`, tone: "red" })),
+    ...qualificationExpiry.authorizations.items.filter(a => new Date(a.expiryDate) < new Date()).map(a => ({ primary: a.user.fullName, secondary: `Authorization ${a.scope} — expired ${fmtDate(a.expiryDate)}`, tone: "red" })),
   ];
   const expiringItems = [
     ...qualificationExpiry.qualifications.items.filter(q => new Date(q.expiryDate) >= new Date()).map(q => ({ primary: q.user.fullName, secondary: `${q.qualCode} — expires ${fmtDate(q.expiryDate)}`, tone: "amber" })),
     ...qualificationExpiry.licenses.items.filter(l => new Date(l.expiryDate) >= new Date()).map(l => ({ primary: l.user.fullName, secondary: `License ${l.licenseNo} (${l.category}) — expires ${fmtDate(l.expiryDate)}`, tone: "amber" })),
+    ...qualificationExpiry.authorizations.items.filter(a => new Date(a.expiryDate) >= new Date()).map(a => ({ primary: a.user.fullName, secondary: `Authorization ${a.scope} — expires ${fmtDate(a.expiryDate)}`, tone: "amber" })),
   ];
   const expiredCount = expiredItems.length;
   const expiringCount = expiringItems.length;
+  const blockedStaffCount = dgcaCompliance.blockedStaffCount || 0;
   const maxCategoryCount = Math.max(1, ...Object.values(today.byCategory));
   const onDutyPct = today.totalStaff > 0 ? Math.round((today.onDutyToday / today.totalStaff) * 100) : 0;
 
@@ -111,6 +114,11 @@ export default function DashboardPage() {
   const openAlerts = () => setDetail({ title: `Compliance Alerts (${alerts.length})`, rows: alertRows(alerts), empty: "No coverage gaps this month." });
   const openExpired = () => setDetail({ title: `Qualifications Expired (${expiredCount})`, rows: expiredItems, empty: "Nothing expired." });
   const openExpiring = () => setDetail({ title: `Expiring in 30 days (${expiringCount})`, rows: expiringItems, empty: "Nothing expiring soon." });
+  const openBlocked = () => setDetail({
+    title: `Staff Blocked From Duty (${blockedStaffCount})`,
+    rows: (dgcaCompliance.blockedStaff || []).map(s => ({ primary: s.fullName, secondary: s.reasons.join("; ") || "Expired qualification, license, or authorization", tone: "red" })),
+    empty: "No staff currently blocked.",
+  });
 
   return (
     <div>
@@ -122,7 +130,15 @@ export default function DashboardPage() {
         <KpiCard tone={alerts.length > 0 ? "red" : "neutral"} icon="⚠️" label="Compliance Alerts" value={alerts.length} sub={criticalAlerts > 0 ? `${criticalAlerts} critical` : alerts.length > 0 ? "This month" : "None open"} onClick={openAlerts} />
         <KpiCard tone={expiredCount > 0 ? "red" : "neutral"} icon="🎓" label="Qualifications Expired" value={expiredCount} sub={expiredCount > 0 ? "Needs attention" : "All up to date"} onClick={openExpired} />
         <KpiCard tone={expiringCount > 0 ? "amber" : "neutral"} icon="⏰" label="Expiring (30 days)" value={expiringCount} sub={expiringCount > 0 ? "Plan renewals" : "No upcoming"} onClick={openExpiring} />
+        <KpiCard tone={blockedStaffCount > 0 ? "red" : "neutral"} icon="🔒" label="Staff Blocked" value={blockedStaffCount} sub={blockedStaffCount > 0 ? "Cannot be rostered" : "Everyone cleared"} onClick={openBlocked} />
       </div>
+
+      {blockedStaffCount > 0 && (
+        <div className="ab red" style={{ marginBottom: 14 }}>
+          🔒 {blockedStaffCount} staff member{blockedStaffCount === 1 ? "" : "s"} {blockedStaffCount === 1 ? "has" : "have"} an expired qualification, license, or authorization and {blockedStaffCount === 1 ? "is" : "are"} blocked from full-scope duty.{" "}
+          <button className="btn btn-ghost btn-sm" onClick={openBlocked} style={{ marginLeft: 4 }}>View details</button>
+        </div>
+      )}
 
       {/* Today's Staff by Category / Shift Distribution / Compliance Alerts */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>

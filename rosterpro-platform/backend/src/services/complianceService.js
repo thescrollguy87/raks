@@ -261,7 +261,12 @@ async function getComplianceSummary(userId) {
     listQualificationsForUser(userId), listLicensesForUser(userId),
     listTrainingForUser(userId), listAuthorizationsForUser(userId),
   ]);
-  const hasExpired = [...quals, ...licenses].some(r => r.status === "EXPIRED");
+  // An expired authorization blocks duty the same as an expired
+  // qualification or license — a staff member no longer authorized for a
+  // scope isn't safe to roster for it just because their base quals are
+  // still current. (Training records don't gate duty the same way — a
+  // lapsed training course is a renewal reminder, not a duty block.)
+  const hasExpired = [...quals, ...licenses, ...authorizations].some(r => r.status === "EXPIRED");
   return { qualifications: quals, licenses, trainings, authorizations, isBlocked: hasExpired };
 }
 

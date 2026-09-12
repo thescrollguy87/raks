@@ -68,6 +68,22 @@ const authorization = {
   update: (id, data) => prisma.staffAuthorization.update({ where: { id }, data }),
   softDelete: (id, actorId) => prisma.staffAuthorization.update({ where: { id }, data: { deletedAt: new Date(), updatedById: actorId } }),
   listForUser: (userId) => prisma.staffAuthorization.findMany({ where: { userId, deletedAt: null }, orderBy: { grantedDate: "desc" } }),
+  // expiryDate is optional here (an open-ended authorization never
+  // expires) — unlike qualification/license, so this must explicitly
+  // exclude the nulls rather than relying on `lte` to do it.
+  listExpiringWithin: (days, scope = {}) => {
+    const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const { stationId, stationIdIn } = scope;
+    return prisma.staffAuthorization.findMany({
+      where: {
+        deletedAt: null, expiryDate: { not: null, lte: cutoff },
+        ...(stationId ? { user: { stationId } } : {}),
+        ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
+      },
+      include: { user: { select: { id: true, fullName: true, email: true, stationId: true } } },
+      orderBy: { expiryDate: "asc" },
+    });
+  },
 };
 
 module.exports = { qualification, license, training, authorization };

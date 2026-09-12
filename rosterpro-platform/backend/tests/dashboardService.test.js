@@ -86,12 +86,17 @@ describe("dashboardService.dgcaComplianceWidget", () => {
     rosterRepo.getActiveStaffContacts.mockResolvedValue([
       { id: "s1", fullName: "A" }, { id: "s2", fullName: "B" }, { id: "s3", fullName: "C" }, { id: "s4", fullName: "D" },
     ]);
-    complianceService.getComplianceSummary.mockImplementation(async (id) => ({ isBlocked: id === "s2" }));
+    complianceService.getComplianceSummary.mockImplementation(async (id) => ({
+      isBlocked: id === "s2",
+      qualifications: id === "s2" ? [{ qualCode: "B737 B1", status: "EXPIRED" }] : [],
+      licenses: [], authorizations: [],
+    }));
 
     const result = await dashboardService.dgcaComplianceWidget("station-1");
 
     expect(result.blockedStaffCount).toBe(1);
     expect(result.complianceRate).toBe(75);
+    expect(result.blockedStaff).toEqual([{ id: "s2", fullName: "B", reasons: ["Qualification B737 B1 expired"] }]);
   });
 });
 
