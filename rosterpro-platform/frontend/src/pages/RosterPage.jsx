@@ -1093,7 +1093,7 @@ const RosterRow = memo(function RosterRow({
           <div className="sn">
             {fullName.split("(")[0].trim().substring(0, 20)}
             {isBlocked && (
-              <span title={`Blocked from duty — ${blockReason || "expired qualification, license, or authorization"}`} style={{ marginLeft: 4, color: "var(--rp-red)" }}>🔒</span>
+              <span title={`Blocked from duty — ${blockReason || "expired compliance record"}`} style={{ marginLeft: 4, color: "var(--rp-red)" }}>🔒</span>
             )}
           </div>
           <div className="sr">{designation}</div>
@@ -1111,11 +1111,20 @@ const RosterRow = memo(function RosterRow({
         const key = cellKey(userId, day);
         const isSelected = !!selectedCells?.has(key);
         const isCutPending = !!cutPendingKeys?.includes(key);
-        const title = def ? `${def.name}${in1 ? `: ${in1}–${out1}${in2 && out2 ? `, ${in2}–${out2}` : ""}` : ""}` : code;
+        const originalTitle = def ? `${def.name}${in1 ? `: ${in1}–${out1}${in2 && out2 ? `, ${in2}–${out2}` : ""}` : ""}` : code;
+        // A display-only overlay — the real shift assignment underneath
+        // (assignmentsByDay, used for weekHours/totalHours above) is never
+        // touched, so as soon as isBlocked next computes false (the
+        // expired record got renewed/updated), the cell goes right back
+        // to showing the actual allocated shift with no restore step needed.
         return (
           <RosterCell
-            key={day} userId={userId} day={day} code={code} colorHex={def?.color || "rgba(180,180,180,.1)"}
-            title={title} in1={in1} out1={out1} in2={in2} out2={out2}
+            key={day} userId={userId} day={day}
+            code={isBlocked ? "🔒" : code}
+            colorHex={isBlocked ? "rgba(220,38,38,.22)" : (def?.color || "rgba(180,180,180,.1)")}
+            title={isBlocked ? `Blocked from duty — ${blockReason || "expired compliance record"}. Originally scheduled: ${originalTitle}` : originalTitle}
+            in1={isBlocked ? null : in1} out1={isBlocked ? null : out1}
+            in2={isBlocked ? null : in2} out2={isBlocked ? null : out2}
             isSelected={isSelected} isCutPending={isCutPending}
             dayClass={dayCellClasses(monthKey, day, todayDayNum)}
             onCellClick={onCellClick} onCellDoubleClick={onCellDoubleClick}

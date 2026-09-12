@@ -89,7 +89,7 @@ describe("dashboardService.dgcaComplianceWidget", () => {
     complianceService.getComplianceSummary.mockImplementation(async (id) => ({
       isBlocked: id === "s2",
       qualifications: id === "s2" ? [{ qualCode: "B737 B1", status: "EXPIRED" }] : [],
-      licenses: [], authorizations: [],
+      licenses: [], trainings: [], authorizations: [],
     }));
 
     const result = await dashboardService.dgcaComplianceWidget("station-1");

@@ -97,11 +97,13 @@ export default function DashboardPage() {
   const expiredItems = [
     ...qualificationExpiry.qualifications.items.filter(q => new Date(q.expiryDate) < new Date()).map(q => ({ primary: q.user.fullName, secondary: `${q.qualCode} — expired ${fmtDate(q.expiryDate)}`, tone: "red" })),
     ...qualificationExpiry.licenses.items.filter(l => new Date(l.expiryDate) < new Date()).map(l => ({ primary: l.user.fullName, secondary: `License ${l.licenseNo} (${l.category}) — expired ${fmtDate(l.expiryDate)}`, tone: "red" })),
+    ...qualificationExpiry.trainings.items.filter(t => new Date(t.expiryDate) < new Date()).map(t => ({ primary: t.user.fullName, secondary: `Training ${t.courseName} — expired ${fmtDate(t.expiryDate)}`, tone: "red" })),
     ...qualificationExpiry.authorizations.items.filter(a => new Date(a.expiryDate) < new Date()).map(a => ({ primary: a.user.fullName, secondary: `Authorization ${a.scope} — expired ${fmtDate(a.expiryDate)}`, tone: "red" })),
   ];
   const expiringItems = [
     ...qualificationExpiry.qualifications.items.filter(q => new Date(q.expiryDate) >= new Date()).map(q => ({ primary: q.user.fullName, secondary: `${q.qualCode} — expires ${fmtDate(q.expiryDate)}`, tone: "amber" })),
     ...qualificationExpiry.licenses.items.filter(l => new Date(l.expiryDate) >= new Date()).map(l => ({ primary: l.user.fullName, secondary: `License ${l.licenseNo} (${l.category}) — expires ${fmtDate(l.expiryDate)}`, tone: "amber" })),
+    ...qualificationExpiry.trainings.items.filter(t => new Date(t.expiryDate) >= new Date()).map(t => ({ primary: t.user.fullName, secondary: `Training ${t.courseName} — expires ${fmtDate(t.expiryDate)}`, tone: "amber" })),
     ...qualificationExpiry.authorizations.items.filter(a => new Date(a.expiryDate) >= new Date()).map(a => ({ primary: a.user.fullName, secondary: `Authorization ${a.scope} — expires ${fmtDate(a.expiryDate)}`, tone: "amber" })),
   ];
   const expiredCount = expiredItems.length;

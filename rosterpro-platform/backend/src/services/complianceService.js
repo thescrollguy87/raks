@@ -261,12 +261,10 @@ async function getComplianceSummary(userId) {
     listQualificationsForUser(userId), listLicensesForUser(userId),
     listTrainingForUser(userId), listAuthorizationsForUser(userId),
   ]);
-  // An expired authorization blocks duty the same as an expired
-  // qualification or license — a staff member no longer authorized for a
-  // scope isn't safe to roster for it just because their base quals are
-  // still current. (Training records don't gate duty the same way — a
-  // lapsed training course is a renewal reminder, not a duty block.)
-  const hasExpired = [...quals, ...licenses, ...authorizations].some(r => r.status === "EXPIRED");
+  // An expired license, training, or authorization blocks duty the same
+  // way an expired qualification does — a staff member with any lapsed
+  // compliance record isn't safe to roster for full-scope duty.
+  const hasExpired = [...quals, ...licenses, ...trainings, ...authorizations].some(r => r.status === "EXPIRED");
   return { qualifications: quals, licenses, trainings, authorizations, isBlocked: hasExpired };
 }
 
@@ -276,11 +274,12 @@ async function getComplianceSummary(userId) {
 // this for every staff member on every load. Returns { [userId]: reasons[] };
 // a userId absent from the map is not blocked.
 async function getBlockedStaffMap(stationId) {
-  const { qualifications, licenses, authorizations } = await repo.bulkExpiredForStation(stationId);
+  const { qualifications, licenses, trainings, authorizations } = await repo.bulkExpiredForStation(stationId);
   const map = {};
   const add = (userId, reason) => { (map[userId] || (map[userId] = [])).push(reason); };
   qualifications.forEach(q => add(q.userId, `Qualification ${q.qualCode} expired`));
   licenses.forEach(l => add(l.userId, `License ${l.licenseNo} (${l.category}) expired`));
+  trainings.forEach(t => add(t.userId, `Training ${t.courseName} expired`));
   authorizations.forEach(a => add(a.userId, `Authorization ${a.scope} expired`));
   return map;
 }

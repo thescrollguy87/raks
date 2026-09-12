@@ -13,13 +13,19 @@ const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
 // ── 1. Qualification expiry ──────────────────────────────────────────────
 
 async function qualificationExpiryWidget(stationId, windowDays = 30) {
-  const [quals, licenses, authorizations] = await Promise.all([
+  const [quals, licenses, trainings, authorizations] = await Promise.all([
     complianceRepo.qualification.listExpiringWithin(windowDays, { stationId }),
     complianceRepo.license.listExpiringWithin(windowDays, { stationId }),
+    complianceRepo.training.listExpiringWithin(windowDays, { stationId }),
     complianceRepo.authorization.listExpiringWithin(windowDays, { stationId }),
   ]);
 
   const now = new Date();
+  // Training uses validUntil rather than expiryDate — normalize both to
+  // the same {expiryDate} shape the caller works with, since the field
+  // itself represents the same thing (the date the record stops being
+  // valid) under a different name.
+  const trainingItems = trainings.map(t => ({ ...t, expiryDate: t.validUntil }));
   const countByStatus = (items) => ({
     expired: items.filter(i => i.expiryDate < now).length,
     expiring: items.filter(i => i.expiryDate >= now).length,
@@ -28,10 +34,11 @@ async function qualificationExpiryWidget(stationId, windowDays = 30) {
   return {
     qualifications: { ...countByStatus(quals), items: quals },
     licenses: { ...countByStatus(licenses), items: licenses },
-    // An expired authorization blocks full-scope duty the same way an
-    // expired qualification/license does (see complianceService.
-    // getComplianceSummary) — it belongs in the same expiry picture, not
-    // a separate one a caller could forget to check.
+    // An expired license, training, or authorization blocks full-scope
+    // duty the same way an expired qualification does (see
+    // complianceService.getComplianceSummary) — they belong in the same
+    // expiry picture, not one a caller could forget to check.
+    trainings: { ...countByStatus(trainingItems), items: trainingItems },
     authorizations: { ...countByStatus(authorizations), items: authorizations },
     windowDays,
   };
@@ -159,7 +166,7 @@ async function dgcaComplianceWidget(stationId) {
   const summaries = await Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id)));
 
   // Real reasons, not just a name — every expired qualification/license/
-  // authorization that caused the block (same three record types
+  // training/authorization that caused the block (same four record types
   // complianceService.getComplianceSummary itself checks), so a caller can
   // show what's actually wrong instead of just "blocked".
   const blockedStaff = staff
@@ -169,6 +176,7 @@ async function dgcaComplianceWidget(stationId) {
       const reasons = [
         ...sum.qualifications.filter(q => q.status === "EXPIRED").map(q => `Qualification ${q.qualCode} expired`),
         ...sum.licenses.filter(l => l.status === "EXPIRED").map(l => `License ${l.licenseNo} (${l.category}) expired`),
+        ...sum.trainings.filter(t => t.status === "EXPIRED").map(t => `Training ${t.courseName} expired`),
         ...sum.authorizations.filter(a => a.status === "EXPIRED").map(a => `Authorization ${a.scope} expired`),
       ];
       return { id: s.id, fullName: s.fullName, reasons };

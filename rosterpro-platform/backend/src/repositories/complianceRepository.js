@@ -59,6 +59,21 @@ const training = {
   update: (id, data) => prisma.training.update({ where: { id }, data }),
   softDelete: (id, actorId) => prisma.training.update({ where: { id }, data: { deletedAt: new Date(), updatedById: actorId } }),
   listForUser: (userId) => prisma.training.findMany({ where: { userId, deletedAt: null }, orderBy: { completedDate: "desc" } }),
+  // validUntil is optional here (an open-ended training never expires) —
+  // same nullable-date handling as authorization.listExpiringWithin.
+  listExpiringWithin: (days, scope = {}) => {
+    const cutoff = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+    const { stationId, stationIdIn } = scope;
+    return prisma.training.findMany({
+      where: {
+        deletedAt: null, validUntil: { not: null, lte: cutoff },
+        ...(stationId ? { user: { stationId } } : {}),
+        ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
+      },
+      include: { user: { select: { id: true, fullName: true, email: true, stationId: true } } },
+      orderBy: { validUntil: "asc" },
+    });
+  },
 };
 
 // ── Staff authorizations ─────────────────────────────────────────────────────
@@ -86,11 +101,11 @@ const authorization = {
   },
 };
 
-// Bulk "who at this station is currently blocked, and why" — three plain
+// Bulk "who at this station is currently blocked, and why" — four plain
 // queries regardless of staff count, instead of running the equivalent of
 // getComplianceSummary (4 queries each) once per staff member. Built for
 // the Shift Roster grid, which needs this for every staff row on every
-// load and can't afford an N+1 there. Filters on the raw expiryDate
+// load and can't afford an N+1 there. Filters on the raw expiry date
 // (same rule complianceService.deriveStatus uses), not the persisted
 // Qualification.status column, so it can't drift from what a scheduled
 // status-refresh job has or hasn't caught up on yet.
@@ -105,11 +120,17 @@ function bulkExpiredForStation(stationId) {
       where: { deletedAt: null, expiryDate: { lt: now }, user: { stationId } },
       select: { userId: true, licenseNo: true, category: true },
     }),
+    // validUntil is optional here (an open-ended training never expires)
+    // — same nullable-date handling as authorizations below.
+    prisma.training.findMany({
+      where: { deletedAt: null, validUntil: { not: null, lt: now }, user: { stationId } },
+      select: { userId: true, courseName: true },
+    }),
     prisma.staffAuthorization.findMany({
       where: { deletedAt: null, expiryDate: { not: null, lt: now }, user: { stationId } },
       select: { userId: true, scope: true },
     }),
-  ]).then(([qualifications, licenses, authorizations]) => ({ qualifications, licenses, authorizations }));
+  ]).then(([qualifications, licenses, trainings, authorizations]) => ({ qualifications, licenses, trainings, authorizations }));
 }
 
 module.exports = { qualification, license, training, authorization, bulkExpiredForStation };
