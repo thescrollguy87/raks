@@ -21,7 +21,7 @@ function HowToUse({ children }) {
 // drift apart. `onDayClick`, when passed, replaces the plain expand/
 // collapse row click with the caller's own handler (used by the sidebar
 // page to open that day's Manpower Allocation panel instead).
-export default function FlightScheduleManager({ stationId, monthKey, onMonthKeyChange, onDayClick, expandedDay, renderDayExtra }) {
+export default function FlightScheduleManager({ stationId, monthKey, onMonthKeyChange, onDayClick, expandedDay, renderDayExtra, onScheduleChange }) {
   const [internalMonthKey, setInternalMonthKey] = useState(new Date().toISOString().slice(0, 7));
   const [schedule, setSchedule] = useState(null);
   const [file, setFile] = useState(null);
@@ -40,7 +40,10 @@ export default function FlightScheduleManager({ stationId, monthKey, onMonthKeyC
 
   const load = useCallback(() => {
     if (!stationId) return;
-    flightScheduleApi.getFlightSchedule(stationId, year, month).then(setSchedule).catch(err => setError(err.message));
+    flightScheduleApi.getFlightSchedule(stationId, year, month)
+      .then(s => { setSchedule(s); onScheduleChange?.(s); })
+      .catch(err => setError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stationId, year, month]);
   useEffect(load, [load]);
   useEffect(() => { if (expandedDay === undefined) setInternalExpandedDay(null); }, [effectiveMonthKey, expandedDay]);

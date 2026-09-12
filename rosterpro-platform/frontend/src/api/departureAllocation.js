@@ -11,3 +11,7 @@ export function autoAllocateDay(stationId, year, month, day) {
 export function assignManual(input) {
   return api.post("/api/departure-allocation/assign", input);
 }
+
+export function getMonthManpowerSummary(stationId, year, month) {
+  return api.get("/api/departure-allocation/month-summary", { stationId, year, month });
+}

@@ -124,25 +124,188 @@ function DayManpowerAllocation({ stationId, year, month, day }) {
   );
 }
 
+function KpiCard({ tone, icon, label, value, sub }) {
+  return (
+    <div className={`stat-card ${tone}`}>
+      <div className="stat-label">{icon} {label}</div>
+      <div className="stat-value">{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "var(--text-dim)", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+function Widget({ title, children }) {
+  return (
+    <div className="card">
+      <div className="card-title">{title}</div>
+      <div style={{ marginTop: 4 }}>{children}</div>
+    </div>
+  );
+}
+
+// 3-segment donut for the month's days — Fully Covered / Partially Covered
+// / Uncovered — same segmented-circle technique used elsewhere in the app.
+const COVERAGE_COLORS = { full: "#22C55E", partial: "#FBBF24", none: "#E53935" };
+function CoverageDonut({ full, partial, none }) {
+  const total = full + partial + none;
+  const size = 100, strokeWidth = 14;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const entries = [
+    { key: "full", label: "Fully Covered", value: full },
+    { key: "partial", label: "Partial", value: partial },
+    { key: "none", label: "Uncovered", value: none },
+  ];
+  let offsetAccum = 0;
+  const segments = entries.filter(e => e.value > 0).map(e => {
+    const frac = total > 0 ? e.value / total : 0;
+    const len = frac * circumference;
+    const seg = { ...e, dasharray: `${len} ${circumference - len}`, dashoffset: -offsetAccum };
+    offsetAccum += len;
+    return seg;
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+      <div className="gauge-ring" style={{ width: size, height: size, flexShrink: 0 }}>
+        <svg width={size} height={size} style={{ transform: "rotate(-90deg)" }}>
+          <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke="rgba(15,23,42,.06)" strokeWidth={strokeWidth} />
+          {segments.map(s => (
+            <circle
+              key={s.key} cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={COVERAGE_COLORS[s.key]} strokeWidth={strokeWidth}
+              strokeDasharray={s.dasharray} strokeDashoffset={s.dashoffset}
+            />
+          ))}
+        </svg>
+        <div className="gauge-ring-value" style={{ fontSize: 18 }}>{total}</div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {entries.map(e => (
+          <div key={e.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+            <span style={{ width: 8, height: 8, borderRadius: "50%", background: COVERAGE_COLORS[e.key], display: "inline-block" }} />
+            <span style={{ color: "var(--text-dim)", minWidth: 90 }}>{e.label}</span>
+            <span style={{ fontWeight: 700 }}>{e.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ManpowerCoverageTab({ stationId, year, month }) {
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!stationId) return;
+    setSummary(null);
+    setError("");
+    departureAllocationApi.getMonthManpowerSummary(stationId, year, month)
+      .then(setSummary)
+      .catch(err => setError(err.message));
+  }, [stationId, year, month]);
+
+  if (error) return <div className="ab red">{error}</div>;
+  if (!summary) return <div className="card">Loading manpower coverage…</div>;
+
+  if (summary.totalDepartures === 0) {
+    return <div className="card"><div className="empty-note">No departures found this month — import a Turn Report on the Flight Schedule tab first.</div></div>;
+  }
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14 }}>
+      <Widget title="🗓 Day Coverage Breakdown">
+        <CoverageDonut full={summary.fullyCoveredDays} partial={summary.partialDays} none={summary.uncoveredDays} />
+      </Widget>
+      <Widget title="📋 Per-Day Fill Status">
+        <div style={{ overflowX: "auto", maxHeight: 380, overflowY: "auto" }}>
+          <table className="dc-table">
+            <thead>
+              <tr><th style={{ textAlign: "left" }}>Day</th><th>Departures</th><th>Releaser Filled</th><th>Support Filled</th></tr>
+            </thead>
+            <tbody>
+              {summary.byDay.filter(d => d.departures > 0).map(d => (
+                <tr key={d.day}>
+                  <td style={{ textAlign: "left", fontWeight: 700 }}>{d.day}</td>
+                  <td>{d.departures}</td>
+                  <td><span className={`metric-badge ${d.releaserFilled === d.departures ? "green" : d.releaserFilled === 0 ? "red" : "amber"}`}>{d.releaserFilled}/{d.departures}</span></td>
+                  <td><span className={`metric-badge ${d.supportFilled === d.departures ? "green" : d.supportFilled === 0 ? "red" : "amber"}`}>{d.supportFilled}/{d.departures}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Widget>
+    </div>
+  );
+}
+
 export default function FlightSchedulePage() {
   const { stationId, currentStation } = useStation();
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   const [expandedDay, setExpandedDay] = useState(null);
+  const [activeTab, setActiveTab] = useState("schedule");
+  const [summary, setSummary] = useState(null);
+  const [manpowerKpi, setManpowerKpi] = useState(null);
 
   usePageHeader({ title: "Flight Schedule", subtitle: currentStation ? `${currentStation.name} · Turn Report import & departure manpower` : "" });
 
   const [year, month] = monthKey.split("-").map(Number);
 
+  const refreshManpowerKpi = useCallback(() => {
+    if (!stationId) return;
+    setManpowerKpi(null);
+    departureAllocationApi.getMonthManpowerSummary(stationId, year, month).then(setManpowerKpi).catch(() => setManpowerKpi(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stationId, year, month]);
+
+  useEffect(() => { refreshManpowerKpi(); }, [refreshManpowerKpi]);
+
+  // Fired by FlightScheduleManager whenever it (re)loads the schedule —
+  // including right after a new Turn Report import — so the page-level KPI
+  // row and the Manpower Coverage tab both reflect the new data without a
+  // second, independent fetch of the same schedule the manager already
+  // pulled (and without a manual "reload" affordance the manager itself
+  // doesn't need).
+  const handleScheduleChange = useCallback((s) => {
+    setSummary(s.imported ? s.summary : null);
+    refreshManpowerKpi();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshManpowerKpi]);
+
   return (
-    <FlightScheduleManager
-      stationId={stationId}
-      monthKey={monthKey}
-      onMonthKeyChange={setMonthKey}
-      expandedDay={expandedDay}
-      onDayClick={setExpandedDay}
-      renderDayExtra={(d) => (
-        <DayManpowerAllocation stationId={stationId} year={year} month={month} day={d} />
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 }}>
+        <KpiCard tone="sky" icon="🗓" label="Operating Days" value={summary ? `${summary.operatingDays}/${summary.daysInMonth}` : "—"} sub="This month" />
+        <KpiCard tone="sky" icon="✈️" label="Total Movements" value={summary ? summary.totalMovements : "—"} sub="Takeoffs + landings" />
+        <KpiCard tone="neutral" icon="📊" label="Avg Daily Movements" value={summary ? summary.avgDailyMovements : "—"} sub="Per operating day" />
+        <KpiCard tone="amber" icon="📈" label="Peak Daily Movements" value={summary ? summary.peakDailyMovements : "—"} sub={summary?.peakDate || "—"} />
+        <KpiCard
+          tone={manpowerKpi?.coveragePct == null ? "neutral" : manpowerKpi.coveragePct >= 90 ? "green" : manpowerKpi.coveragePct >= 70 ? "amber" : "red"}
+          icon="👥" label="Manpower Coverage" value={manpowerKpi?.coveragePct != null ? `${manpowerKpi.coveragePct}%` : "—"}
+          sub={manpowerKpi ? `${manpowerKpi.releaserFilled + manpowerKpi.supportFilled}/${manpowerKpi.totalDepartures * 2} slots filled` : "No departures"}
+        />
+      </div>
+
+      <div className="view-toggle" style={{ marginBottom: 14 }}>
+        <button className={`view-toggle-btn ${activeTab === "schedule" ? "active" : ""}`} onClick={() => setActiveTab("schedule")}>✈ Flight Schedule</button>
+        <button className={`view-toggle-btn ${activeTab === "manpower" ? "active" : ""}`} onClick={() => setActiveTab("manpower")}>👥 Manpower Coverage</button>
+      </div>
+
+      {activeTab === "schedule" ? (
+        <FlightScheduleManager
+          stationId={stationId}
+          monthKey={monthKey}
+          onMonthKeyChange={setMonthKey}
+          expandedDay={expandedDay}
+          onDayClick={setExpandedDay}
+          onScheduleChange={handleScheduleChange}
+          renderDayExtra={(d) => (
+            <DayManpowerAllocation stationId={stationId} year={year} month={month} day={d} />
+          )}
+        />
+      ) : (
+        <ManpowerCoverageTab stationId={stationId} year={year} month={month} />
       )}
-    />
+    </div>
   );
 }

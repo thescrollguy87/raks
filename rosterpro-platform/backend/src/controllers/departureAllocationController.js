@@ -18,4 +18,10 @@ const manualAssign = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { getDay, autoAllocate, manualAssign };
+const getMonthSummary = asyncHandler(async (req, res) => {
+  const { stationId, year, month } = req.query;
+  const result = await service.getMonthManpowerSummary(stationId, year, month, req.user);
+  res.json(result);
+});
+
+module.exports = { getDay, autoAllocate, manualAssign, getMonthSummary };
