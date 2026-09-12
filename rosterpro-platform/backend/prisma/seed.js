@@ -62,11 +62,15 @@ const ROLE_MATRIX = {
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
     "billing:*", // the Billing page is Airline Admin only — no other role gets this
   ],
+  // Full parity with Airline Admin's permission set (everything except
+  // billing:*, which stays Airline Admin/Super Admin only) — Station
+  // Manager's actual reach still stops at their own station, enforced
+  // entirely by assertOwnStation/resolveStationScope in
+  // utils/stationScope.js, not by narrowing this permission list.
   STATION_MANAGER: [
-    "roster:*", "shift:*", "staff:read", "staff:update", "leave:*",
-    "qualification:read", "license:read", "training:read", "store:read",
-    "audit_finding:*", "capa:*", "flight:read", "engineering_delay:*",
-    "reports:*", "users:read", "station:read", "audit_trail:read",
+    "roster:*", "shift:*", "staff:*", "leave:*", "qualification:*", "license:*",
+    "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
+    "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
   ],
   LMM: [ // Line Maintenance Manager
     "roster:read", "roster:update", "roster:publish", "shift:*", "staff:read",
