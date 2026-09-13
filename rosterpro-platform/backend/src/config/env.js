@@ -82,7 +82,7 @@ module.exports = {
   // never sent to, or read by, the frontend in any form.
   gemini: {
     apiKey: process.env.GEMINI_API_KEY,
-    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+    model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
   },
 
   billing: {

@@ -22,9 +22,20 @@ function buildSystemPrompt({ stationName, stationIataCode, airlineName, otherSta
   const otherList = otherStations.length
     ? otherStations.map(s => `${s.name} (${s.iataCode})`).join(", ")
     : "none — this is the only active station on this airline";
+  // Without an anchor date the model has no way to resolve "tomorrow",
+  // "tonight", or "Tuesday" — observed live: asking about "tomorrow"
+  // without this sent the model flailing through unrelated tool calls
+  // trying to guess what date "tomorrow" even was. Resolving a relative
+  // date against a known today is translation, not the "date arithmetic"
+  // the hard rule below bans (computing rest-gaps, shift math, etc.).
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0, 10);
+  const weekday = now.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 
   return [
     "You are the Roster Assistant inside RosterPro, a line-maintenance staff rostering platform for an airline's ground/maintenance stations.",
+    "",
+    `TODAY'S DATE is ${todayStr} (a ${weekday}). Use this to resolve any relative date the user gives you (tomorrow, tonight, this Tuesday, next week) into an exact YYYY-MM-DD before calling a tool — every tool requires an exact date, never a relative phrase.`,
     "",
     `CURRENT SESSION CONTEXT — Airline: "${airlineName}". Station: "${stationName}" (${stationIataCode}).`,
     `Every tool call you make is automatically scoped ONLY to this station — you cannot see or affect any other station's data no matter what arguments you pass.`,
@@ -119,8 +130,19 @@ async function askAssistant(input, actor, req) {
     }
     toolCallsLog.push({ name, args: args || {}, result: toolResult });
 
-    contents.push({ role: "model", parts: [{ functionCall: { name, args: args || {} } }] });
-    contents.push({ role: "function", parts: [{ functionResponse: { name, response: { name, content: toolResult } } }] });
+    // Two things confirmed only by hitting the live API (neither is
+    // obvious from the function-calling docs' basic examples):
+    // 1. This model version rejects role "function" outright ("Role
+    //    'function' is not supported... USER, ASSISTANT, ... MODEL,
+    //    USER") — a functionResponse part goes on a "user" turn instead.
+    // 2. The model's own functionCall part carries a `thoughtSignature`
+    //    sibling field that MUST be echoed back verbatim on replay, or
+    //    the next call fails with "Function call is missing a
+    //    thought_signature" — so the model's turn is replayed using
+    //    result.parts AS RETURNED, never a hand-rebuilt {functionCall}
+    //    object that would silently drop it.
+    contents.push({ role: "model", parts: result.parts });
+    contents.push({ role: "user", parts: [{ functionResponse: { name, response: { name, content: toolResult } } }] });
   }
 
   if (!finalAnswer) {
