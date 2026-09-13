@@ -76,6 +76,15 @@ module.exports = {
     webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
   },
 
+  // Optional like Razorpay/SMTP/Twilio above — the app boots fine without
+  // it; geminiClient.js throws a clear error only when the Roster
+  // Assistant is actually asked something. Server-side only: this key is
+  // never sent to, or read by, the frontend in any form.
+  gemini: {
+    apiKey: process.env.GEMINI_API_KEY,
+    model: process.env.GEMINI_MODEL || "gemini-2.5-flash",
+  },
+
   billing: {
     pricePerStaffPaise: parseInt(process.env.BILLING_PRICE_PER_STAFF_PAISE || "10000", 10), // Rs.100
     trialMonths: parseInt(process.env.BILLING_TRIAL_MONTHS || "2", 10),

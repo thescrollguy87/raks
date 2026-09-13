@@ -2,6 +2,7 @@ import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import BillingBanner from "./BillingBanner.jsx";
+import RosterAssistantWidget from "../chat/RosterAssistantWidget.jsx";
 import { PageHeaderProvider } from "../../store/PageHeaderContext.jsx";
 
 // Matches the prototype's <div class="app"><aside>...</aside><main
@@ -21,6 +22,7 @@ export default function AppLayout() {
           </div>
         </main>
       </div>
+      <RosterAssistantWidget />
     </PageHeaderProvider>
   );
 }

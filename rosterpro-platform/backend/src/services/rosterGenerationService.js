@@ -111,6 +111,22 @@ async function buildPatternByUser(stationId, staff, airlineId) {
   return result;
 }
 
+// ruleEngine.js's checkers (checkHardRuleCompliance, computeSoftRuleScore)
+// expect shiftDefsByCode as { code: { type, start, end, breakMin } } — a
+// different shape from rosterGenerationAlgorithm.js's own shiftType(),
+// which expects { code: typeString } directly. Covers every code (not
+// just M/A/N) since a staff member's shifts can include pattern codes
+// (G, G1, ...), O, and L, all of which these checkers read. Exported so the
+// Roster Assistant's compliance-check tool can call the exact same real
+// checkHardRuleCompliance() this file uses, instead of reimplementing it.
+function buildRuleShiftDefsByCode(allShiftDefs) {
+  const ruleShiftDefsByCode = {};
+  allShiftDefs.forEach(d => {
+    ruleShiftDefsByCode[d.code] = { type: d.type, start: d.startTime, end: d.endTime, breakMin: d.breakMin };
+  });
+  return ruleShiftDefsByCode;
+}
+
 // Gathers everything the Workload Config / Rule Builder / Flight Schedule
 // tabs feed into generation: the Mandatory Minimum Coverage grid, the
 // enabled night_only/no_night hard rules (for proactive enforcement) plus
@@ -143,16 +159,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     if (def) shiftDefsFull[code] = { start: def.startTime, end: def.endTime, type: def.type };
   });
 
-  // ruleEngine.js's checkers (checkHardRuleCompliance, computeSoftRuleScore)
-  // expect shiftDefsByCode as { code: { type, start, end, breakMin } } — a
-  // different shape from rosterGenerationAlgorithm.js's own shiftType(),
-  // which expects { code: typeString } directly. Covers every code (not
-  // just M/A/N) since a staff member's shifts can include pattern codes
-  // (G, G1, ...), O, and L, all of which these checkers read.
-  const ruleShiftDefsByCode = {};
-  allShiftDefs.forEach(d => {
-    ruleShiftDefsByCode[d.code] = { type: d.type, start: d.startTime, end: d.endTime, breakMin: d.breakMin };
-  });
+  const ruleShiftDefsByCode = buildRuleShiftDefsByCode(allShiftDefs);
 
   const baseCoverage = {};
   ["M", "A", "N"].forEach(sh => {
@@ -407,4 +414,12 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   };
 }
 
-module.exports = { generateRoster, buildLeaveByUserDay };
+module.exports = {
+  generateRoster, buildLeaveByUserDay,
+  // Exported additionally for the Roster Assistant chat tools (see
+  // chatToolsService.js) to compose real, already-correct demand/rule
+  // logic instead of re-deriving any of it — the CRITICAL architectural
+  // rule for that feature is that no roster math ever happens outside
+  // these already-tested functions.
+  buildWorkloadContext, buildStaffWithShifts, buildRuleShiftDefsByCode, daysInMonth, dateAt, yearMonth,
+};

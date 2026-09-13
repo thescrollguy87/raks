@@ -3,6 +3,7 @@ import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import * as auditApi from "../api/audit.js";
 import * as staffApi from "../api/staff.js";
+import * as chatApi from "../api/chat.js";
 
 // Every entityType string actually passed to auditTrail.recordCreate/
 // recordUpdate/recordDelete across the backend — kept as a flat list here
@@ -16,7 +17,7 @@ const ENTITY_TYPES = [
 ];
 
 export default function ChangeHistoryPage() {
-  const [tab, setTab] = useState("feed"); // feed | detailed
+  const [tab, setTab] = useState("feed"); // feed | detailed | assistant
   usePageHeader({ title: "Change History", subtitle: "Recent activity across the platform" });
 
   return (
@@ -24,8 +25,134 @@ export default function ChangeHistoryPage() {
       <div className="view-toggle" style={{ marginBottom: 14, width: "fit-content" }}>
         <button className={`view-toggle-btn${tab === "feed" ? " active" : ""}`} onClick={() => setTab("feed")}>Activity Feed</button>
         <button className={`view-toggle-btn${tab === "detailed" ? " active" : ""}`} onClick={() => setTab("detailed")}>Detailed Changes</button>
+        <button className={`view-toggle-btn${tab === "assistant" ? " active" : ""}`} onClick={() => setTab("assistant")}>Roster Assistant</button>
       </div>
-      {tab === "feed" ? <ActivityFeedTab /> : <DetailedChangesTab />}
+      {tab === "feed" ? <ActivityFeedTab /> : tab === "detailed" ? <DetailedChangesTab /> : <RosterAssistantLogTab />}
+    </div>
+  );
+}
+
+// Every logged Roster Assistant exchange — question, final answer, and
+// exactly which real tool(s) produced it — same station-scoping contract
+// as DetailedChangesTab's GET /api/audit/trail (see auditController's
+// resolveStationScope), just against GET /api/chat/log instead.
+function RosterAssistantLogTab() {
+  const { stations } = useStation();
+  const [filters, setFilters] = useState({ from: "", to: "", stationId: "" });
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [expandedId, setExpandedId] = useState(null);
+
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    const params = { page, pageSize: 50 };
+    if (filters.from) params.from = new Date(filters.from + "T00:00:00.000Z").toISOString();
+    if (filters.to) params.to = new Date(filters.to + "T23:59:59.999Z").toISOString();
+    if (filters.stationId) params.stationId = filters.stationId;
+    chatApi.listConversationLog(params)
+      .then(setData)
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [page, filters]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function updateFilter(key, value) {
+    setPage(1);
+    setFilters(f => ({ ...f, [key]: value }));
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">🤖 Roster Assistant Log {data && <span className="tag">{data.total} conversation(s)</span>}</div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "10px 0" }}>
+        <div className="fg" style={{ maxWidth: 150 }}>
+          <label className="fl">From</label>
+          <input className="fi" type="date" value={filters.from} onChange={(e) => updateFilter("from", e.target.value)} />
+        </div>
+        <div className="fg" style={{ maxWidth: 150 }}>
+          <label className="fl">To</label>
+          <input className="fi" type="date" value={filters.to} onChange={(e) => updateFilter("to", e.target.value)} />
+        </div>
+        {stations.length > 1 && (
+          <div className="fg" style={{ maxWidth: 180 }}>
+            <label className="fl">Station</label>
+            <select className="fi" value={filters.stationId} onChange={(e) => updateFilter("stationId", e.target.value)}>
+              <option value="">All (my airline)</option>
+              {stations.map(s => <option key={s.id} value={s.id}>{s.iataCode} — {s.name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+
+      {error && <div className="ab red">{error}</div>}
+      {loading ? (
+        <div className="empty-note">Loading…</div>
+      ) : !data || data.items.length === 0 ? (
+        <div className="empty-note">No Roster Assistant conversations match these filters.</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {data.items.map(row => {
+              const isOpen = expandedId === row.id;
+              const toolNames = (row.toolCalls || []).map(t => t.name);
+              return (
+                <div key={row.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                  <div
+                    onClick={() => setExpandedId(isOpen ? null : row.id)}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "7px 4px", fontSize: 11, cursor: "pointer" }}
+                  >
+                    <div>
+                      <span style={{ fontWeight: 700 }}>{isOpen ? "▼" : "▶"} "{row.question}"</span>
+                      {row.outcome !== "answered" && (
+                        <span className="tag" style={{ marginLeft: 6, background: "rgba(220,38,38,.12)", color: "var(--red)" }}>{row.outcome}</span>
+                      )}
+                      {row.outcome === "answered" && toolNames.length === 0 && (
+                        <span className="tag" style={{ marginLeft: 6 }}>no tool used</span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexShrink: 0, marginLeft: 10 }}>
+                      <span style={{ color: "var(--text-dim)" }}>{row.userName || "Unknown"}</span>
+                      <span style={{ color: "var(--text-dim)", fontSize: 10 }}>
+                        {new Date(row.createdAt).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                      </span>
+                    </div>
+                  </div>
+                  {isOpen && (
+                    <div style={{ padding: "4px 4px 10px 20px", fontSize: 10, color: "var(--text-dim)", display: "flex", flexDirection: "column", gap: 5 }}>
+                      <div><strong>Answer:</strong> {row.answer}</div>
+                      {toolNames.length > 0 && (
+                        <div>
+                          <strong>Tool calls:</strong>
+                          {row.toolCalls.map((t, i) => (
+                            <div key={i} style={{ marginTop: 3, paddingLeft: 10 }}>
+                              <div style={{ fontFamily: "var(--mono)", color: "var(--purple)" }}>{t.name}({JSON.stringify(t.args)})</div>
+                              <pre style={{ fontFamily: "var(--mono)", fontSize: 9, whiteSpace: "pre-wrap", wordBreak: "break-word", margin: "2px 0 0" }}>{JSON.stringify(t.result, null, 1)}</pre>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {row.stationId && <div><strong>Station:</strong> {row.stationId}</div>}
+                      {row.ipAddress && <div><strong>IP:</strong> {row.ipAddress}</div>}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {data.totalPages > 1 && (
+            <div style={{ display: "flex", justifyContent: "center", gap: 10, marginTop: 12, fontSize: 11 }}>
+              <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>‹ Prev</button>
+              <span style={{ alignSelf: "center", color: "var(--text-dim)" }}>Page {data.page} of {data.totalPages}</span>
+              <button className="btn btn-ghost btn-sm" disabled={page >= data.totalPages} onClick={() => setPage(p => p + 1)}>Next ›</button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

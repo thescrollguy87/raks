@@ -315,6 +315,7 @@ model User {
   auditFindingsRaised AuditFinding[]  @relation("FindingRaisedBy")
   capaOwned         Capa[]            @relation("CapaOwner")
   activityLogs      ActivityLog[]
+  chatConversationLogs ChatConversationLog[]
   shiftAllocation   StaffShiftAllocation?
   staffGroupMemberships WorkloadRuleStaffGroupMember[]
   departureReleaserAssignments DepartureManpowerAssignment[] @relation("DepartureReleaser")
@@ -1367,4 +1368,39 @@ model ActivityLog {
   @@index([timestamp])
   @@index([stationId])
   @@map("activity_logs")
+}
+
+// Full trace of every Roster Assistant (chat) exchange, for audit — same
+// spirit as ActivityLog/AuditTrail above, but structured enough to show a
+// station/airline admin exactly which real backend functions answered a
+// question and what those functions actually returned, not just a summary
+// line. stationId/airlineId are the SESSION CONTEXT the question was
+// answered under (the currently-selected station at ask time), not
+// necessarily the actor's own home station — an Airline Admin's question
+// about a station they've switched into still needs to show up when that
+// station's manager filters this log.
+model ChatConversationLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userName      String?  // denormalized snapshot in case the user is later deleted
+  stationId     String?
+  airlineId     String?
+  question      String
+  answer        String
+  // [{ name, args, result }] — the exact tool calls Gemini made and what
+  // each real function actually returned, so an answer is traceable rather
+  // than trusted on faith.
+  toolCalls     Json?
+  // Set instead of a normal answer when the question was declined —
+  // "no_matching_tool" | "access_denied" | "station_mismatch" | "error" —
+  // kept distinct from a normal answered conversation for admin review.
+  outcome       String   @default("answered")
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+
+  @@index([userId])
+  @@index([stationId])
+  @@index([createdAt])
+  @@map("chat_conversation_logs")
 }
