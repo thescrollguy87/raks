@@ -3,8 +3,8 @@ const baRosterService = require("../services/baRosterService");
 const asyncHandler = require("../utils/asyncHandler");
 
 const download = asyncHandler(async (req, res) => {
-  const { type, format, stationId, monthKey, year } = req.query;
-  const report = await reportService.generateReport(type, format, { stationId, monthKey, year });
+  const { type, format, stationId, monthKey, year, userId } = req.query;
+  const report = await reportService.generateReport(type, format, { stationId, monthKey, year, userId });
 
   res.setHeader("Content-Type", report.contentType);
   res.setHeader("Content-Disposition", `attachment; filename="${report.filename}"`);

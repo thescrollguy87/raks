@@ -24,9 +24,9 @@ const REPORT_TYPES = {
     renderExcel: (data) => render.toRosterExcelBuffer(data),
   },
   compliance: {
-    title: () => "Compliance Status Report",
-    fetch: (p) => reportData.getComplianceReportData(p.stationId),
-    filename: (p) => `compliance_${p.stationId}`,
+    title: (p) => p.userId ? "Compliance Status Report — 1 staff member" : "Compliance Status Report",
+    fetch: (p) => reportData.getComplianceReportData(p.stationId, { userId: p.userId }),
+    filename: (p) => p.userId ? `compliance_${p.userId}` : `compliance_${p.stationId}`,
   },
   leave: {
     title: (p) => `Leave Balance — ${p.year}`,

@@ -10,6 +10,11 @@ const UNFILLED_REASON_LABEL = {
   all_busy_with_clash: "everyone eligible is already committed to another departure clashing within the configured window",
 };
 
+function initials(name) {
+  if (!name) return "?";
+  return name.split(" ").filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
+}
+
 // One departure row: shows the current releaser (B1 or CM — either
 // qualifies to give a departure) + support (NCS), each editable via a
 // dropdown that calls the manual-assign endpoint directly on change —
@@ -53,23 +58,33 @@ function DepartureRow({ dep, year, month, day, onChanged, busy, setBusy }) {
   const shiftLabel = dep.shiftCode ? `${SHIFT_LABEL[dep.shiftCode] || dep.shiftCode} crew · ${dep.rosterDate}` : "no shift covers this time";
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", flexWrap: "wrap", fontSize: 9 }}>
-      <span style={{ minWidth: 140, color: "var(--text-dim)" }}>{dep.eventType === "turn" ? "🔄" : "🛩"} {dep.flightRef} <span style={{ color: "var(--cyan)" }}>Dep {dep.depTime}</span></span>
-      <span style={{ color: "var(--text-dim)", fontStyle: "italic" }} title="Only staff on this shift's real roster are offered below">from {shiftLabel}</span>
-      <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 130 }} value={releaserValue} disabled={busy} onChange={e => setReleaser(e.target.value)}>
-        <option value="">— Releaser (B1/CM) unassigned —</option>
-        {releaserOptions.map(s => <option key={s.id} value={`${s.category}:${s.id}`}>{s.category} · {s.fullName}</option>)}
-      </select>
-      <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 130 }} value={dep.support?.id || ""} disabled={busy} onChange={e => setSupport(e.target.value)}>
-        <option value="">— Support (NCS) unassigned —</option>
-        {supportOptions.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
-      </select>
-      {!dep.releaser && (
-        <span style={{ color: "var(--amber)" }}>⚠ no releaser — {UNFILLED_REASON_LABEL[dep.releaserUnfilledReason] || "unfilled"}</span>
-      )}
-      {!dep.support && (
-        <span style={{ color: "var(--amber)" }}>⚠ no support — {UNFILLED_REASON_LABEL[dep.supportUnfilledReason] || "unfilled"}</span>
-      )}
+    <div style={{ padding: "8px 4px", borderBottom: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 5 }}>
+        <span style={{ fontSize: 10, fontWeight: 700 }}>{dep.eventType === "turn" ? "🔄" : "🛩"} {dep.flightRef}</span>
+        <span style={{ fontSize: 9, color: "var(--text-dim)" }}>Dep {dep.depTime} · from {shiftLabel}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div className="u-avatar" style={{ width: 22, height: 22, fontSize: 8 }}>{dep.releaser ? initials(dep.releaser.fullName) : "?"}</div>
+          <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 150 }} value={releaserValue} disabled={busy} onChange={e => setReleaser(e.target.value)}>
+            <option value="">— Releaser (B1/CM) unassigned —</option>
+            {releaserOptions.map(s => <option key={s.id} value={`${s.category}:${s.id}`}>{s.category} · {s.fullName}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          <div className="u-avatar" style={{ width: 22, height: 22, fontSize: 8 }}>{dep.support ? initials(dep.support.fullName) : "?"}</div>
+          <select className="fi" style={{ fontSize: 9, padding: "2px 4px", minWidth: 150 }} value={dep.support?.id || ""} disabled={busy} onChange={e => setSupport(e.target.value)}>
+            <option value="">— Support (NCS) unassigned —</option>
+            {supportOptions.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
+          </select>
+        </div>
+        {!dep.releaser && (
+          <span style={{ fontSize: 9, color: "var(--amber)" }}>⚠ no releaser — {UNFILLED_REASON_LABEL[dep.releaserUnfilledReason] || "unfilled"}</span>
+        )}
+        {!dep.support && (
+          <span style={{ fontSize: 9, color: "var(--amber)" }}>⚠ no support — {UNFILLED_REASON_LABEL[dep.supportUnfilledReason] || "unfilled"}</span>
+        )}
+      </div>
     </div>
   );
 }

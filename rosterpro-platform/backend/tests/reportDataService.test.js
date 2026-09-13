@@ -55,8 +55,8 @@ describe("reportDataService.getComplianceReportData", () => {
       { id: "s2", fullName: "Alice Staff" },
     ]);
     complianceService.getComplianceSummary.mockImplementation(async (id) => {
-      if (id === "s1") return { qualifications: [{ qualCode: "B737", expiryDate: new Date("2027-01-01"), status: "VALID" }], licenses: [], trainings: [] };
-      return { qualifications: [{ qualCode: "A320", expiryDate: new Date("2026-01-01"), status: "EXPIRED" }], licenses: [], trainings: [] };
+      if (id === "s1") return { qualifications: [{ qualCode: "B737", expiryDate: new Date("2027-01-01"), status: "VALID" }], licenses: [], trainings: [], authorizations: [] };
+      return { qualifications: [{ qualCode: "A320", expiryDate: new Date("2026-01-01"), status: "EXPIRED" }], licenses: [], trainings: [], authorizations: [] };
     });
 
     const report = await reportDataService.getComplianceReportData("station-1");

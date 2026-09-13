@@ -109,8 +109,15 @@ async function getRosterTemplateData(stationId, monthKey) {
 // One row per qualification/license/training/authorization record, across
 // every active staff member at the station — the "who's compliant, who
 // isn't, and by when" report a quality manager actually needs to print.
-async function getComplianceReportData(stationId) {
-  const staff = await rosterRepo.getActiveStaffContacts(stationId);
+async function getComplianceReportData(stationId, { userId } = {}) {
+  const allStaff = await rosterRepo.getActiveStaffContacts(stationId);
+  // Optional single-staff narrowing (e.g. the "Generate Report" button on
+  // one person's Qualifications detail view) — a non-matching/missing
+  // userId here would silently produce an empty report rather than fail,
+  // so the caller is expected to have confirmed the id belongs to this
+  // station first (the frontend only ever passes an id from staff already
+  // loaded for this same station).
+  const staff = userId ? allStaff.filter(s => s.id === userId) : allStaff;
   const header = ["Staff", "Type", "Item", "Expiry Date", "Status"];
   const rows = [];
 
@@ -125,13 +132,16 @@ async function getComplianceReportData(stationId) {
     for (const t of summary.trainings) {
       rows.push([s.fullName, "Training", t.courseName, t.validUntil?.toISOString().slice(0, 10) || "No expiry", t.status]);
     }
+    for (const a of summary.authorizations) {
+      rows.push([s.fullName, "Authorization", a.scope, a.expiryDate?.toISOString().slice(0, 10) || "No expiry", a.status]);
+    }
   }
 
   // Most urgent first — EXPIRED, then EXPIRING, then VALID, alphabetical within each.
   const order = { EXPIRED: 0, EXPIRING: 1, VALID: 2 };
   rows.sort((a, b) => (order[a[4]] - order[b[4]]) || a[0].localeCompare(b[0]));
 
-  return { header, rows, meta: { stationId, staffCount: staff.length, recordCount: rows.length } };
+  return { header, rows, meta: { stationId, userId: userId || null, staffCount: staff.length, recordCount: rows.length } };
 }
 
 // ── Leave balance report ─────────────────────────────────────────────────────

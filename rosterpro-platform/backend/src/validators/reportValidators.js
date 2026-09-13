@@ -8,6 +8,10 @@ const reportQuerySchema = z.object({
   stationId: z.string().uuid(),
   monthKey: monthKey.optional(),
   year: z.coerce.number().int().min(2000).max(2100).optional(),
+  // Compliance report only — narrows the station-wide report down to one
+  // staff member (e.g. the "Generate Report" button on their Qualifications
+  // detail view). Ignored by every other report type.
+  userId: z.string().uuid().optional(),
 }).refine(
   (d) => (d.type !== "roster" && d.type !== "roster-template") || !!d.monthKey,
   { message: "monthKey is required for roster reports", path: ["monthKey"] }

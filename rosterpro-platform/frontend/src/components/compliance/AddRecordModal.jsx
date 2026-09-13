@@ -51,9 +51,9 @@ function toDateInputValue(v) {
 // to prefill from an existing record and PATCH it instead of creating a new
 // one; the record type is then fixed (editing a Qualification can't turn it
 // into a License) so only the field values are editable.
-export default function AddRecordModal({ userId, editingRecord, onSaved, onClose }) {
+export default function AddRecordModal({ userId, editingRecord, initialType, onSaved, onClose }) {
   const isEdit = !!editingRecord;
-  const [recordType, setRecordType] = useState(editingRecord?.type || "qualification");
+  const [recordType, setRecordType] = useState(editingRecord?.type || initialType || "qualification");
   const [values, setValues] = useState(() => {
     if (!editingRecord) return {};
     const def = RECORD_TYPES[editingRecord.type];
