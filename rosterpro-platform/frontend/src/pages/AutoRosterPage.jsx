@@ -123,7 +123,11 @@ function ShiftDefinitionsTab({ stationId }) {
   if (!defs) return <div className="card">Loading…</div>;
 
   return (
-    <div className="two-col">
+    <>
+      <HowToUseTab>
+        Define every shift code this station uses — its start/end time, break, and type (duty/night/off/leave/other). The generator reads these times directly for rest-gap and mandatory-coverage checks, so a Night shift must be typed "night" (not "duty") or the rest-gap and no-night rules won't recognize it.
+      </HowToUseTab>
+      <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">⏱ Define Shifts & Timings</div>
@@ -172,7 +176,8 @@ function ShiftDefinitionsTab({ stationId }) {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -254,7 +259,11 @@ function ShiftPatternsTab({ stationId }) {
   if (!patterns) return <div className="card">Loading…</div>;
 
   return (
-    <div className="two-col">
+    <>
+      <HowToUseTab>
+        A Shift Pattern is a fixed repeating cycle (e.g. MMAANNOO) assigned to specific staff on the Staff Allocation tab, instead of the default 8-day rotation. Anyone on an assigned pattern is LMPM-locked: the generator will never pull them onto a shift on their pattern's OFF day, even to cover a coverage shortfall elsewhere.
+      </HowToUseTab>
+      <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">🔁 Define Shift Patterns</div>
@@ -299,7 +308,8 @@ function ShiftPatternsTab({ stationId }) {
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -346,7 +356,11 @@ function StaffAllocationTab({ stationId }) {
   if (!rows) return <div className="card">Loading…</div>;
 
   return (
-    <div className="card">
+    <>
+      <HowToUseTab>
+        Assigning a staff member to a Shift Pattern here locks them to that pattern's cycle instead of the default rotation — and, once locked, they're excluded from every coverage-filling pass during generation, so a mandatory or advisory shortfall can never pull them onto a shift on their pattern's OFF day.
+      </HowToUseTab>
+      <div className="card">
       <div className="card-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>👤 Assign Staff to Shift Patterns</span>
         <div style={{ display: "flex", gap: 6 }}>
@@ -382,7 +396,8 @@ function StaffAllocationTab({ stationId }) {
           </tbody>
         </table>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -439,7 +454,11 @@ function LeaveAbsenceTab({ stationId }) {
   for (const e of entries || []) (byStaff[e.leaveType] ??= []).push(e);
 
   return (
-    <div className="two-col">
+    <>
+      <HowToUseTab>
+        Approved leave entered here overrides the base rotation on those exact dates — the generator marks the staff member's leave code on the roster and never considers them for a shift (mandatory or advisory) on a day they're on leave, regardless of coverage pressure.
+      </HowToUseTab>
+      <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">🌴 Leave Entries for Target Month</div>
@@ -498,7 +517,8 @@ function LeaveAbsenceTab({ stationId }) {
           )}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -521,7 +541,14 @@ function FlightScheduleTab({ stationId }) {
   // Schedule page (left sidebar) uses — one implementation, not two copies
   // that can drift apart. The day-wise Manpower Allocation panel lives only
   // on the standalone page (this tab stays focused on import + schedule).
-  return <FlightScheduleManager stationId={stationId} />;
+  return (
+    <>
+      <HowToUseTab>
+        Import the monthly Turn Report / Charter schedule here — this is what Workload Config's peak-concurrency demand and the Generate tab's Flight/PDC workload figures are actually computed from. Without an import for the target month, generation falls back to flat base coverage only.
+      </HowToUseTab>
+      <FlightScheduleManager stationId={stationId} />
+    </>
+  );
 }
 
 // ═══ TAB: WORKLOAD CONFIG ═════════════════════════════════════════════════════
@@ -921,7 +948,11 @@ function RuleBuilderTab({ stationId }) {
   if (!groups || !rules) return <div className="card">Loading…</div>;
 
   return (
-    <div className="two-col">
+    <>
+      <HowToUseTab>
+        A Hard Rule is enforced proactively during generation (night_only/no_night are applied inline; the rest are checked after and reported as violations); a Soft Rule is scored only, never blocks generation. "Applies To" genuinely scopes who the rule affects — a rule set to Category or Group only touches that subset of staff, never the whole roster.
+      </HowToUseTab>
+      <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">👥 Staff Groups</div>
@@ -964,7 +995,8 @@ function RuleBuilderTab({ stationId }) {
           <button className="btn btn-ghost btn-sm" onClick={() => addRule("soft")} disabled={busy}>＋ Add Soft Rule</button>
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -1033,7 +1065,11 @@ function DailyOpsTab({ stationId }) {
   const STATUS_ICON = { green: "✅", amber: "⚠", red: "🛑" };
 
   return (
-    <div className="two-col">
+    <>
+      <HowToUseTab>
+        Log real-world changes here as they become known (a sick call, an unplanned AOG check) to compare against what's already rostered — this is read-only against the published roster: it flags shortfalls, it never edits or regenerates a shift on its own.
+      </HowToUseTab>
+      <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">📅 Log Daily Operational Adjustment</div>
@@ -1083,7 +1119,8 @@ function DailyOpsTab({ stationId }) {
           ))}
         </div>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 
