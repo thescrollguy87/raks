@@ -62,4 +62,20 @@ const balance = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { request, decide, cancel, list, balance };
+// Team Calendar (spec #11) — same scoping split as list() above: a
+// station-wide approver sees their whole station's team, an L1-Manager
+// (leave:approve_reports only) sees only people who report to them.
+const teamCalendar = asyncHandler(async (req, res) => {
+  const { stationId: requestedStationId, from, to } = req.query;
+  if (!from || !to) throw ApiError.badRequest("from and to are required (YYYY-MM-DD)");
+
+  const isReportsScopedApprover = req.user.permissions?.includes("leave:approve_reports") && !req.user.permissions?.includes("leave:approve");
+  const scope = isReportsScopedApprover
+    ? { reportsToId: req.user.sub }
+    : await resolveStationScope(req.user, requestedStationId);
+
+  const items = await leaveService.getTeamCalendar(req.user, scope, from, to);
+  res.json({ items });
+});
+
+module.exports = { request, decide, cancel, list, balance, teamCalendar };

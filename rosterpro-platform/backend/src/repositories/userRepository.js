@@ -31,7 +31,7 @@ function findStationId(id) {
 // only, not the station-wide leave:approve) can decide a leave request only
 // for someone whose reportsToId is literally them.
 function findStationAndManager(id) {
-  return prisma.user.findUnique({ where: { id }, select: { stationId: true, reportsToId: true } });
+  return prisma.user.findUnique({ where: { id }, select: { stationId: true, reportsToId: true, fullName: true } });
 }
 
 // Who to notify for station-level operational alerts (low stock, tool

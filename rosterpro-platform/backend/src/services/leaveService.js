@@ -17,13 +17,13 @@ function daysBetweenInclusive(from, to) {
 
 async function requestLeave(body, actor, req) {
   const targetUserId = body.userId || actor.sub;
-  let targetStationId = actor.stationId;
-  if (targetUserId !== actor.sub) {
-    const target = await userRepo.findStationId(targetUserId);
-    if (!target) throw ApiError.notFound("Staff member not found");
+  const target = await userRepo.findStationAndManager(targetUserId);
+  if (!target) throw ApiError.notFound("Staff member not found");
+  const isSelfRequest = targetUserId === actor.sub;
+  if (!isSelfRequest) {
     await assertOwnStation(actor, target.stationId);
-    targetStationId = target.stationId;
   }
+  const targetStationId = target.stationId;
   const fromDate = toDateOnly(body.fromDate);
   const toDate = toDateOnly(body.toDate);
 
@@ -36,7 +36,31 @@ async function requestLeave(body, actor, req) {
   });
   await auditTrail.recordCreate("Leave", leave.id, targetStationId, actor, req);
   await auditTrail.logActivity("Leave requested", `${body.leaveType} ${body.fromDate}→${body.toDate}`, targetStationId, actor, req);
+
+  // Only a genuine self-service submission notifies the L1 Manager — the
+  // Auto-Roster Generator's Leave & Absence tab creates-then-immediately-
+  // approves already-known leave on someone else's behalf, so a "new
+  // request" alert to the very manager who just entered it would be noise,
+  // not signal.
+  if (isSelfRequest && target.reportsToId) {
+    notifyLeaveRequestedAsync(target.reportsToId, target.fullName, leave, actor, req);
+  }
   return leave;
+}
+
+async function notifyLeaveRequestedAsync(managerId, staffName, leave, actor, req) {
+  try {
+    const manager = await userRepo.findById(managerId);
+    if (!manager) return;
+    await notificationService.notifyLeaveRequested(manager, {
+      staffName,
+      leaveType: leave.leaveType,
+      fromDate: leave.fromDate.toISOString().slice(0, 10),
+      toDate: leave.toDate.toISOString().slice(0, 10),
+    });
+  } catch (err) {
+    await auditTrail.logActivity("Notification error", `Leave request alert: ${err.message}`, leave.userId, actor, req);
+  }
 }
 
 async function decideLeave(leaveId, { decision, reason }, actor, req) {
@@ -57,7 +81,7 @@ async function decideLeave(leaveId, { decision, reason }, actor, req) {
 
   if (leave.status !== "PENDING") throw ApiError.conflict(`Leave is already ${leave.status.toLowerCase()}`);
 
-  const updated = await leaveRepo.decide(leaveId, decision, actor.sub, actor.sub);
+  const updated = await leaveRepo.decide(leaveId, decision, actor.sub, actor.sub, reason);
   await auditTrail.recordUpdate(
     "Leave", leaveId, leave.user.stationId, { status: leave.status }, { status: decision }, actor, req, reason
   );
@@ -136,4 +160,21 @@ async function getBalance(userId, year) {
   return { userId, year, balance };
 }
 
-module.exports = { requestLeave, decideLeave, cancelLeave, listLeaves, getBalance };
+// "Team Calendar" (spec #11): a manager's own pending+approved leave
+// picture, scoped exactly the same way the Approvals queue is scoped — a
+// station-wide approver (leave:approve) sees their whole station, an
+// L1-Manager-only approver (leave:approve_reports, no leave:approve) sees
+// only their own direct reports, never the whole station.
+async function getTeamCalendar(actor, scope, from, to) {
+  const query = {
+    ...scope,
+    status: ["PENDING", "APPROVED"],
+    from, to,
+    page: 1,
+    pageSize: 1000,
+  };
+  const result = await listLeaves(query);
+  return result.items;
+}
+
+module.exports = { requestLeave, decideLeave, cancelLeave, listLeaves, getBalance, getTeamCalendar };

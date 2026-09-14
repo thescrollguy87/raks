@@ -450,6 +450,18 @@ function LeaveAbsenceTab({ stationId }) {
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
+  // Deleting a leave entry here means cancelling the underlying
+  // LeaveRequest — this tab and the self-service "My Leave" page both read
+  // and write the exact same Leave table, so this removes it everywhere,
+  // not just from this month's list.
+  async function removeLeave(id) {
+    if (!confirm("Remove this leave entry? This cancels the underlying leave request everywhere it's shown.")) return;
+    try {
+      await leaveApi.cancelLeave(id);
+      loadEntries();
+    } catch (err) { alert(`Failed: ${err.message}`); }
+  }
+
   const byStaff = {};
   for (const e of entries || []) (byStaff[e.leaveType] ??= []).push(e);
 
@@ -492,9 +504,10 @@ function LeaveAbsenceTab({ stationId }) {
             {!entries || entries.length === 0 ? (
               <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No leave entries for this month.</div>
             ) : entries.map(e => (
-              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
+              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
                 <span>{e.user?.fullName || e.userId}</span>
                 <span style={{ color: "var(--text-dim)" }}>{e.leaveType} · {e.fromDate?.slice(0, 10)} → {e.toDate?.slice(0, 10)}</span>
+                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => removeLeave(e.id)} title="Cancel this leave request">✕</button>
               </div>
             ))}
           </div>

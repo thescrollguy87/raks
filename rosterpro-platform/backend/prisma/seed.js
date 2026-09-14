@@ -28,6 +28,7 @@ const PERMISSIONS = [
   ["shift", "read"], ["shift", "update"],
   ["staff", "read"], ["staff", "create"], ["staff", "update"], ["staff", "deactivate"], ["staff", "delete"],
   ["leave", "read"], ["leave", "request"], ["leave", "approve"], ["leave", "approve_reports"],
+  ["holiday", "read"], ["holiday", "manage"],
   ["qualification", "read"], ["qualification", "create"], ["qualification", "update"],
   ["license", "read"], ["license", "create"], ["license", "update"],
   ["training", "read"], ["training", "create"], ["training", "update"],
@@ -47,7 +48,7 @@ const PERMISSIONS = [
 // CM, Sr. Tech, Tech, Jr. Tech, NCS, Stores) — view everything relevant to
 // their own work, request their own leave, no edit/approve rights anywhere.
 const VIEW_ONLY_STAFF_PERMISSIONS = [
-  "roster:read", "shift:read", "leave:read", "leave:request",
+  "roster:read", "shift:read", "leave:read", "leave:request", "holiday:read",
   "qualification:read", "license:read", "training:read", "store:read",
   "flight:read", "reports:read",
 ];
@@ -57,7 +58,7 @@ const VIEW_ONLY_STAFF_PERMISSIONS = [
 const ROLE_MATRIX = {
   SUPER_ADMIN: "*", // gets every permission — platform owner across all airlines
   AIRLINE_ADMIN: [
-    "roster:*", "shift:*", "staff:*", "leave:*", "qualification:*", "license:*",
+    "roster:*", "shift:*", "staff:*", "leave:*", "holiday:*", "qualification:*", "license:*",
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
     "billing:*", // the Billing page is Airline Admin only — no other role gets this
@@ -68,21 +69,25 @@ const ROLE_MATRIX = {
   // entirely by assertOwnStation/resolveStationScope in
   // utils/stationScope.js, not by narrowing this permission list.
   STATION_MANAGER: [
-    "roster:*", "shift:*", "staff:*", "leave:*", "qualification:*", "license:*",
+    "roster:*", "shift:*", "staff:*", "leave:*", "holiday:*", "qualification:*", "license:*",
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
   ],
   LMM: [ // Line Maintenance Manager
     "roster:read", "roster:update", "roster:publish", "shift:*", "staff:read",
-    "leave:read", "leave:approve", "qualification:*", "license:*", "training:*",
+    "leave:read", "leave:approve", "holiday:read", "qualification:*", "license:*", "training:*",
     "store:read", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "audit_trail:read",
   ],
   // Can approve leave for their own direct reports (see the "reportsToId"
   // field on User / "L1 Manager" in the UI) and is otherwise view-only
-  // across the whole app — never roster:update, staff:update, etc.
+  // across the whole app — never roster:update, staff:update, etc. This is
+  // the role the Leave & Absence module's "L1 Manager" spec concept maps
+  // onto: there is no separate L1_MANAGER role in the RoleName enum — it's
+  // this existing role (leave:approve_reports) + a person's reportsToId
+  // pointing at whoever holds it for their station.
   SHIFT_INCHARGE: [
-    "roster:read", "shift:read", "staff:read", "leave:read", "leave:approve_reports",
+    "roster:read", "shift:read", "staff:read", "leave:read", "leave:approve_reports", "holiday:read",
     "qualification:read", "license:read", "training:read", "store:read",
     "audit_finding:read", "capa:read", "flight:read", "engineering_delay:read",
     "reports:read", "users:read", "station:read", "audit_trail:read",
@@ -102,7 +107,7 @@ const ROLE_MATRIX = {
   NCS: VIEW_ONLY_STAFF_PERMISSIONS,
   STORES: VIEW_ONLY_STAFF_PERMISSIONS,
   READ_ONLY_AUDITOR: [
-    "roster:read", "shift:read", "staff:read", "leave:read", "qualification:read",
+    "roster:read", "shift:read", "staff:read", "leave:read", "holiday:read", "qualification:read",
     "license:read", "training:read", "store:read", "audit_finding:read",
     "capa:read", "flight:read", "engineering_delay:read", "reports:read",
     "users:read", "station:read", "airline:read", "audit_trail:read",

@@ -10,10 +10,10 @@ function findById(id) {
   return prisma.leave.findUnique({ where: { id }, include: { user: { select: { id: true, fullName: true, email: true, phone: true, stationId: true } } } });
 }
 
-function decide(id, status, approvedById, actorId) {
+function decide(id, status, approvedById, actorId, comment) {
   return prisma.leave.update({
     where: { id },
-    data: { status, approvedById, approvedAt: new Date(), updatedById: actorId, version: { increment: 1 } },
+    data: { status, approvedById, approvedAt: new Date(), comment: comment || null, updatedById: actorId, version: { increment: 1 } },
   });
 }
 
@@ -43,11 +43,12 @@ function findOverlapping(userId, fromDate, toDate, excludeId) {
 // caller who didn't name one specific station gets every station in THEIR
 // OWN airline (a real DB-level filter the caller resolves), never every
 // leave request on the whole platform.
-function list({ userId, stationId, stationIdIn, reportsToId, status, from, to, page, pageSize }) {
+function list({ userId, userIdIn, stationId, stationIdIn, reportsToId, status, from, to, page, pageSize }) {
   const where = {
     deletedAt: null,
     ...(userId ? { userId } : {}),
-    ...(status ? { status } : {}),
+    ...(userIdIn ? { userId: { in: userIdIn } } : {}),
+    ...(status ? { status: Array.isArray(status) ? { in: status } : status } : {}),
     ...(stationId ? { user: { stationId } } : {}),
     ...(stationIdIn ? { user: { stationId: { in: stationIdIn } } } : {}),
     ...(reportsToId ? { user: { reportsToId } } : {}),
@@ -59,7 +60,15 @@ function list({ userId, stationId, stationIdIn, reportsToId, status, from, to, p
     prisma.leave.findMany({
       where, skip: (page - 1) * pageSize, take: pageSize,
       orderBy: { fromDate: "desc" },
-      include: { user: { select: { id: true, fullName: true, category: true } } },
+      include: {
+        user: { select: { id: true, fullName: true, category: true } },
+        approvedBy: {
+          select: {
+            id: true, fullName: true,
+            roles: { select: { role: { select: { name: true } } } },
+          },
+        },
+      },
     }),
   ]).then(([total, items]) => ({ items, total, page, pageSize, totalPages: Math.ceil(total / pageSize) }));
 }

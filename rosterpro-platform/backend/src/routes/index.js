@@ -3,6 +3,7 @@ const authRoutes = require("./authRoutes");
 const userRoutes = require("./userRoutes");
 const rosterRoutes = require("./rosterRoutes");
 const leaveRoutes = require("./leaveRoutes");
+const holidayRoutes = require("./holidayRoutes");
 const complianceRoutes = require("./complianceRoutes");
 const flightRoutes = require("./flightRoutes");
 const notificationRoutes = require("./notificationRoutes");
@@ -26,6 +27,7 @@ router.use("/auth", authRoutes);
 router.use("/users", userRoutes);
 router.use("/roster", rosterRoutes);
 router.use("/leave", leaveRoutes);
+router.use("/holidays", holidayRoutes);
 router.use("/compliance", complianceRoutes); // qualifications, licenses, trainings, authorizations
 router.use("/flights", flightRoutes); // flights + engineering delays
 router.use("/notifications", notificationRoutes);

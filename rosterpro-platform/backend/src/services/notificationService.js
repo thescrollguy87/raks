@@ -69,6 +69,15 @@ function notifyLeaveDecision(user, { leaveType, fromDate, toDate, decision, reas
   return dispatch(user, "EMAIL", "leave_approval", subject, body);
 }
 
+// Fired at the L1 Manager (the requester's reportsToId) the moment a
+// self-service leave request is submitted, so it reaches them before they'd
+// otherwise notice it sitting in their Approvals queue.
+function notifyLeaveRequested(manager, { staffName, leaveType, fromDate, toDate }) {
+  const subject = `Leave request awaiting your approval: ${staffName}`;
+  const body = `${staffName} has requested ${leaveType} leave from ${fromDate} to ${toDate}.\nReview it in RosterPro's Leave Approvals.`;
+  return dispatch(manager, "EMAIL", "leave_requested", subject, body);
+}
+
 // ── Compliance (qualifications & licenses) ───────────────────────────────────
 
 function notifyQualificationExpiring(user, { label, expiryDate, daysLeft }) {
@@ -92,6 +101,6 @@ async function notifyDailyShiftReminder(user, { shiftDate, shiftLabel }) {
 module.exports = {
   dispatch, dispatchAll,
   notifyRosterPublished, notifyRosterUnpublished, notifyShiftChanged,
-  notifyLeaveDecision, notifyQualificationExpiring,
+  notifyLeaveDecision, notifyLeaveRequested, notifyQualificationExpiring,
   notifyDailyShiftReminder,
 };

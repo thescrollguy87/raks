@@ -12,57 +12,49 @@ const STATUS_STYLE = {
   CANCELLED: { background: "rgba(148,163,184,.15)", color: "var(--text-dim)" },
 };
 
+// This page is deliberately "My Leave" — the logged-in person's own
+// requests only. It was previously querying by station (showing everyone's
+// requests mixed together, with no userId filter at all) which is both a
+// privacy leak and the root of the "No leave requests match this filter"
+// bug reported against this exact screen: always scoping to the caller's
+// own userId is what makes the filter tabs (and this page's very purpose,
+// "your history") actually correct. Approving/rejecting someone ELSE's
+// request now lives on the separate Leave Approvals page, scoped to a
+// manager's real direct reports — never mixed into this self-service view.
 export default function LeavePage() {
-  const { user, hasPermission } = useAuth();
-  const { stationId, currentStation } = useStation();
+  const { user } = useAuth();
+  const { currentStation } = useStation();
   const [statusFilter, setStatusFilter] = useState("PENDING");
   const [leaves, setLeaves] = useState(null);
   const [balance, setBalance] = useState(null);
   const [showRequestModal, setShowRequestModal] = useState(false);
   const [error, setError] = useState("");
 
-  // A Shift Incharge only has leave:approve_reports (scoped to their own
-  // direct reports server-side — see leaveService.decideLeave) rather than
-  // the station-wide leave:approve every other approver role has; either
-  // one should show the Approve/Reject buttons here, same as the backend
-  // accepts either for POST /leave/:id/decide.
-  const canApprove = hasPermission("leave", "approve") || hasPermission("leave", "approve_reports");
-
   // Memoized: usePageHeader re-syncs whenever `actions` changes reference,
   // and this component re-renders on every header-context update — a fresh
   // JSX element here every render would loop the two forever.
   const headerActions = useMemo(() => (
-    <button className="btn btn-primary" onClick={() => setShowRequestModal(true)}>＋ Request Leave</button>
+    <button className="btn btn-primary" onClick={() => setShowRequestModal(true)}>＋ Apply for Leave</button>
   ), []);
 
   usePageHeader({
-    title: "Leave & Absence",
+    title: "My Leave",
     subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "",
     actions: headerActions,
   });
 
   const load = useCallback(() => {
-    if (!stationId) return;
+    if (!user?.id) return;
     setError("");
-    leaveApi.listLeave({ status: statusFilter === "ALL" ? undefined : statusFilter, pageSize: 100, stationId })
+    leaveApi.listLeave({ userId: user.id, status: statusFilter === "ALL" ? undefined : statusFilter, pageSize: 100 })
       .then(d => setLeaves(d))
       .catch(err => setError(err.message));
-    leaveApi.getLeaveBalance(user?.id, new Date().getFullYear())
+    leaveApi.getLeaveBalance(user.id, new Date().getFullYear())
       .then(setBalance)
       .catch(() => {}); // balance is a nice-to-have widget; don't block the page on it
-  }, [statusFilter, user, stationId]);
+  }, [statusFilter, user]);
 
   useEffect(() => { load(); }, [load]);
-
-  async function handleDecide(id, decision) {
-    const reason = decision === "REJECTED" ? prompt("Reason for rejecting (optional):") || undefined : undefined;
-    try {
-      await leaveApi.decideLeave(id, decision, reason);
-      load();
-    } catch (err) {
-      alert(`Failed: ${err.message}`);
-    }
-  }
 
   async function handleCancel(id) {
     if (!confirm("Cancel this leave request?")) return;
@@ -81,9 +73,15 @@ export default function LeavePage() {
           <div className="card-title">Your Leave Balance ({new Date().getFullYear()})</div>
           <div style={{ display: "flex", gap: 18, marginTop: 8, flexWrap: "wrap" }}>
             {Object.entries(balance.balance).filter(([, v]) => v.entitlement > 0).map(([type, v]) => (
-              <div key={type} style={{ fontSize: 11 }}>
+              <div key={type} style={{ fontSize: 11, minWidth: 110 }}>
                 <div style={{ color: "var(--text-dim)", fontWeight: 700 }}>{type}</div>
                 <div>{v.remaining} / {v.entitlement} remaining</div>
+                <div className="progress">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${Math.min(100, (v.remaining / v.entitlement) * 100)}%`, background: v.remaining === 0 ? "var(--rp-red)" : "var(--cyan)" }}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -91,7 +89,7 @@ export default function LeavePage() {
       )}
 
       <div className="sh">
-        <div className="st">Leave Requests</div>
+        <div className="st">Your Requests</div>
         <div style={{ display: "flex", gap: 7 }}>
           {["PENDING", "APPROVED", "REJECTED", "ALL"].map(s => (
             <button
@@ -116,30 +114,30 @@ export default function LeavePage() {
           <table className="rt" style={{ width: "100%" }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left" }}>Staff</th>
-                <th>Type</th>
+                <th style={{ textAlign: "left" }}>Type</th>
                 <th>From</th>
                 <th>To</th>
                 <th>Status</th>
+                <th style={{ textAlign: "left" }}>Decided By</th>
+                <th style={{ textAlign: "left" }}>Comment</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {leaves.items.map(l => (
                 <tr key={l.id}>
-                  <td style={{ textAlign: "left", padding: "6px 4px" }}>{l.user?.fullName}</td>
-                  <td>{l.leaveType}</td>
+                  <td style={{ textAlign: "left", padding: "6px 4px" }}>{l.leaveType}</td>
                   <td>{new Date(l.fromDate).toISOString().slice(0, 10)}</td>
                   <td>{new Date(l.toDate).toISOString().slice(0, 10)}</td>
                   <td><span className="tag" style={STATUS_STYLE[l.status]}>{l.status}</span></td>
+                  <td style={{ textAlign: "left", fontSize: 10, color: "var(--text-dim)" }}>
+                    {l.approvedBy
+                      ? `${l.approvedBy.fullName}${l.approvedBy.roles?.[0]?.role?.name ? ` (${l.approvedBy.roles[0].role.name})` : ""}`
+                      : "—"}
+                  </td>
+                  <td style={{ textAlign: "left", fontSize: 10, color: "var(--text-dim)" }}>{l.comment || "—"}</td>
                   <td>
-                    {l.status === "PENDING" && canApprove && (
-                      <>
-                        <button className="btn btn-ghost btn-sm" onClick={() => handleDecide(l.id, "APPROVED")}>✅ Approve</button>
-                        <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => handleDecide(l.id, "REJECTED")}>✕ Reject</button>
-                      </>
-                    )}
-                    {(l.status === "PENDING" || l.status === "APPROVED") && l.userId === user?.id && (
+                    {(l.status === "PENDING" || l.status === "APPROVED") && (
                       <button className="btn btn-ghost btn-sm" onClick={() => handleCancel(l.id)}>Cancel</button>
                     )}
                   </td>

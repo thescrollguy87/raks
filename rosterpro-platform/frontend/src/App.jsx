@@ -7,6 +7,7 @@ import RosterPage from "./pages/RosterPage.jsx";
 import AutoRosterPage from "./pages/AutoRosterPage.jsx";
 import StaffPage from "./pages/StaffPage.jsx";
 import LeavePage from "./pages/LeavePage.jsx";
+import LeaveApprovalsPage from "./pages/LeaveApprovalsPage.jsx";
 import QualificationsPage from "./pages/QualificationsPage.jsx";
 import ReportsPage from "./pages/ReportsPage.jsx";
 import ChangeHistoryPage from "./pages/ChangeHistoryPage.jsx";
@@ -32,7 +33,14 @@ export default function App() {
           path="/auto-roster"
           element={<ProtectedRoute permission={["roster", "update"]}><AutoRosterPage /></ProtectedRoute>}
         />
-        <Route path="/leave" element={<LeavePage />} />
+        <Route
+          path="/leave"
+          element={<ProtectedRoute permission={["leave", "read"]}><LeavePage /></ProtectedRoute>}
+        />
+        <Route
+          path="/leave-approvals"
+          element={<ProtectedRoute anyPermission={[["leave", "approve"], ["leave", "approve_reports"]]}><LeaveApprovalsPage /></ProtectedRoute>}
+        />
         <Route path="/my-account" element={<MyAccountPage />} />
         <Route path="/compliance-rules" element={<ComplianceRulesPage />} />
         <Route

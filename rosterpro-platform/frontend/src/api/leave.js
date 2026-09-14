@@ -19,3 +19,7 @@ export function decideLeave(id, decision, reason) {
 export function cancelLeave(id) {
   return api.post(`/api/leave/${id}/cancel`);
 }
+
+export function getTeamCalendar(params) {
+  return api.get("/api/leave/team-calendar", params);
+}

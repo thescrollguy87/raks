@@ -116,6 +116,7 @@ model Airline {
   flights     Flight[]
   shiftDefinitions ShiftDefinition[]
   billing     AirlineBilling?
+  holidays    Holiday[]
 
   @@map("airlines")
 }
@@ -245,6 +246,7 @@ model Station {
   dailyOperationalAdjustments DailyOperationalAdjustment[]
   departureManpowerAssignments DepartureManpowerAssignment[]
   importJobs      ImportJob[]
+  holidays        Holiday[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -1021,6 +1023,11 @@ model Leave {
   approvedById String?
   approvedBy  User?       @relation("LeaveApprover", fields: [approvedById], references: [id], onDelete: SetNull)
   approvedAt  DateTime?
+  // The APPROVER's comment — distinct from the requester's own `reason`
+  // above. Previously this was only ever written into the audit trail
+  // (which the requester has no permission to read), so a rejection's
+  // "why" never actually reached the person who needed to see it.
+  comment     String?
 
   createdById String?
   updatedById String?
@@ -1031,6 +1038,33 @@ model Leave {
 
   @@index([userId, fromDate, toDate])
   @@map("leaves")
+}
+
+// Purely informational for now (shown to staff/managers, not read by the
+// roster generator) — a reasonable, minimal v1 that adds zero risk to the
+// already-working generation algorithm. Whether a holiday should also
+// reduce advisory-tier coverage requirements (e.g. lighter Stores/admin
+// staffing) is a genuine open design question flagged for confirmation,
+// not silently assumed either way.
+model Holiday {
+  id        String   @id @default(uuid())
+  date      DateTime @db.Date
+  name      String
+  // null = airline-wide; set = one specific station only.
+  stationId String?
+  station   Station? @relation(fields: [stationId], references: [id])
+  airlineId String
+  airline   Airline  @relation(fields: [airlineId], references: [id])
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@index([airlineId, date])
+  @@index([stationId, date])
+  @@map("holidays")
 }
 
 // ─── Qualifications, licenses, training, authorizations ─────────────────────

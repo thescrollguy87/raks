@@ -15,7 +15,10 @@ const requestLeaveSchema = z.object({
 const decideLeaveSchema = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   reason: z.string().max(500).optional(),
-});
+}).refine(
+  d => d.decision !== "REJECTED" || (d.reason && d.reason.trim().length > 0),
+  { message: "A comment is required when rejecting a leave request", path: ["reason"] }
+);
 
 const leaveQuerySchema = z.object({
   userId: z.string().uuid().optional(),
@@ -27,4 +30,10 @@ const leaveQuerySchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
 });
 
-module.exports = { requestLeaveSchema, decideLeaveSchema, leaveQuerySchema, LEAVE_TYPES };
+const teamCalendarQuerySchema = z.object({
+  stationId: z.string().uuid().optional(),
+  from: isoDate,
+  to: isoDate,
+});
+
+module.exports = { requestLeaveSchema, decideLeaveSchema, leaveQuerySchema, teamCalendarQuerySchema, LEAVE_TYPES };

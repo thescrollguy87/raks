@@ -16,6 +16,8 @@ const managerActor = { sub: "mgr-1", name: "Station Manager", roles: ["STATION_M
 beforeEach(() => {
   leaveRepo.DEFAULT_ENTITLEMENT = { ANNUAL: 30, SICK: 12, CASUAL: 12, MEDICAL: 0, LWP: 0, TRAINING: 0, OTHER: 0 };
   notificationService.notifyLeaveDecision.mockResolvedValue({ sent: true });
+  notificationService.notifyLeaveRequested.mockResolvedValue({ sent: true });
+  userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: null, fullName: actor.name });
 });
 
 describe("leaveService.requestLeave", () => {
@@ -37,6 +39,36 @@ describe("leaveService.requestLeave", () => {
       { leaveType: "ANNUAL", fromDate: "2026-09-05", toDate: "2026-09-07" }, actor, {}
     )).rejects.toMatchObject({ statusCode: 409 });
   });
+
+  it("notifies the requester's L1 Manager (reportsToId) on a genuine self-service submission", async () => {
+    userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: "mgr-1", fullName: "Rakesh Patel" });
+    userRepo.findById.mockResolvedValue({ id: "mgr-1", email: "mgr@amd.example" });
+    leaveRepo.findOverlapping.mockResolvedValue(null);
+    leaveRepo.create.mockResolvedValue({
+      id: "leave-1", leaveType: "ANNUAL", fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"),
+    });
+
+    await leaveService.requestLeave({ leaveType: "ANNUAL", fromDate: "2026-09-05", toDate: "2026-09-07" }, actor, {});
+    await Promise.resolve(); // flush the fire-and-forget notify
+
+    expect(notificationService.notifyLeaveRequested).toHaveBeenCalledWith(
+      { id: "mgr-1", email: "mgr@amd.example" },
+      { staffName: "Rakesh Patel", leaveType: "ANNUAL", fromDate: "2026-09-05", toDate: "2026-09-07" }
+    );
+  });
+
+  it("does NOT notify a manager when an admin enters leave on someone else's behalf", async () => {
+    userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: "mgr-1", fullName: "Staff Two" });
+    leaveRepo.findOverlapping.mockResolvedValue(null);
+    leaveRepo.create.mockResolvedValue({ id: "leave-2" });
+
+    await leaveService.requestLeave(
+      { userId: "staff-2", leaveType: "ANNUAL", fromDate: "2026-09-05", toDate: "2026-09-07" }, managerActor, {}
+    );
+    await Promise.resolve();
+
+    expect(notificationService.notifyLeaveRequested).not.toHaveBeenCalled();
+  });
 });
 
 describe("leaveService.decideLeave", () => {
@@ -56,10 +88,23 @@ describe("leaveService.decideLeave", () => {
 
     await leaveService.decideLeave("leave-1", { decision: "APPROVED" }, managerActor, {});
 
-    expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", managerActor.sub, managerActor.sub);
+    expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", managerActor.sub, managerActor.sub, undefined);
     expect(auditTrail.recordUpdate).toHaveBeenCalledWith(
       "Leave", "leave-1", "station-1", { status: "PENDING" }, { status: "APPROVED" }, managerActor, {}, undefined
     );
+  });
+
+  it("persists the approver's comment onto the leave record (e.g. a rejection reason)", async () => {
+    leaveRepo.findById.mockResolvedValue({
+      id: "leave-1", status: "PENDING", userId: "staff-1", leaveType: "ANNUAL",
+      fromDate: new Date("2026-09-05"), toDate: new Date("2026-09-07"),
+      user: { fullName: "Staff One", email: "staff@amd.example", stationId: "station-1" },
+    });
+    leaveRepo.decide.mockResolvedValue({ id: "leave-1", status: "REJECTED", comment: "Coverage gap" });
+
+    await leaveService.decideLeave("leave-1", { decision: "REJECTED", reason: "Coverage gap" }, managerActor, {});
+
+    expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "REJECTED", managerActor.sub, managerActor.sub, "Coverage gap");
   });
 
   it("notifies the leave owner of the decision", async () => {
@@ -91,7 +136,7 @@ describe("leaveService.decideLeave", () => {
       leaveRepo.decide.mockResolvedValue({ id: "leave-1", status: "APPROVED" });
 
       await leaveService.decideLeave("leave-1", { decision: "APPROVED" }, shiftIncharge, {});
-      expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", shiftIncharge.sub, shiftIncharge.sub);
+      expect(leaveRepo.decide).toHaveBeenCalledWith("leave-1", "APPROVED", shiftIncharge.sub, shiftIncharge.sub, undefined);
     });
 
     it("rejects deciding on someone who isn't a direct report", async () => {
@@ -154,5 +199,29 @@ describe("leaveService.getBalance", () => {
   it("throws if the user doesn't exist", async () => {
     userRepo.findById.mockResolvedValue(null);
     await expect(leaveService.getBalance("nobody", 2026)).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe("leaveService.getTeamCalendar", () => {
+  it("scopes to reportsToId when called with a reports-scoped approver's scope", async () => {
+    leaveRepo.list.mockResolvedValue({ items: [{ id: "leave-1" }], total: 1, page: 1, pageSize: 1000, totalPages: 1 });
+
+    const shiftIncharge = { sub: "si-1", roles: ["SHIFT_INCHARGE"], permissions: ["leave:approve_reports", "leave:read"] };
+    const items = await leaveService.getTeamCalendar(shiftIncharge, { reportsToId: "si-1" }, "2026-09-01", "2026-09-30");
+
+    expect(items).toEqual([{ id: "leave-1" }]);
+    expect(leaveRepo.list).toHaveBeenCalledWith(expect.objectContaining({
+      reportsToId: "si-1", status: ["PENDING", "APPROVED"],
+    }));
+  });
+
+  it("scopes to the station for a station-wide approver", async () => {
+    leaveRepo.list.mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 1000, totalPages: 0 });
+
+    await leaveService.getTeamCalendar(managerActor, { stationId: "station-1" }, "2026-09-01", "2026-09-30");
+
+    expect(leaveRepo.list).toHaveBeenCalledWith(expect.objectContaining({
+      stationId: "station-1", status: ["PENDING", "APPROVED"],
+    }));
   });
 });
