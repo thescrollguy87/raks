@@ -20,7 +20,6 @@ const NAV_SECTIONS = [
     { to: "/staff", icon: "🧑‍🔧", label: "Staff Registry", permission: ["staff", "read"] },
     { to: "/qualifications", icon: "🎓", label: "Qualifications", permission: ["qualification", "read"] },
     { to: "/leave", icon: "🏖", label: "Leave & Absence", permission: ["leave", "read"] },
-    { to: "/leave-approvals", icon: "✅", label: "Leave Approvals", anyPermission: [["leave", "approve"], ["leave", "approve_reports"]] },
   ]},
   { label: "Reports", items: [
     { to: "/reports", icon: "📄", label: "Staff Reports", permission: ["reports", "export"] },
@@ -75,10 +74,7 @@ export default function Sidebar() {
           <div key={section.label}>
             <div className="nav-sl">{section.label}</div>
             {section.items
-              .filter(item =>
-                (!item.permission || hasPermission(item.permission[0], item.permission[1])) &&
-                (!item.anyPermission || item.anyPermission.some(([r, a]) => hasPermission(r, a)))
-              )
+              .filter(item => !item.permission || hasPermission(item.permission[0], item.permission[1]))
               .map(item => (
                 <NavLink key={item.to} to={item.to} className={({ isActive }) => `ni${isActive ? " active" : ""}`} title={collapsed ? item.label : undefined}>
                   <span className="ni-icon">{item.icon}</span><span>{item.label}</span>
