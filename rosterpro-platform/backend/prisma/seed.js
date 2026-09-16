@@ -29,6 +29,8 @@ const PERMISSIONS = [
   ["staff", "read"], ["staff", "create"], ["staff", "update"], ["staff", "deactivate"], ["staff", "delete"],
   ["leave", "read"], ["leave", "request"], ["leave", "approve"], ["leave", "approve_reports"],
   ["holiday", "read"], ["holiday", "manage"],
+  ["attendance", "punch"], ["attendance", "read"], ["attendance", "manage"],
+  ["regularization", "request"], ["regularization", "approve"], ["regularization", "approve_reports"],
   ["qualification", "read"], ["qualification", "create"], ["qualification", "update"],
   ["license", "read"], ["license", "create"], ["license", "update"],
   ["training", "read"], ["training", "create"], ["training", "update"],
@@ -51,6 +53,7 @@ const VIEW_ONLY_STAFF_PERMISSIONS = [
   "roster:read", "shift:read", "leave:read", "leave:request", "holiday:read",
   "qualification:read", "license:read", "training:read", "store:read",
   "flight:read", "reports:read",
+  "attendance:punch", "attendance:read", "regularization:request",
 ];
 
 // Which permissions each role gets by default. READ_ONLY_AUDITOR intentionally
@@ -62,6 +65,7 @@ const ROLE_MATRIX = {
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
     "billing:*", // the Billing page is Airline Admin only — no other role gets this
+    "attendance:*", "regularization:*",
   ],
   // Full parity with Airline Admin's permission set (everything except
   // billing:*, which stays Airline Admin/Super Admin only) — Station
@@ -72,12 +76,19 @@ const ROLE_MATRIX = {
     "roster:*", "shift:*", "staff:*", "leave:*", "holiday:*", "qualification:*", "license:*",
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
+    "attendance:*", "regularization:*",
   ],
   LMM: [ // Line Maintenance Manager
     "roster:read", "roster:update", "roster:publish", "shift:*", "staff:read",
     "leave:read", "leave:approve", "holiday:read", "qualification:*", "license:*", "training:*",
     "store:read", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "audit_trail:read",
+    // Punching is a physical-presence action every staff member does,
+    // unlike leave:request (which LMM was never granted) — an LMM still
+    // clocks in themselves, so gets the same self-service pair everyone
+    // operational gets, plus station-wide regularization approval to match
+    // their station-wide leave:approve above.
+    "attendance:punch", "attendance:read", "regularization:request", "regularization:approve",
   ],
   // Can approve leave for their own direct reports (see the "reportsToId"
   // field on User / "L1 Manager" in the UI) and is otherwise view-only
@@ -91,6 +102,7 @@ const ROLE_MATRIX = {
     "qualification:read", "license:read", "training:read", "store:read",
     "audit_finding:read", "capa:read", "flight:read", "engineering_delay:read",
     "reports:read", "users:read", "station:read", "audit_trail:read",
+    "attendance:punch", "attendance:read", "regularization:request", "regularization:approve_reports",
   ],
   // Every operational designation below gets the exact same view-only
   // permission set — read everything relevant to their own work, request
@@ -111,6 +123,7 @@ const ROLE_MATRIX = {
     "license:read", "training:read", "store:read", "audit_finding:read",
     "capa:read", "flight:read", "engineering_delay:read", "reports:read",
     "users:read", "station:read", "airline:read", "audit_trail:read",
+    "attendance:read",
   ],
 };
 

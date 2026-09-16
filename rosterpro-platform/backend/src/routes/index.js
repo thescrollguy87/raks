@@ -4,6 +4,9 @@ const userRoutes = require("./userRoutes");
 const rosterRoutes = require("./rosterRoutes");
 const leaveRoutes = require("./leaveRoutes");
 const holidayRoutes = require("./holidayRoutes");
+const officeLocationRoutes = require("./officeLocationRoutes");
+const attendanceRoutes = require("./attendanceRoutes");
+const regularizationRoutes = require("./regularizationRoutes");
 const complianceRoutes = require("./complianceRoutes");
 const flightRoutes = require("./flightRoutes");
 const notificationRoutes = require("./notificationRoutes");
@@ -28,6 +31,9 @@ router.use("/users", userRoutes);
 router.use("/roster", rosterRoutes);
 router.use("/leave", leaveRoutes);
 router.use("/holidays", holidayRoutes);
+router.use("/office-locations", officeLocationRoutes); // Geolocation Attendance: geofences a punch can land inside
+router.use("/attendance", attendanceRoutes); // Geolocation Attendance: punch in/out, today's context, records list
+router.use("/regularization", regularizationRoutes); // Geolocation Attendance: missing/late-punch regularization, routed through the same L1 Manager approval as Leave
 router.use("/compliance", complianceRoutes); // qualifications, licenses, trainings, authorizations
 router.use("/flights", flightRoutes); // flights + engineering delays
 router.use("/notifications", notificationRoutes);

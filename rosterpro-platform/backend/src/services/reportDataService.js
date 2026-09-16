@@ -1,7 +1,9 @@
 const rosterRepo = require("../repositories/rosterRepository");
 const stationRepo = require("../repositories/stationRepository");
+const attendanceRepo = require("../repositories/attendanceRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
+const attendanceService = require("./attendanceService");
 const ApiError = require("../utils/ApiError");
 
 // Real shift-code legend for the Monthly Roster's footer (Excel export/
@@ -159,4 +161,72 @@ async function getLeaveReportData(stationId, year) {
   return { header, rows, meta: { stationId, year, staffCount: staff.length } };
 }
 
-module.exports = { daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getComplianceReportData, getLeaveReportData };
+// ── Geolocation attendance ─────────────────────────────────────────────────
+
+function formatClockTime(dt) {
+  if (!dt) return "";
+  return new Date(dt).toISOString().slice(11, 16); // "HH:MM" in UTC — matches how shift startTime/endTime are stored
+}
+
+const STATUS_LABEL = {
+  ON_TIME: "On Time", LATE: "Late", EARLY_OUT: "Early Out",
+  MISSING: "Missing Punch", REGULARIZED: "Regularized", EXEMPT: "—",
+};
+
+// One row per staff-member-per-day (not per staff-member-per-month) — a
+// register reads as a chronological log, matching how a real attendance
+// register/muster roll is laid out, unlike the Roster export's one-row-
+// per-staff/one-column-per-day grid.
+async function getAttendanceRegisterData(stationId, monthKey) {
+  const nDays = daysInMonth(monthKey);
+  const from = new Date(`${dateLabel(monthKey, 1)}T00:00:00.000Z`);
+  const to = new Date(`${dateLabel(monthKey, nDays)}T00:00:00.000Z`);
+
+  const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+  const staffWithShifts = roster ? byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id)) : byCategoryThenName(await rosterRepo.getActiveStaffForGeneration(stationId));
+  const attendanceRows = await attendanceRepo.listForRange(stationId, from, to);
+
+  const attendanceByKey = new Map(attendanceRows.map(r => [`${r.userId}:${r.date.toISOString().slice(0, 10)}`, r]));
+  const shiftByKey = new Map();
+  for (const s of staffWithShifts) {
+    for (const sa of s.shiftAssignments || []) {
+      shiftByKey.set(`${s.id}:${new Date(sa.shiftDate).toISOString().slice(0, 10)}`, sa.shiftDef);
+    }
+  }
+
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const header = ["Date", "Staff", "Category", "Scheduled Shift", "Punch In", "Punch Out", "Status", "Regularization"];
+  const rows = [];
+  for (const s of staffWithShifts) {
+    for (let day = 1; day <= nDays; day++) {
+      const iso = dateLabel(monthKey, day);
+      const key = `${s.id}:${iso}`;
+      const shiftDef = shiftByKey.get(key) || null;
+      const record = attendanceByKey.get(key) || null;
+      const exempt = attendanceService.isExemptShiftType(shiftDef?.type);
+      const isPast = new Date(`${iso}T00:00:00.000Z`) < today;
+
+      let statusLabel;
+      if (record) statusLabel = STATUS_LABEL[record.status] || record.status;
+      else if (exempt) statusLabel = STATUS_LABEL.EXEMPT;
+      else if (shiftDef && isPast) statusLabel = STATUS_LABEL.MISSING;
+      else statusLabel = "";
+
+      const latestReg = record?.regularizationRequests?.[0];
+      const regularizationLabel = latestReg ? `${latestReg.status} (${latestReg.reason})` : "";
+
+      rows.push([
+        iso, s.fullName, s.category || "", shiftDef?.code || (exempt ? "" : "O"),
+        formatClockTime(record?.punchInAt), formatClockTime(record?.punchOutAt),
+        statusLabel, regularizationLabel,
+      ]);
+    }
+  }
+
+  return { header, rows, meta: { stationId, monthKey, staffCount: staffWithShifts.length, title: `ATTENDANCE REGISTER — ${monthKey}` } };
+}
+
+module.exports = {
+  daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getComplianceReportData, getLeaveReportData,
+  getAttendanceRegisterData,
+};

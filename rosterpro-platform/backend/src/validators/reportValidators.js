@@ -2,8 +2,10 @@ const { z } = require("zod");
 
 const monthKey = z.string().regex(/^\d{4}-\d{2}$/, "Expected month as YYYY-MM");
 
+const REPORT_TYPES = ["roster", "roster-template", "compliance", "leave", "attendance-register"];
+
 const reportQuerySchema = z.object({
-  type: z.enum(["roster", "roster-template", "compliance", "leave"]),
+  type: z.enum(REPORT_TYPES),
   format: z.enum(["excel", "pdf", "csv"]),
   stationId: z.string().uuid(),
   monthKey: monthKey.optional(),
@@ -13,15 +15,15 @@ const reportQuerySchema = z.object({
   // detail view). Ignored by every other report type.
   userId: z.string().uuid().optional(),
 }).refine(
-  (d) => (d.type !== "roster" && d.type !== "roster-template") || !!d.monthKey,
-  { message: "monthKey is required for roster reports", path: ["monthKey"] }
+  (d) => !["roster", "roster-template", "attendance-register"].includes(d.type) || !!d.monthKey,
+  { message: "monthKey is required for this report", path: ["monthKey"] }
 ).refine(
   (d) => d.type !== "leave" || !!d.year,
   { message: "year is required for leave reports", path: ["year"] }
 );
 
 const emailReportSchema = z.object({
-  type: z.enum(["roster", "roster-template", "compliance", "leave"]),
+  type: z.enum(REPORT_TYPES),
   format: z.enum(["excel", "pdf", "csv"]),
   stationId: z.string().uuid(),
   monthKey: monthKey.optional(),

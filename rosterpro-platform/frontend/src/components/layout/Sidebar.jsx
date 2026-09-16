@@ -20,6 +20,8 @@ const NAV_SECTIONS = [
     { to: "/staff", icon: "🧑‍🔧", label: "Staff Registry", permission: ["staff", "read"] },
     { to: "/qualifications", icon: "🎓", label: "Qualifications", permission: ["qualification", "read"] },
     { to: "/leave", icon: "🏖", label: "Leave & Absence", permission: ["leave", "read"] },
+    { to: "/attendance", icon: "📍", label: "Attendance", permission: ["attendance", "read"] },
+    { to: "/punch", icon: "📷", label: "Punch In / Out", permission: ["attendance", "punch"] },
   ]},
   { label: "Reports", items: [
     { to: "/reports", icon: "📄", label: "Staff Reports", permission: ["reports", "export"] },
@@ -34,7 +36,15 @@ export default function Sidebar() {
   const { user, hasPermission, hasRole, logout } = useAuth();
   const { needsSwitcher, currentStation } = useStation();
   const [collapsed, setCollapsed] = useState(() => {
-    try { return localStorage.getItem("rp-sidebar-collapsed") === "1"; } catch { return false; }
+    try {
+      const saved = localStorage.getItem("rp-sidebar-collapsed");
+      // No explicit preference yet and the viewport is phone-width (the
+      // Punch page — the one screen genuinely meant to be used on a phone
+      // — needs the room): default to collapsed rather than the desktop
+      // default of expanded. An explicit prior toggle always wins.
+      if (saved === null) return window.innerWidth <= 700;
+      return saved === "1";
+    } catch { return false; }
   });
 
   function toggleCollapsed() {

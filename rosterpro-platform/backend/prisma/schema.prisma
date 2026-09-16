@@ -58,6 +58,36 @@ enum LeaveStatus {
   CANCELLED
 }
 
+// A punch's computed standing for the day — set by attendanceService, not
+// hand-picked by anyone. MISSING becomes REGULARIZED only once an approved
+// RegularizationRequest exists against it; it never silently disappears.
+enum AttendancePunchStatus {
+  ON_TIME
+  LATE
+  EARLY_OUT
+  MISSING
+  REGULARIZED
+  EXEMPT // the roster already explains the day (deputation/leave/off) — see attendanceService.isExemptDay
+}
+
+enum RegularizationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+// Deliberately the exact fixed list confirmed with the user — not
+// free-text, so reporting on "why do we have so many regularizations" stays
+// meaningful across the whole airline.
+enum RegularizationReason {
+  FORGOT_TO_PUNCH
+  FLIGHT_DUTY
+  DEPUTATION
+  NETWORK_ISSUE
+  OTHER
+}
+
 enum QualificationStatus {
   VALID
   EXPIRING
@@ -247,6 +277,8 @@ model Station {
   departureManpowerAssignments DepartureManpowerAssignment[]
   importJobs      ImportJob[]
   holidays        Holiday[]
+  officeLocations OfficeLocation[]
+  attendanceRecords AttendanceRecord[]
 
   @@unique([airlineId, iataCode])
   @@map("stations")
@@ -322,6 +354,10 @@ model User {
   staffGroupMemberships WorkloadRuleStaffGroupMember[]
   departureReleaserAssignments DepartureManpowerAssignment[] @relation("DepartureReleaser")
   departureSupportAssignments  DepartureManpowerAssignment[] @relation("DepartureSupport")
+
+  attendanceRecords            AttendanceRecord[]
+  regularizationRequests       RegularizationRequest[]       @relation("RegularizationOwner")
+  decidedRegularizations       RegularizationRequest[]       @relation("RegularizationApprover")
 
   @@index([airlineId])
   @@index([stationId])
@@ -1437,4 +1473,125 @@ model ChatConversationLog {
   @@index([stationId])
   @@index([createdAt])
   @@map("chat_conversation_logs")
+}
+
+// ─── Geolocation attendance ──────────────────────────────────────────────────
+
+// A geofence a punch can land inside. Radius is per-location, not a global
+// constant, specifically because GPS accuracy degrades badly indoors and
+// near large metal aircraft structures — a hangar location is expected to
+// carry a wider radius than an office building, not the same hardcoded 200m
+// for everywhere. A station can have several (hangar + office + gate, say);
+// a punch is valid if it's within radius of ANY one of them.
+model OfficeLocation {
+  id          String   @id @default(uuid())
+  stationId   String
+  station     Station  @relation(fields: [stationId], references: [id])
+  name        String
+  latitude    Float
+  longitude   Float
+  radiusMeters Int     @default(200)
+  isActive    Boolean  @default(true)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@index([stationId])
+  @@map("office_locations")
+}
+
+// One row per staff member per calendar day. Punch-in and punch-out are two
+// independent events on the same row (not two rows) so "did they punch out"
+// is a single nullable-field check, not a second query. Every "*At" here is
+// the timestamp CAPTURED ON THE DEVICE at the moment the button was tapped —
+// never the time the server received it — because the whole point of the
+// offline queue is that those two can legitimately differ by hours in a
+// hangar with poor signal; "*SyncedAt" is separately when the server actually
+// saw it, kept purely for audit/debugging, never used for status math.
+model AttendanceRecord {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  stationId String
+  station   Station  @relation(fields: [stationId], references: [id])
+  date      DateTime @db.Date
+
+  // Snapshot of the roster's shift for this exact date at punch time — not
+  // re-derived later, so a subsequent roster edit can't silently rewrite
+  // what an already-recorded punch was judged against.
+  scheduledShiftDefId String?
+  scheduledShiftCode  String?
+  scheduledStartTime  String? // "HH:MM", copied from ShiftDefinition at punch time
+  scheduledEndTime    String?
+
+  punchInAt         DateTime?
+  punchInSyncedAt   DateTime?
+  punchInLat        Float?
+  punchInLng        Float?
+  punchInAccuracy   Float?    // meters, as reported by the device's Geolocation API
+  punchInDistanceM  Float?    // Haversine distance to the nearest matched OfficeLocation
+  punchInLocationId String?   // which OfficeLocation it matched, if any
+  punchInPhoto      Bytes?    // compressed JPEG — see attendanceService for the "no S3 integration exists yet" note
+  punchInPhotoMime  String?
+  punchInDevice     String?   // User-Agent string, for audit only
+  punchInMockSuspected Boolean @default(false)
+
+  punchOutAt         DateTime?
+  punchOutSyncedAt   DateTime?
+  punchOutLat        Float?
+  punchOutLng        Float?
+  punchOutAccuracy   Float?
+  punchOutDistanceM  Float?
+  punchOutLocationId String?
+  punchOutPhoto      Bytes?
+  punchOutPhotoMime  String?
+  punchOutDevice     String?
+  punchOutMockSuspected Boolean @default(false)
+
+  status    AttendancePunchStatus @default(MISSING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  version   Int      @default(1)
+
+  regularizationRequests RegularizationRequest[]
+
+  @@unique([userId, date])
+  @@index([stationId, date])
+  @@map("attendance_records")
+}
+
+// Routes through the SAME L1 Manager relationship as Leave — never a
+// separate approver concept. See regularizationService.decide, which
+// mirrors leaveService.decideLeave's leave:approve vs
+// leave:approve_reports/reportsToId split exactly.
+model RegularizationRequest {
+  id                 String   @id @default(uuid())
+  attendanceRecordId String
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id])
+  userId             String   // whose attendance this regularizes (may differ from submittedById)
+  user               User     @relation("RegularizationOwner", fields: [userId], references: [id])
+
+  reason  RegularizationReason
+  detail  String?
+  status  RegularizationStatus @default(PENDING)
+
+  submittedById String?
+  approvedById  String?
+  approver      User?    @relation("RegularizationApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt    DateTime?
+  comment       String?  // the approver's comment — required on reject, mirrors Leave.comment
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  version     Int      @default(1)
+
+  @@index([attendanceRecordId])
+  @@index([userId])
+  @@map("regularization_requests")
 }

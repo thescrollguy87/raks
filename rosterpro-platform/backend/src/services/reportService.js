@@ -33,6 +33,11 @@ const REPORT_TYPES = {
     fetch: (p) => reportData.getLeaveReportData(p.stationId, p.year),
     filename: (p) => `leave_balance_${p.year}`,
   },
+  "attendance-register": {
+    title: (p) => `Attendance Register — ${p.monthKey}`,
+    fetch: (p) => reportData.getAttendanceRegisterData(p.stationId, p.monthKey),
+    filename: (p) => `attendance_register_${p.monthKey}`,
+  },
 };
 
 const CONTENT_TYPES = {

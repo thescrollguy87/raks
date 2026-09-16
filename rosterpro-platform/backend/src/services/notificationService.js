@@ -78,6 +78,36 @@ function notifyLeaveRequested(manager, { staffName, leaveType, fromDate, toDate 
   return dispatch(manager, "EMAIL", "leave_requested", subject, body);
 }
 
+// ── Geolocation attendance ────────────────────────────────────────────────
+
+function notifyRegularizationDecision(user, { date, decision, reason }) {
+  const verb = decision === "APPROVED" ? "approved" : "rejected";
+  const subject = `Regularization ${verb}: ${date}`;
+  const body = `Your attendance regularization request for ${date} has been ${verb}.` + (reason ? `\nNote: ${reason}` : "");
+  return dispatch(user, "EMAIL", "regularization_decision", subject, body);
+}
+
+// Fired at the L1 Manager the moment a self-service regularization request
+// is submitted — same "reaches them before they'd otherwise notice it"
+// rationale as notifyLeaveRequested above.
+function notifyRegularizationRequested(manager, { staffName, date, reason }) {
+  const subject = `Regularization request awaiting your approval: ${staffName}`;
+  const body = `${staffName} has requested attendance regularization for ${date} (${reason}).\nReview it in RosterPro's Attendance Approvals.`;
+  return dispatch(manager, "EMAIL", "regularization_requested", subject, body);
+}
+
+// A few minutes before a rostered shift ends, if the person hasn't punched
+// out yet — self-deduplicating per day exactly like notifyDailyShiftReminder,
+// since a normal duty roster gives one shift per person per day.
+async function notifyShiftEndingSoon(user, { shiftCode, endTime }) {
+  const already = await notificationRepo.findSentToday(user.id, "shift_end_reminder");
+  if (already) return { skipped: true, reason: "already sent today" };
+
+  const subject = `Your shift (${shiftCode}) ends soon`;
+  const body = `Your shift ends at ${endTime} and you haven't punched out yet. Don't forget to punch out in RosterPro.`;
+  return dispatch(user, "EMAIL", "shift_end_reminder", subject, body);
+}
+
 // ── Compliance (qualifications & licenses) ───────────────────────────────────
 
 function notifyQualificationExpiring(user, { label, expiryDate, daysLeft }) {
@@ -103,4 +133,5 @@ module.exports = {
   notifyRosterPublished, notifyRosterUnpublished, notifyShiftChanged,
   notifyLeaveDecision, notifyLeaveRequested, notifyQualificationExpiring,
   notifyDailyShiftReminder,
+  notifyRegularizationDecision, notifyRegularizationRequested, notifyShiftEndingSoon,
 };

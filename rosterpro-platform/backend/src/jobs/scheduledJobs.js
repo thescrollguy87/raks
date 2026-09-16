@@ -3,6 +3,7 @@ const env = require("../config/env");
 const logger = require("../config/logger");
 
 const rosterRepo = require("../repositories/rosterRepository");
+const attendanceRepo = require("../repositories/attendanceRepository");
 const notificationService = require("../services/notificationService");
 const complianceService = require("../services/complianceService");
 const billingService = require("../services/billingService");
@@ -81,6 +82,48 @@ async function runBillingCycle() {
   logger.info(`[job:billing-cycle] processed ${results.length} tenant(s): ${JSON.stringify(byAction)}`);
 }
 
+// ── Job 4: shift-end reminder — the first job in this file that isn't
+// whole-day-boundary. Runs every 5 minutes and only actually notifies
+// someone whose shift ends within the next 5 minutes, so nobody gets
+// reminded hours early or after they've already left.
+const SHIFT_END_WINDOW_MINUTES = 5;
+
+function effectiveEndTime(dateObj, assignment) {
+  const hhmm = assignment.out2 || assignment.out1 || assignment.shiftDef.endTime;
+  if (!hhmm) return null;
+  const [h, m] = hhmm.split(":").map(Number);
+  const d = new Date(dateObj);
+  d.setUTCHours(h, m, 0, 0);
+  return d;
+}
+
+async function runShiftEndReminders() {
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+
+  const [assignments, todaysAttendance] = await Promise.all([
+    rosterRepo.findShiftsForDate(today),
+    attendanceRepo.listForDate(today),
+  ]);
+  const punchedOutUserIds = new Set(todaysAttendance.filter(r => r.punchOutAt).map(r => r.userId));
+
+  const now = new Date();
+  let sent = 0, skipped = 0;
+  for (const a of assignments) {
+    if (!a.user?.isActive || punchedOutUserIds.has(a.userId)) continue;
+    const end = effectiveEndTime(today, a);
+    if (!end) continue;
+    const minutesToEnd = (end.getTime() - now.getTime()) / 60000;
+    if (minutesToEnd < 0 || minutesToEnd > SHIFT_END_WINDOW_MINUTES) continue;
+
+    const result = await notificationService.notifyShiftEndingSoon(a.user, {
+      shiftCode: a.shiftDef.code, endTime: a.out2 || a.out1 || a.shiftDef.endTime,
+    });
+    if (result.skipped) skipped++; else sent++;
+  }
+  if (sent || skipped) logger.info(`[job:shift-end-reminder] sent=${sent} skipped=${skipped}`);
+}
+
 function startScheduler() {
   // Daily reminder: defaults to 18:00 station-local time, so staff get
   // tomorrow's shift the evening before.
@@ -101,10 +144,18 @@ function startScheduler() {
     runBillingCycle().catch(err => logger.error(`[job:billing-cycle] failed: ${err.message}`));
   }, { timezone: env.tz || "Asia/Kolkata" });
 
-  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance expiry @06:00, billing cycle @07:00");
+  // Shift-end reminder: the only per-minute-granularity job in this file —
+  // everything else above only ever needs to look at "today"/"tomorrow" as
+  // a whole; this one needs to catch a shift ending in the next few
+  // minutes, which a daily job structurally cannot do.
+  cron.schedule("*/5 * * * *", () => {
+    runShiftEndReminders().catch(err => logger.error(`[job:shift-end-reminder] failed: ${err.message}`));
+  }, { timezone: env.tz || "Asia/Kolkata" });
+
+  logger.info("[scheduler] Notification jobs scheduled: daily reminder @18:00, compliance expiry @06:00, billing cycle @07:00, shift-end reminder every 5min");
 }
 
 module.exports = {
   startScheduler,
-  runDailyShiftReminders, runComplianceExpiryReminders, runBillingCycle,
+  runDailyShiftReminders, runComplianceExpiryReminders, runBillingCycle, runShiftEndReminders,
 };

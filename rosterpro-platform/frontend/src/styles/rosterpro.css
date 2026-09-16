@@ -83,7 +83,7 @@ table{border-collapse:collapse}
   color:var(--white);
   position:relative;width:240px;flex-shrink:0;background:var(--navy-mid);border-right:1px solid var(--border);display:flex;flex-direction:column;z-index:100;transition:width .18s ease}
 .sidebar.collapsed{width:64px}
-.sidebar.collapsed .s-logo .ln,.sidebar.collapsed .s-logo .ls,.sidebar.collapsed .ni span:not(.ni-icon),.sidebar.collapsed .u-name,.sidebar.collapsed .u-role,.sidebar.collapsed .nav-sl{display:none}
+.sidebar.collapsed .s-logo .lm,.sidebar.collapsed .s-logo .ln,.sidebar.collapsed .s-logo .ls,.sidebar.collapsed .ni span:not(.ni-icon),.sidebar.collapsed .u-name,.sidebar.collapsed .u-role,.sidebar.collapsed .nav-sl{display:none}
 .sidebar.collapsed .u-card{justify-content:center}
 .sb-collapse-btn{position:absolute;top:14px;right:-11px;width:22px;height:22px;border-radius:50%;background:var(--navy-mid);border:1px solid var(--border);color:var(--text-dim);display:flex;align-items:center;justify-content:center;font-size:10px;z-index:101}
 .s-logo{padding:14px 12px 10px;border-bottom:1px solid var(--border)}
@@ -93,6 +93,7 @@ table{border-collapse:collapse}
 /* Tenant airline's own name/logo, standing in for the generic app mark —
    an inline-flex row so a wide/non-square logo image never distorts. */
 .s-logo-ln{display:flex!important;align-items:center;gap:7px}
+.sidebar.collapsed .s-logo-ln{display:none!important}
 .s-logo-img{width:22px;height:22px;object-fit:contain;border-radius:5px;background:#fff;flex-shrink:0}
 .nav{flex:1;padding:8px 6px;overflow-y:auto}
 .nav-sl{font-size:8px;font-weight:700;letter-spacing:2px;color:var(--text-dim);padding:9px 8px 3px;text-transform:uppercase;opacity:.75}
