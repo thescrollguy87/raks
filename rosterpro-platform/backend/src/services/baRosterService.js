@@ -2,26 +2,25 @@ const ExcelJS = require("exceljs");
 const rosterRepo = require("../repositories/rosterRepository");
 const ApiError = require("../utils/ApiError");
 
-// Ports the Daily BA (Breath Analyser) Roster export from the reference PWA
-// (RosterPro-PWA/index.html — buildBARosterRows/exportBARoster) onto real
-// data: same column layout/order, same header text (incl. embedded line
-// breaks), same "0630"-style zero-padded text time format, same header
-// styling (measured from the airline's actual BA roster upload template),
-// so the exported file uploads to the BA test portal without reformatting.
+// Matches the airport ground-staff access system's own upload template
+// exactly (Ground_Staff_Roster_April_2026.xlsx — column names, plain
+// unstyled header, plain numeric cells with no zero-padding): one row per
+// staff member per day they're actually on duty. "Shift Role" is a fixed
+// label per the portal's own spec — every row is "Ground Staff" regardless
+// of the person's real category/designation — and "Roster End Date/Month/
+// Year" is always the same calendar day as "Roster Date/Month/Year" (the
+// portal has no concept of an overnight shift spanning two dates).
 const BA_EXPORT_HEADER = [
-  "Staff No", "First Name", "Last Name", "Email ID", "Designation/Function", "Department", "Location",
-  "Roster Date\n(Numeric)", "Roster Month\n(Numeric)", "Roster Year\n(Numeric)",
-  "ShiftTime\nStart\n(0000-2359)", "ShiftTime\nEnd\n(0000-2359)", "Shift",
-  "Roster EndDate\n(Numeric)", "Roster EndMonth\n(Numeric)", "Roster EndYear\n(Numeric)",
+  "Employee Number", "Roster Date", "Roster Month", "Roster Year",
+  "Roster End Date", "Roster End Month", "Roster End Year",
+  "Shift Role", "Shift Start Time", "Shift End Time",
 ];
-const COLUMN_WIDTHS = [8.2, 27, 14.4, 32.7, 20.4, 11.7, 9, 11, 11.3, 10.8, 11.3, 11, 15.9, 11.2, 11.6, 12.1];
-const WRAP_COLUMNS = new Set([8, 9, 10, 11, 12, 14, 15, 16]); // 1-indexed — header cells with embedded line breaks
+const SHIFT_ROLE = "Ground Staff";
 
-// "06:30" -> "0630". The portal expects zero-padded text, not a number
-// (which would silently lose the leading zero).
+// "06:30" -> 630, "21:00" -> 2100 — a plain number, same convention the
+// portal's own sample file uses for every numeric column (no zero-padding).
 function toBATime(hhmm) {
-  if (!hhmm) return "";
-  return hhmm.replace(":", "").padStart(4, "0");
+  return Number(hhmm.replace(":", ""));
 }
 
 function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
@@ -42,15 +41,12 @@ async function buildBARosterRows(stationId, dateStr) {
   const monthKey = monthKeyOf(dateStr);
   const [y, m, d] = dateStr.split("-").map(Number);
 
-  const [roster, station] = await Promise.all([
-    rosterRepo.findRosterByStationAndMonth(stationId, monthKey),
-    rosterRepo.findStationById(stationId),
-  ]);
+  const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
   if (!roster) {
     throw ApiError.notFound(`No roster exists for ${monthKey} yet — generate or create it first.`);
   }
 
-  const staff = byCategoryThenName(await rosterRepo.getRosterGridForExport(stationId, roster.id));
+  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
   const rows = [];
 
   for (const s of staff) {
@@ -64,23 +60,12 @@ async function buildBARosterRows(stationId, dateStr) {
     const endTime = todayShift.out1 || def.endTime;
     if (!startTime || !endTime) continue; // shift types with no real time can't produce a valid row
 
-    const [sh, sm] = startTime.split(":").map(Number);
-    const [eh, em] = endTime.split(":").map(Number);
-    const overnight = (eh * 60 + em) < (sh * 60 + sm); // e.g. Night: 21:00 -> 07:00 crosses midnight
-    const endDateObj = new Date(Date.UTC(y, m - 1, d + (overnight ? 1 : 0)));
-
-    const nameParts = s.fullName.split("(")[0].trim().split(" ");
     rows.push([
       s.employeeId || "",
-      nameParts[0] || "",
-      nameParts.slice(1).join(" ") || "",
-      s.email || "",
-      s.designation || "",
-      s.department || "M&E",
-      station?.iataCode || "",
       d, m, y,
-      toBATime(startTime), toBATime(endTime), def.name.toUpperCase(),
-      endDateObj.getUTCDate(), endDateObj.getUTCMonth() + 1, endDateObj.getUTCFullYear(),
+      d, m, y, // "Roster End Date" — always the same day as "Roster Date" (no overnight-shift adjustment)
+      SHIFT_ROLE,
+      toBATime(startTime), toBATime(endTime),
     ]);
   }
 
@@ -92,22 +77,9 @@ async function generateBARosterExcel(stationId, dateStr) {
   if (!rows.length) throw ApiError.badRequest("No staff are on duty that day — nothing to export");
 
   const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Sheet1");
-  ws.columns = COLUMN_WIDTHS.map(width => ({ width }));
-
-  const headerRow = ws.addRow(BA_EXPORT_HEADER);
-  headerRow.height = 59.25;
-  headerRow.eachCell((cell, colNum) => {
-    cell.font = { name: "Calibri", size: 11, bold: true, color: { argb: "FF002060" } };
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFED7D31" } };
-    cell.alignment = { horizontal: "center", vertical: "middle", wrapText: WRAP_COLUMNS.has(colNum) };
-    cell.border = { top: { style: "thin" }, bottom: { style: "thin" }, left: { style: "thin" }, right: { style: "thin" } };
-  });
-
-  rows.forEach(r => {
-    const row = ws.addRow(r);
-    row.eachCell(cell => { cell.font = { name: "Calibri", size: 11, bold: false }; });
-  });
+  const ws = wb.addWorksheet("Roster");
+  ws.addRow(BA_EXPORT_HEADER);
+  rows.forEach(r => ws.addRow(r));
 
   const buffer = await wb.xlsx.writeBuffer();
   return { buffer, rowCount: rows.length, filename: `BA_Roster_${dateStr}.xlsx` };
