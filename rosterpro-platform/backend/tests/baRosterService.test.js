@@ -33,7 +33,7 @@ describe("baRosterService.buildBARosterRows", () => {
       5, 9, 2026, // Roster Date/Month/Year
       5, 9, 2026, // Roster End Date/Month/Year — same day, no overnight adjustment
       "Ground Staff",
-      630, 1400, // Shift Start/End Time — plain numbers, no zero-padding (06:30 -> 630, not "0630")
+      "0630", "1400", // Shift Start/End Time — zero-padded 4-digit text, never a bare number (which would drop the leading zero)
     ]);
     expect(rosterRepo.getRosterGrid).toHaveBeenCalledWith("station-1", "roster-1");
   });
@@ -51,8 +51,8 @@ describe("baRosterService.buildBARosterRows", () => {
 
     const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
 
-    expect(rows[0][8]).toBe(700);
-    expect(rows[0][9]).toBe(1500);
+    expect(rows[0][8]).toBe("0700");
+    expect(rows[0][9]).toBe("1500");
   });
 
   it("skips a staff member whose shift that day is not a duty type (e.g. off/leave)", async () => {
@@ -69,5 +69,28 @@ describe("baRosterService.buildBARosterRows", () => {
     const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
 
     expect(rows).toHaveLength(0);
+  });
+
+  it("skips a staff member on duty with no employee number on file", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      {
+        id: "s1", fullName: "Admin User", category: null, employeeId: null,
+        shiftAssignments: [
+          { shiftDate: new Date("2026-09-05T00:00:00.000Z"), shiftDef: { code: "N", name: "Night", type: "night", startTime: "21:00", endTime: "07:00" }, in1: null, out1: null },
+        ],
+      },
+      {
+        id: "s2", fullName: "Rakesh Patel", category: "B1", employeeId: "700577",
+        shiftAssignments: [
+          { shiftDate: new Date("2026-09-05T00:00:00.000Z"), shiftDef: { code: "M", name: "Morning", type: "duty", startTime: "06:30", endTime: "14:00" }, in1: null, out1: null },
+        ],
+      },
+    ]);
+
+    const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0][0]).toBe("700577");
   });
 });

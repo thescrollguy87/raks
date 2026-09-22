@@ -3,13 +3,13 @@ const rosterRepo = require("../repositories/rosterRepository");
 const ApiError = require("../utils/ApiError");
 
 // Matches the airport ground-staff access system's own upload template
-// exactly (Ground_Staff_Roster_April_2026.xlsx — column names, plain
-// unstyled header, plain numeric cells with no zero-padding): one row per
-// staff member per day they're actually on duty. "Shift Role" is a fixed
-// label per the portal's own spec — every row is "Ground Staff" regardless
-// of the person's real category/designation — and "Roster End Date/Month/
-// Year" is always the same calendar day as "Roster Date/Month/Year" (the
-// portal has no concept of an overnight shift spanning two dates).
+// (Ground_Staff_Roster_April_2026.xlsx — column names, plain unstyled
+// header): one row per staff member per day they're actually on duty.
+// "Shift Role" is a fixed label per the portal's own spec — every row is
+// "Ground Staff" regardless of the person's real category/designation —
+// and "Roster End Date/Month/Year" is always the same calendar day as
+// "Roster Date/Month/Year" (the portal has no concept of an overnight
+// shift spanning two dates).
 const BA_EXPORT_HEADER = [
   "Employee Number", "Roster Date", "Roster Month", "Roster Year",
   "Roster End Date", "Roster End Month", "Roster End Year",
@@ -17,10 +17,10 @@ const BA_EXPORT_HEADER = [
 ];
 const SHIFT_ROLE = "Ground Staff";
 
-// "06:30" -> 630, "21:00" -> 2100 — a plain number, same convention the
-// portal's own sample file uses for every numeric column (no zero-padding).
+// "06:30" -> "0630". The portal expects a zero-padded 4-digit time, not a
+// bare number (which would silently drop the leading zero on a morning shift).
 function toBATime(hhmm) {
-  return Number(hhmm.replace(":", ""));
+  return hhmm.replace(":", "").padStart(4, "0");
 }
 
 function monthKeyOf(dateStr) { return dateStr.slice(0, 7); }
@@ -59,9 +59,10 @@ async function buildBARosterRows(stationId, dateStr) {
     const startTime = todayShift.in1 || def.startTime;
     const endTime = todayShift.out1 || def.endTime;
     if (!startTime || !endTime) continue; // shift types with no real time can't produce a valid row
+    if (!s.employeeId) continue; // no way to identify this person to the portal without one — e.g. a test/admin account with a stray shift assignment but no real Staff Registry record
 
     rows.push([
-      s.employeeId || "",
+      s.employeeId,
       d, m, y,
       d, m, y, // "Roster End Date" — always the same day as "Roster Date" (no overnight-shift adjustment)
       SHIFT_ROLE,
