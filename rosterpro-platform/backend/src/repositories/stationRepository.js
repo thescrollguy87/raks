@@ -44,4 +44,14 @@ function createStation({ airlineId, name, iataCode, icaoCode, actorId }) {
   });
 }
 
-module.exports = { listStations, findStationAirlineId, findStationByAirlineAndIata, createStation };
+// Display-only lookup for report headers (the Shift Roster PDF export's
+// title band) — name/iataCode plus the owning airline's name, nothing a
+// tenancy check needs (that's findStationAirlineId above).
+function findStationWithAirline(stationId) {
+  return prisma.station.findUnique({
+    where: { id: stationId },
+    select: { name: true, iataCode: true, airline: { select: { name: true } } },
+  });
+}
+
+module.exports = { listStations, findStationAirlineId, findStationByAirlineAndIata, createStation, findStationWithAirline };

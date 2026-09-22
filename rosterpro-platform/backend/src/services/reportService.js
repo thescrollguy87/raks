@@ -14,8 +14,13 @@ const REPORT_TYPES = {
     filename: (p) => `roster_${p.monthKey}`,
     // Excel needs the real Monthly Roster layout (multi-row header + shift
     // legend), not the generic single-header-row table — see
-    // reportRenderService.toRosterExcelBuffer. PDF/CSV stay generic.
+    // reportRenderService.toRosterExcelBuffer. CSV stays generic.
     renderExcel: (data) => render.toRosterExcelBuffer(data),
+    // PDF is its own purpose-built, category-grouped, color-coded layout
+    // (the approved shift_roster_sample.pdf design) — it needs richer,
+    // differently-shaped data than the flat {header,rows} above, so it
+    // fetches its own via getRosterPdfData rather than reusing `data`.
+    renderPdf: (data, params) => reportData.getRosterPdfData(params.stationId, params.monthKey).then(render.toRosterPdfBuffer),
   },
   "roster-template": {
     title: (p) => `Roster Import Template — ${p.monthKey}`,
@@ -58,6 +63,7 @@ async function generateReport(type, format, params) {
   let buffer;
   if (format === "excel" && def.renderExcel) buffer = await def.renderExcel(data, params);
   else if (format === "excel") buffer = await render.toExcelBuffer(data, title, title);
+  else if (format === "pdf" && def.renderPdf) buffer = await def.renderPdf(data, params);
   else if (format === "pdf") buffer = await render.toPdfBuffer(data, title);
   else buffer = render.toCsvBuffer(data);
 

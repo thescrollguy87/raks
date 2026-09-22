@@ -4,6 +4,7 @@ const attendanceRepo = require("../repositories/attendanceRepository");
 const complianceService = require("./complianceService");
 const leaveService = require("./leaveService");
 const attendanceService = require("./attendanceService");
+const { FALLBACK_HEX } = require("../utils/colorTint");
 const ApiError = require("../utils/ApiError");
 
 // Real shift-code legend for the Monthly Roster's footer (Excel export/
@@ -42,6 +43,20 @@ function dateLabel(monthKey, day) {
 // anyone; alphabetical is only the fallback for staff no import has ever
 // captured an order for.
 const CATEGORY_ORDER = ["B1", "B2", "CM", "NCS", "STO"];
+// Same section labels the Shift Roster grid and Staff Registry UI both use
+// (see frontend CAT_LABELS in RosterPage.jsx/AutoRosterPage.jsx) — kept in
+// sync deliberately, not imported across the frontend/backend boundary.
+const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
+const WEEKDAY_2 = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+function monthLabelFor(monthKey) {
+  const [y, m] = monthKey.split("-").map(Number);
+  return `${MONTH_NAMES[m - 1]} ${y}`;
+}
+// "06:30" -> "0630" — the PDF roster's own compact convention (see
+// reportRenderService.toRosterPdfBuffer), distinct from the colon'd
+// "06:30–14:00" the on-screen legend/tooltips use.
+function timeCompact(t) { return t ? t.replace(":", "") : ""; }
 function byCategoryThenName(staff) {
   return [...staff].sort((a, b) => {
     const ca = CATEGORY_ORDER.indexOf(a.category || "NCS");
@@ -104,6 +119,89 @@ async function getRosterTemplateData(stationId, monthKey) {
   const rows = staff.map((s, i) => [i + 1, nameWithCategory(s.fullName, s.category), s.designation || "", s.employeeId || "", ...dayLabels.map(() => "O")]);
 
   return { header, rows, meta: { stationId, monthKey, staffCount: staff.length, shiftDefs, title: `ROSTER TEMPLATE — ${monthKey}` } };
+}
+
+// Purpose-built shape for the Shift Roster PDF export (see
+// reportRenderService.toRosterPdfBuffer) — category-grouped sections with
+// per-cell shift code + real clock time + the tenant's own configured
+// Shift Definition color, rather than the flat one-row-per-staff
+// {header,rows} shape getRosterReportData produces for Excel/CSV (that
+// shape collapses category into the name string and loses per-cell color
+// entirely, neither of which the PDF's design can work from).
+async function getRosterPdfData(stationId, monthKey) {
+  const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+  if (!roster) throw ApiError.notFound(`No roster exists yet for ${monthKey}`);
+
+  const station = await stationRepo.findStationWithAirline(stationId);
+  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
+  const nDays = daysInMonth(monthKey);
+  const dayLabels = Array.from({ length: nDays }, (_, i) => {
+    const day = i + 1;
+    const iso = dateLabel(monthKey, day);
+    const dow = new Date(`${iso}T00:00:00Z`).getUTCDay();
+    return { day, weekday: WEEKDAY_2[dow], iso };
+  });
+
+  const shiftDefs = await shiftLegendFor(stationId);
+  const defByCode = new Map(shiftDefs.map(d => [d.code, d]));
+
+  // Legend only lists codes actually used on this month's roster (plus the
+  // implicit "O" default for a blank day) — never the airline's full,
+  // possibly much longer, Shift Definitions list, which would crowd the
+  // printed legend with codes nobody is on this month.
+  const usedCodes = new Set(["O"]);
+  for (const s of staff) for (const sa of s.shiftAssignments) usedCodes.add(sa.shiftDef.code);
+  const legend = shiftDefs.filter(d => usedCodes.has(d.code)).sort((a, b) => a.sortOrder - b.sortOrder);
+  if (!legend.some(d => d.code === "O")) {
+    legend.push({ code: "O", name: "Off / Rest", color: FALLBACK_HEX, type: "off", startTime: null, endTime: null, sortOrder: 999 });
+  }
+
+  const categories = CATEGORY_ORDER.map(catCode => {
+    const catStaff = staff.filter(s => (s.category || "NCS") === catCode);
+    if (!catStaff.length) return null;
+    return {
+      code: catCode,
+      label: CAT_LABELS[catCode] || catCode,
+      staff: catStaff.map(s => {
+        const byDate = new Map(s.shiftAssignments.map(sa => [new Date(sa.shiftDate).toISOString().slice(0, 10), sa]));
+        return {
+          fullName: s.fullName,
+          days: dayLabels.map(({ iso }) => {
+            const sa = byDate.get(iso);
+            const code = sa?.shiftDef.code || "O";
+            const def = defByCode.get(code) || null;
+            // Same fallback chain the on-screen grid uses (RosterCell in
+            // RosterPage.jsx): a per-assignment override first, then the
+            // shift definition's own default — and OFF/LEAVE/DEPUTATION
+            // codes naturally have neither, which is exactly what should
+            // suppress the second time line (requirement, not a type check).
+            const startTime = sa?.in1 || def?.startTime || null;
+            const endTime = sa?.out1 || def?.endTime || null;
+            const hasTime = !!(startTime && endTime);
+            return {
+              code,
+              hasTime,
+              timeLabel: hasTime ? `${timeCompact(startTime)}-${timeCompact(endTime)}` : "",
+              color: def?.color || FALLBACK_HEX,
+            };
+          }),
+        };
+      }),
+    };
+  }).filter(Boolean);
+
+  return {
+    meta: {
+      stationId, monthKey,
+      stationName: station.name, iataCode: station.iataCode, airlineName: station.airline.name,
+      monthLabel: monthLabelFor(monthKey),
+      generatedAt: new Date(),
+      isPublished: roster.isPublished,
+    },
+    legend,
+    dayLabels,
+    categories,
+  };
 }
 
 // ── Compliance report ─────────────────────────────────────────────────────
@@ -227,6 +325,6 @@ async function getAttendanceRegisterData(stationId, monthKey) {
 }
 
 module.exports = {
-  daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getComplianceReportData, getLeaveReportData,
+  daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getRosterPdfData, getComplianceReportData, getLeaveReportData,
   getAttendanceRegisterData,
 };
