@@ -16,7 +16,16 @@ import StaffDetailDrawer from "../components/roster/StaffDetailDrawer.jsx";
 import GenerationResultPanel from "../components/roster/GenerationResultPanel.jsx";
 import RosterVersionsPanel from "../components/roster/RosterVersionsPanel.jsx";
 import RosterImportWizard from "../components/roster/RosterImportWizard.jsx";
-import { shiftNetHours, shiftBucket } from "../utils/shiftHours.js";
+import { shiftNetHours, shiftBucket, effectiveShiftWindow, restGapHours } from "../utils/shiftHours.js";
+
+// Matches ruleEngine.js's own default for the "min_rest_hours" hard rule —
+// the DGCA/CAR-145 baseline (see the Compliance Rules page's "N → M
+// Illegal", "A → M Illegal", "N → A Illegal" entries, which are all just
+// named instances of this one general rule). Checked here unconditionally,
+// independent of whether a station has actually configured a Rule Builder
+// rule for it, since these are meant to read as fixed safety rules, not
+// something that can silently go unchecked because nobody set it up.
+const MIN_REST_HOURS = 11;
 
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
@@ -1112,6 +1121,29 @@ const RosterRow = memo(function RosterRow({
         const isSelected = !!selectedCells?.has(key);
         const isCutPending = !!cutPendingKeys?.includes(key);
         const originalTitle = def ? `${def.name}${in1 ? `: ${in1}–${out1}${in2 && out2 ? `, ${in2}–${out2}` : ""}` : ""}` : code;
+
+        // Rest-gap violation: less than the mandatory MIN_REST_HOURS between
+        // the END of yesterday's shift and the START of today's — computed
+        // generically from real shift times (not a fixed list of code
+        // pairs), so it catches every shift-code variant (M1/A2/N3/...),
+        // not just the base M/A/N letters. Day 1 can't see the previous
+        // month's last day from this grid alone, so it's never flagged.
+        let restViolation = null;
+        if (day > 1 && !isBlocked && in1) {
+          const prevA = assignmentsByDay[day - 2];
+          const prevCode = prevA?.shiftDef.code || "O";
+          const prevDef = shiftDefByCode[prevCode];
+          const prevDateStr = dateAt(monthKey, day - 1).toISOString().slice(0, 10);
+          const prevWindow = effectiveShiftWindow(prevDef, prevA, prevDateStr);
+          if (prevWindow) {
+            const todayDateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
+            const gap = restGapHours(prevWindow, todayDateStr, in1);
+            if (gap !== null && gap < MIN_REST_HOURS) {
+              restViolation = `Only ${gap.toFixed(1)}h rest since ${prevCode} ended at ${prevWindow.lastOut} — below the mandatory ${MIN_REST_HOURS}h minimum rest period`;
+            }
+          }
+        }
+
         // A display-only overlay — the real shift assignment underneath
         // (assignmentsByDay, used for weekHours/totalHours above) is never
         // touched, so as soon as isBlocked next computes false (the
@@ -1122,10 +1154,11 @@ const RosterRow = memo(function RosterRow({
             key={day} userId={userId} day={day}
             code={isBlocked ? "🔒" : code}
             colorHex={isBlocked ? "rgba(220,38,38,.22)" : (def?.color || "rgba(180,180,180,.1)")}
-            title={isBlocked ? `Blocked from duty — ${blockReason || "expired compliance record"}. Originally scheduled: ${originalTitle}` : originalTitle}
+            title={isBlocked ? `Blocked from duty — ${blockReason || "expired compliance record"}. Originally scheduled: ${originalTitle}` : restViolation ? `⚠ ${restViolation}\n\n${originalTitle}` : originalTitle}
             in1={isBlocked ? null : in1} out1={isBlocked ? null : out1}
             in2={isBlocked ? null : in2} out2={isBlocked ? null : out2}
             isSelected={isSelected} isCutPending={isCutPending}
+            isRestViolation={!!restViolation}
             dayClass={dayCellClasses(monthKey, day, todayDayNum)}
             onCellClick={onCellClick} onCellDoubleClick={onCellDoubleClick}
           />
@@ -1145,12 +1178,12 @@ const RosterRow = memo(function RosterRow({
 // shallow prop compare is a real equality check, not a reference check
 // that always fails (which is what would happen if the parent still
 // passed whole `assignment`/`shiftDef` objects down here).
-const RosterCell = memo(function RosterCell({ userId, day, code, colorHex, title, in1, out1, in2, out2, isSelected, isCutPending, dayClass, onCellClick, onCellDoubleClick }) {
+const RosterCell = memo(function RosterCell({ userId, day, code, colorHex, title, in1, out1, in2, out2, isSelected, isCutPending, isRestViolation, dayClass, onCellClick, onCellDoubleClick }) {
   useRenderCount(`RosterCell:${userId}:${day}`);
   return (
     <td className={dayClass}>
       <div
-        className={`sp${isSelected ? " cell-selected" : ""}${isCutPending ? " cell-cut" : ""}`}
+        className={`sp${isSelected ? " cell-selected" : ""}${isCutPending ? " cell-cut" : ""}${isRestViolation ? " rest-violation" : ""}`}
         onClick={(e) => onCellClick(userId, day, e)}
         onDoubleClick={() => onCellDoubleClick(userId, day)}
         title={title}

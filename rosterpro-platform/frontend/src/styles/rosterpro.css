@@ -239,6 +239,13 @@ table{border-collapse:collapse}
 .sp:hover{filter:brightness(1.05);box-shadow:0 0 0 2px rgba(15,23,42,.35),0 2px 5px rgba(0,0,0,.18);z-index:10}
 .sp.expired-lock{opacity:.7;cursor:not-allowed;background:rgba(220,38,38,.09)!important;border:1px solid rgba(220,38,38,.3)!important}
 .sp.expired-lock::after{content:"🔒";position:absolute;top:-2px;right:-2px;font-size:8px}
+/* Mandatory-rest violation (see MIN_REST_HOURS in RosterPage.jsx) — a
+   solid red outline plus a small warning badge, same corner-badge
+   technique as .expired-lock above but the opposite corner so the two
+   never collide, and never dims the cell itself (the shift is still
+   real and still needs to be seen, just flagged as illegal). */
+.sp.rest-violation{outline:2px solid var(--rp-red);outline-offset:-1px}
+.sp.rest-violation::before{content:"⚠";position:absolute;top:-4px;left:-4px;font-size:8px;line-height:1;width:11px;height:11px;border-radius:50%;background:var(--rp-red);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,.3)}
 /* Excel-style grid selection/clipboard state — a solid ring for the
    current selection, a dashed one for cells a Ctrl+X cut is still pending
    on (cleared only once a paste actually lands, same as real Excel). */

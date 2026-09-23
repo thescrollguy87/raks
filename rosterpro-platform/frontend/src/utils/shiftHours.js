@@ -40,15 +40,19 @@ export function effectiveShiftWindow(def, assignment, dateStr) {
 
 // Rest hours between the end of `fromWindow` (from effectiveShiftWindow, on
 // fromDateStr) and the start of a shift beginning at `toDateStr toTime`.
-// Returns null when either side has no real time (e.g. Off/Leave).
+// Returns null only when either side has no real time to compute from (e.g.
+// Off/Leave) — a NEGATIVE result (today's shift starts before yesterday's
+// even ends, e.g. Night 21:00-07:00 -> Morning 06:30 = -0.5h) is real,
+// meaningful data, not a missing value: it's the worst-case rest violation,
+// not the absence of one, so it must come back as a negative number for
+// every caller's own `< minimum` check to actually catch it.
 export function restGapHours(fromWindow, toDateStr, toTime) {
   if (!fromWindow || !toTime) return null;
   const [fh, fm] = fromWindow.lastOut.split(":").map(Number);
   const [th, tm] = toTime.split(":").map(Number);
   const fromMs = new Date(fromWindow.endDateStr + "T00:00:00Z").getTime() + (fh * 60 + fm) * 60000;
   const toMs = new Date(toDateStr + "T00:00:00Z").getTime() + (th * 60 + tm) * 60000;
-  const diffH = (toMs - fromMs) / 3600000;
-  return diffH >= 0 ? diffH : null;
+  return (toMs - fromMs) / 3600000;
 }
 
 function toMinutes(hhmm) { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; }
