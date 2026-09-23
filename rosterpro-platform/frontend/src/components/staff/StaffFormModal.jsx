@@ -20,10 +20,14 @@ const ROLE_LABELS = {
   NCS: "NCS", STORES: "Stores", READ_ONLY_AUDITOR: "Read-Only Auditor",
 };
 
-// Same modal for add and edit — editingStaff is null for "add". Email is
-// create-only (no endpoint to change a staff member's login email here).
-// Role and L1 Manager ARE editable now — Role via the dedicated
-// assignRoles endpoint, L1 Manager via the regular update.
+// Same modal for add and edit — editingStaff is null for "add", so the two
+// modes can never drift apart into two different field sets/orders. Email
+// and password are editable in both modes now: in edit mode email is
+// pre-filled (changing it re-validates + re-checks uniqueness server-side)
+// and the password field is an optional reset — left blank, it's omitted
+// from the update payload entirely and nothing changes. Role and L1
+// Manager are editable too — Role via the dedicated assignRoles endpoint,
+// L1 Manager via the regular update.
 export default function StaffFormModal({ editingStaff, onSaved, onClose }) {
   const { stationId } = useStation();
   const isEdit = !!editingStaff;
@@ -50,19 +54,24 @@ export default function StaffFormModal({ editingStaff, onSaved, onClose }) {
 
   async function handleSave() {
     if (!fullName.trim()) { setError("Enter the staff member's name"); return; }
+    if (!email.trim()) { setError("Enter an email — it's also their login"); return; }
     setSaving(true);
     setError("");
     try {
       if (isEdit) {
-        await staffApi.updateStaff(editingStaff.id, {
-          fullName, employeeId: employeeId || null, designation: designation || null, category,
+        const body = {
+          fullName, email, employeeId: employeeId || null, designation: designation || null, category,
           reportsToId: reportsToId || null,
-        });
+        };
+        // Blank = no change — never sent, so the server never touches the
+        // existing password. Only a non-empty value goes through the same
+        // strength check Add uses (server-side; see userService.updateStaff).
+        if (password) body.password = password;
+        await staffApi.updateStaff(editingStaff.id, body);
         if (role && !editingStaff.roles?.includes(role)) {
           await staffApi.assignRoles(editingStaff.id, [role]);
         }
       } else {
-        if (!email.trim()) { setError("Enter an email — it's also their login"); setSaving(false); return; }
         if (!password) { setError("Set a temporary password (10+ chars, letters and numbers)"); setSaving(false); return; }
         if (!role) { setError("Select a role"); setSaving(false); return; }
         await staffApi.createStaff({
@@ -97,18 +106,17 @@ export default function StaffFormModal({ editingStaff, onSaved, onClose }) {
           <input className="fi" type="text" value={fullName} onChange={(e) => setFullName(e.target.value)} />
         </div>
 
-        {!isEdit && (
-          <>
-            <div className="fg" style={{ marginBottom: 12 }}>
-              <label className="fl">Email (also their login)</label>
-              <input className="fi" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-            </div>
-            <div className="fg" style={{ marginBottom: 12 }}>
-              <label className="fl">Temporary Password</label>
-              <input className="fi" type="text" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="10+ chars, at least one letter and one number" />
-            </div>
-          </>
-        )}
+        <div className="fg" style={{ marginBottom: 12 }}>
+          <label className="fl">Email (also their login)</label>
+          <input className="fi" type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </div>
+        <div className="fg" style={{ marginBottom: 12 }}>
+          <label className="fl">{isEdit ? "Reset Password (optional)" : "Temporary Password"}</label>
+          <input
+            className="fi" type="text" value={password} onChange={(e) => setPassword(e.target.value)}
+            placeholder={isEdit ? "Leave blank to keep current password" : "10+ chars, at least one letter and one number"}
+          />
+        </div>
 
         <div className="fg2" style={{ marginBottom: 12 }}>
           <div className="fg">

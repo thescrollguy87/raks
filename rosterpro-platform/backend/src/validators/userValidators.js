@@ -31,6 +31,16 @@ const updateUserSchema = z.object({
   designation: z.string().min(1).nullable().optional(),
   stationId: z.string().uuid().nullable().optional(),
   reportsToId: z.string().uuid().nullable().optional(),
+  // Trimmed + lowercased here (before the .email() format check runs), so
+  // "  Jai.Singh@Akasaair.com " and "jai.singh@akasaair.com" validate and
+  // compare identically — the uniqueness check and audit diff in
+  // userService.updateStaff both rely on this already being canonical.
+  email: z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() : v), z.string().email()).optional(),
+  // Omit this field entirely to leave the password unchanged — strength is
+  // checked in the service (isPasswordStrong), same as createStaff and
+  // authService's reset flow, so both places share one definition of
+  // "strong enough."
+  password: z.string().min(1).optional(),
 });
 
 const assignRolesSchema = z.object({

@@ -77,27 +77,63 @@ async function updateStaff(id, body, actor, req) {
   if (!before) throw ApiError.notFound("Staff member not found");
   await assertOwnStation(actor, before.stationId);
 
+  // Email and password change together, atomically, in the one update
+  // below — this app has no separate "auth account" row to fall out of
+  // sync with, `email`/`passwordHash` live on this same User record, so a
+  // single write is what keeps them consistent. Pulled out of `body` here
+  // because each needs its own validation/hashing rather than being
+  // spread straight into the Prisma write like every other field.
+  const { email: rawEmail, password, ...rest } = body;
+
+  const credentialData = {};
+  if (rawEmail !== undefined && rawEmail !== before.email) {
+    const existing = await userRepo.findByEmail(rawEmail);
+    if (existing && existing.id !== id) {
+      throw ApiError.conflict("That email is already in use by another staff member");
+    }
+    credentialData.email = rawEmail; // already trimmed + lowercased + format-checked by updateUserSchema
+  }
+  let passwordWasReset = false;
+  if (password) {
+    if (!isPasswordStrong(password)) {
+      throw ApiError.badRequest("Password must be at least 10 characters and include a letter and a number");
+    }
+    credentialData.passwordHash = await hashPassword(password);
+    passwordWasReset = true;
+  }
+
   // Only an airline-wide admin can move someone to a different station —
   // a Station Manager who holds staff:update shouldn't be able to smuggle
   // a stationId change through this endpoint to reassign staff elsewhere.
   const isAdmin = ["SUPER_ADMIN", "AIRLINE_ADMIN"].some(r => actor.roles.includes(r));
   let data;
-  if (isAdmin && body.stationId && body.stationId !== before.stationId) {
+  if (isAdmin && rest.stationId && rest.stationId !== before.stationId) {
     // Being moved to a genuinely different station — that station must
     // belong to an airline the actor is allowed to place staff at too
     // (same rule as createStaff), or an AIRLINE_ADMIN could otherwise
     // "kidnap" someone into a different tenant entirely just by setting
     // stationId on an update. airlineId is re-derived from wherever they
     // end up so it never drifts out of sync with their actual station.
-    await assertOwnStation(actor, body.stationId);
-    const station = await stationRepo.findStationAirlineId(body.stationId);
-    data = { ...body, airlineId: station.airlineId };
+    await assertOwnStation(actor, rest.stationId);
+    const station = await stationRepo.findStationAirlineId(rest.stationId);
+    data = { ...rest, airlineId: station.airlineId, ...credentialData };
   } else {
-    data = isAdmin ? { ...body } : { ...body, stationId: before.stationId };
+    data = isAdmin ? { ...rest, ...credentialData } : { ...rest, stationId: before.stationId, ...credentialData };
   }
 
   const after = await userRepo.update(id, { ...data, updatedById: actor.sub });
-  await auditTrail.recordUpdate("User", id, before.stationId, before, body, actor, req);
+
+  // Field-level diff for everything EXCEPT the password — passwordHash is
+  // deliberately left out of this object (never written to the audit
+  // trail, hashed or not). A reset is logged as its own activity entry
+  // below instead, naming who/when/which staff member with no value
+  // attached at all.
+  const { passwordHash: _omit, ...auditAfter } = data;
+  await auditTrail.recordUpdate("User", id, before.stationId, before, auditAfter, actor, req);
+  if (passwordWasReset) {
+    await auditTrail.logActivity("Password reset", `${before.fullName}'s password was reset`, before.stationId, actor, req);
+  }
+
   return toPublicShape(after);
 }
 
