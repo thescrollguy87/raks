@@ -565,7 +565,7 @@ function FlightScheduleTab({ stationId }) {
 }
 
 // ═══ TAB: WORKLOAD CONFIG ═════════════════════════════════════════════════════
-const CATEGORIES = ["B1", "B2", "CM"];
+const CATEGORIES = ["B1", "B2", "CM", "NCS"];
 const PREFERRED_SHIFT_OPTIONS = [{ value: "Any", label: "Any (split evenly)" }, { value: "M", label: "Morning" }, { value: "A", label: "Afternoon" }, { value: "N", label: "Night" }];
 
 // Planned/Unplanned Task Master rows use this instead of raw `id` for
@@ -1023,7 +1023,7 @@ function RuleRow({ rule: r, groups, conditionTypes, onSave, onDelete, busy, setR
       </select>
       {r.appliesToType === "category" ? (
         <select className="fi" value={r.appliesToValue || ""} style={{ fontSize: 9 }} onChange={e => { update("appliesToValue", e.target.value); onSave({ ...r, appliesToValue: e.target.value }); }} disabled={busy}>
-          {CATEGORIES.concat("NCS").map(c => <option key={c} value={c}>{c}</option>)}
+          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       ) : r.appliesToType === "group" ? (
         <select className="fi" value={r.appliesToValue || ""} style={{ fontSize: 9 }} onChange={e => { update("appliesToValue", e.target.value); onSave({ ...r, appliesToValue: e.target.value }); }} disabled={busy}>

@@ -139,7 +139,7 @@ async function getMandatoryCoverageStatus(args, ctx) {
     shiftDefsByCodeFlat(ctx.airlineId),
   ]);
 
-  const categories = ["B1", "B2", "CM"].filter(c => mandatoryCoverageConfig?.[c]?.[shift]?.enabled);
+  const categories = ["B1", "B2", "CM", "NCS"].filter(c => mandatoryCoverageConfig?.[c]?.[shift]?.enabled);
   const rows = categories.map(category => {
     const min = Math.max(1, +mandatoryCoverageConfig[category][shift].min || 1);
     const actual = staff.filter(s => {

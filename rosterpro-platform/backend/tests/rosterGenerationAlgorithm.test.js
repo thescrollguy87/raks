@@ -284,4 +284,31 @@ describe("buildRosterAssignments — Mandatory vs Advisory two-tier coverage con
     expect(day1M).toBeGreaterThanOrEqual(3);
     expect(result.violations).toHaveLength(0); // an advisory shortfall never counts as a critical violation
   });
+
+  // NCS previously had no mandatory tier at all — the fill loop only ever
+  // iterated B1/B2/CM (see git history), so with zero flight-schedule-
+  // driven advisory demand for a given day/shift, NCS coverage depended
+  // entirely on where the base 8-day rotation happened to land, with
+  // nothing correcting a coincidental shortfall (the real Oct 1 gap this
+  // was reported against). NCS is now in that loop the same as the other
+  // three categories.
+  it("enforces a mandatory NCS minimum, same as B1/B2/CM", () => {
+    const staff = Array.from({ length: 8 }, (_, i) => ({ id: `ncs${i}`, category: "NCS" }));
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 2 }, A: { enabled: true, min: 2 }, N: { enabled: false } } };
+    const result = buildRosterAssignments({ staff, nDays: 5, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    for (let day = 1; day <= 5; day++) {
+      const onM = result.assignments.filter(a => a.day === day && a.code === "M").length;
+      const onA = result.assignments.filter(a => a.day === day && a.code === "A").length;
+      expect(onM).toBeGreaterThanOrEqual(2);
+      expect(onA).toBeGreaterThanOrEqual(2);
+    }
+    expect(result.violations).toHaveLength(0); // enough staff exist to actually meet it
+  });
+
+  it("reports an unmet mandatory NCS slot as a critical violation when nobody is eligible", () => {
+    const staff = [{ id: "ncs0", category: "NCS" }]; // one person can't cover a min:2 requirement
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 2 }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    expect(result.violations).toContainEqual(expect.objectContaining({ day: 1, shift: "M", category: "NCS" }));
+  });
 });

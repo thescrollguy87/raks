@@ -86,11 +86,14 @@ function shiftFamily(code, shiftDefsByCode) {
 // Default Mandatory Minimum Coverage: every shift needs >=1 B1, Night also
 // needs >=1 B2 — exactly the hardcoded behavior this port had before the
 // config became adjustable, preserved as the default so existing callers
-// that don't pass mandatoryCoverageConfig see no behavior change.
+// that don't pass mandatoryCoverageConfig see no behavior change. NCS
+// defaults to disabled (same as CM) — a station opts in via Workload
+// Config rather than this getting force-enabled under them.
 const DEFAULT_MANDATORY_COVERAGE_CONFIG = {
   B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: true, min: 1 } },
   B2: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: true, min: 1 } },
   CM: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } },
+  NCS: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } },
 };
 
 function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId) {
@@ -210,7 +213,7 @@ function buildRosterAssignments({
   }
 
   for (let day = 1; day <= nDays; day++) {
-    ["B1", "B2", "CM"].forEach(category => {
+    ["B1", "B2", "CM", "NCS"].forEach(category => {
       ["M", "A", "N"].forEach(shift => {
         const cfg = coverageConfig[category]?.[shift];
         if (cfg && cfg.enabled) fillCategory(shift, category, day, Math.max(1, +cfg.min || 1), { mandatory: true });

@@ -29,7 +29,7 @@ const upsertConfigSchema = z.object({
 
 const upsertMandatoryCoverageRuleSchema = z.object({
   stationId: z.string().uuid(),
-  category: z.enum(["B1", "B2", "CM"]),
+  category: z.enum(["B1", "B2", "CM", "NCS"]),
   shift: z.enum(["M", "A", "N"]),
   enabled: z.boolean(),
   minCount: z.number().int().min(1).max(50).default(1),

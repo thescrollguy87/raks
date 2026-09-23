@@ -29,6 +29,8 @@ async function upsertWorkloadConfig(input, actor, req) {
 // Default Mandatory Minimum Coverage — matches
 // rosterGenerationAlgorithm.js's own DEFAULT_MANDATORY_COVERAGE_CONFIG so a
 // station with no explicit rules saved yet generates exactly as before.
+// NCS starts disabled (same as CM) — a station opts in explicitly rather
+// than this changing behavior for anyone who hasn't touched the tab.
 const DEFAULT_MANDATORY_RULES = [
   { category: "B1", shift: "M", enabled: true, minCount: 1 },
   { category: "B1", shift: "A", enabled: true, minCount: 1 },
@@ -39,6 +41,9 @@ const DEFAULT_MANDATORY_RULES = [
   { category: "CM", shift: "M", enabled: false, minCount: 1 },
   { category: "CM", shift: "A", enabled: false, minCount: 1 },
   { category: "CM", shift: "N", enabled: false, minCount: 1 },
+  { category: "NCS", shift: "M", enabled: false, minCount: 1 },
+  { category: "NCS", shift: "A", enabled: false, minCount: 1 },
+  { category: "NCS", shift: "N", enabled: false, minCount: 1 },
 ];
 
 async function listMandatoryCoverageRules(stationId) {
