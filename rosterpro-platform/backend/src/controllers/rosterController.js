@@ -181,7 +181,7 @@ const deleteWorkloadItem = asyncHandler(async (req, res) => {
 // ─── Manpower Plan ────────────────────────────────────────────────────────────
 const manpowerPlan = asyncHandler(async (req, res) => {
   const { stationId, monthKey, aogBuffer } = req.query;
-  const result = await rosterPlanningService.getManpowerPlan(stationId, monthKey, aogBuffer !== undefined ? Number(aogBuffer) : undefined);
+  const result = await rosterPlanningService.getManpowerPlan(stationId, monthKey, aogBuffer !== undefined ? Number(aogBuffer) : undefined, req.user);
   res.json(result);
 });
 

@@ -1479,13 +1479,20 @@ function GenerateTab({ stationId }) {
         <div className="card">
           <div className="card-title">📋 Workload Summary</div>
           {!plan ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Run generation to see results</div> : plan.workloadSummary.length === 0 ? (
-            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No workload configured yet — see the Workload Input tab.</div>
+            <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No workload configured yet — set up Task Masters, Manual Demand, or a Flight Schedule import in the Workload Config / Flight Schedule tabs.</div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
               {plan.workloadSummary.map((r, i) => (
                 <div key={i}>
                   <div style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.label}</div>
-                  <div style={{ fontSize: 13 }}>{r.count}<span style={{ fontSize: 9, color: "var(--text-dim)" }}> B1:{r.b1} B2:{r.b2} CM:{r.cm} NCS:{r.ncs}</span></div>
+                  <div style={{ fontSize: 13 }}>
+                    {r.count}{r.unit || ""}
+                    {r.note ? (
+                      <span style={{ fontSize: 9, color: "var(--text-dim)" }}> {r.note}</span>
+                    ) : (
+                      <span style={{ fontSize: 9, color: "var(--text-dim)" }}> B1:{r.b1} B2:{r.b2} CM:{r.cm} NCS:{r.ncs}</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
