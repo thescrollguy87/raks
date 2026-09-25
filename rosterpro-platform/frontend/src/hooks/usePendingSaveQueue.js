@@ -20,6 +20,7 @@ const IMMEDIATE_FLUSH_SIZE = 20;
 export function usePendingSaveQueue() {
   const [status, setStatus] = useState("idle"); // idle | saving | saved | error
   const [pendingCount, setPendingCount] = useState(0);
+  const [lastError, setLastError] = useState(null);
   const jobsRef = useRef(new Map());
   const failedRef = useRef(new Map());
   const timerRef = useRef(null);
@@ -40,17 +41,26 @@ export function usePendingSaveQueue() {
     updateCounts();
 
     let anyFailure = false;
+    // The most recent failure's real server/network message, not a generic
+    // one — a 403 "Roster is published" and a dropped connection need
+    // different explanations (and different odds that Retry will help),
+    // and the previous single "Unable to save changes" text for both left
+    // a published-roster edit stuck retrying a request that can never
+    // succeed until the roster is unpublished.
+    let failureMessage = null;
     for (const [id, job] of jobs) {
       try {
         await job.run();
       } catch (err) {
         anyFailure = true;
+        failureMessage = err?.message || "Unknown error";
         failedRef.current.set(id, job);
       }
     }
     updateCounts();
     flushingRef.current = false;
     setStatus(anyFailure ? "error" : "saved");
+    setLastError(anyFailure ? failureMessage : null);
 
     // Edits that arrived WHILE this flush was in flight are already queued
     // for the next cycle via their own debounce timer — nothing to do here.
@@ -93,5 +103,5 @@ export function usePendingSaveQueue() {
 
   useEffect(() => () => { if (timerRef.current) clearTimeout(timerRef.current); }, []);
 
-  return { status, pendingCount, enqueue, retry };
+  return { status, pendingCount, lastError, enqueue, retry };
 }

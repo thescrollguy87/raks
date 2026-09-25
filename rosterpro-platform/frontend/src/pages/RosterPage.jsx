@@ -326,6 +326,7 @@ export default function RosterPage() {
   // defeat RosterRow's React.memo on every one of those unrelated renders.
   const openCell = useCallback((userId, day) => {
     if (!canEdit) return;
+    if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
     const s = staffByIdRef.current.get(userId);
     if (!s) return;
     const dateObj = dateAt(monthKey, day);
@@ -338,7 +339,7 @@ export default function RosterPage() {
       currentIn1: assignment?.in1 || null, currentOut1: assignment?.out1 || null,
       currentIn2: assignment?.in2 || null, currentOut2: assignment?.out2 || null,
     });
-  }, [canEdit, monthKey]);
+  }, [canEdit, monthKey, roster]);
 
   // Same stability requirement as openCell above — passed down as
   // onStaffClick to every row.
@@ -356,6 +357,7 @@ export default function RosterPage() {
   // bulk one) specifically so this still gets its own audit-trail entry
   // with `reason`, exactly as before.
   async function saveCell({ shiftCode, reason, in1, out1, in2, out2 }) {
+    if (roster?.isPublished) { alert("Roster is published — unpublish before editing."); return; }
     const { userId, dateStr } = editingCell;
     applyAssignmentToStaff(userId, dateStr, buildOptimisticAssignment(dateStr, shiftCode, in1, out1, in2, out2));
     saveQueue.enqueue(`single:${userId}:${dateStr}`, () =>
@@ -685,7 +687,7 @@ export default function RosterPage() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <StatusPill roster={roster} />
-        <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} onRetry={saveQueue.retry} />
+        <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} lastError={saveQueue.lastError} onRetry={saveQueue.retry} />
       </div>
 
       {/* Toolbar: month / station-scoped category / search / view density */}
@@ -999,7 +1001,7 @@ function StatusPill({ roster }) {
 // The smart-autosave status indicator — reflects usePendingSaveQueue's
 // shared state, not any single edit, since every cell edit on this page
 // (single or bulk) now goes through that one queue.
-function SaveStatusPill({ status, pendingCount, onRetry }) {
+function SaveStatusPill({ status, pendingCount, lastError, onRetry }) {
   if (status === "idle") return null;
   if (status === "saving") {
     return <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, color: "var(--text-dim)" }}>🟡 Saving{pendingCount ? `… (${pendingCount})` : "…"}</div>;
@@ -1007,7 +1009,7 @@ function SaveStatusPill({ status, pendingCount, onRetry }) {
   if (status === "error") {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 11, color: "var(--rp-red)" }}>
-        🔴 Unable to save changes — kept locally.
+        🔴 {lastError || "Unable to save changes"} — kept locally.
         <button className="btn btn-ghost btn-sm" onClick={onRetry}>Retry</button>
       </div>
     );
