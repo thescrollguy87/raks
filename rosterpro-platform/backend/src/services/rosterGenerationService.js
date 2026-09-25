@@ -245,7 +245,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   return {
     mandatoryCoverageConfig, nightRestrictionRules, allRules: rules,
     staffGroupMembersByGroupId, staffGroupNameById,
-    advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason,
+    advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason, demandExplain: demandResult.explain,
     explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
     automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
     manualAdditionalDemand, config, ruleShiftDefsByCode,

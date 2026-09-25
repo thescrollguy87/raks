@@ -149,12 +149,31 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   const grandNeeded = target.M + target.A + target.N;
   const effectiveStaff = Math.max(0, staff.length - blockedIds.size);
 
+  // One-line, human-readable trace of exactly which day and which real
+  // flights produced a category/shift's worst-case number — built so a
+  // planner can hover a Category Requirement cell and see the answer
+  // themselves instead of having to ask why a number "doesn't match the
+  // flight schedule" (it's near-always because it's the WORST day of the
+  // month, not the day they happened to be looking at).
+  function formatExplain(e) {
+    if (!e) return null;
+    const parts = [`floor ${e.mandatoryFloor}`, `concurrency ceil(${e.peakConcurrency}÷${e.concurrencyRatio})=${e.concurrencyDriven}`];
+    if (e.clashTopUp) parts.push(`clash top-up +${e.clashTopUp}`);
+    if (e.clashPeak) parts.push(`clash floor ${e.clashPeak}`);
+    if (e.manual) parts.push(`manual demand +${e.manual}`);
+    if (e.buffer) parts.push(`buffer +${e.buffer}`);
+    const flightsText = e.flights.length ? e.flights.join(", ") : "none — no aircraft on ground/PDC at that instant";
+    return `Day ${e.day}: ${e.total} needed = ${parts.join(" + ")}. Aircraft active at peak concurrency: ${flightsText}.`;
+  }
+
   const CAT_KEY = { B1: "b1", B2: "b2", CM: "cm", NCS: "ncs", STO: null };
   const categoryRequirement = Object.entries(CAT_KEY).map(([cat, key]) => {
     const needs = key ? { M: peak.M[key], A: peak.A[key], N: peak.N[key] } : { M: 0, A: 0, N: 0 };
     const available = staffByCategory[cat] || 0;
     const maxNeed = Math.max(needs.M, needs.A, needs.N, 0);
-    return { category: cat, needs, available, status: available >= maxNeed ? "OK" : "SHORT" };
+    const catExplain = workloadContext.demandExplain?.[cat];
+    const explain = catExplain ? { M: formatExplain(catExplain.M), A: formatExplain(catExplain.A), N: formatExplain(catExplain.N) } : null;
+    return { category: cat, needs, available, status: available >= maxNeed ? "OK" : "SHORT", explain };
   });
 
   // Real, currently-configured workload feeding the numbers above — Flight

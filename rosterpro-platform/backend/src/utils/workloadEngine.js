@@ -231,8 +231,22 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
     });
   }
 
+  // Traces WHICH day and WHICH real flights drive the worst-case number for
+  // each category/shift — the single biggest source of "these numbers don't
+  // match what I see in the flight schedule" confusion, since Category
+  // Requirement shows a peak-of-month figure but nothing on screen ever
+  // said which day that peak actually fell on or what was overlapping.
+  // Keyed by category then shift; each entry is the (day, breakdown) pair
+  // with the highest TOTAL for that category/shift across the whole month.
+  const emptyExplain = () => ({ M: null, A: null, N: null });
+  const explain = { B1: emptyExplain(), CM: emptyExplain(), NCS: emptyExplain() };
+  const recordExplain = (cat, sh, day, total, breakdown) => {
+    const cur = explain[cat][sh];
+    if (!cur || total > cur.total) explain[cat][sh] = { day, total, ...breakdown };
+  };
+
   if (!flightSchedule) {
-    return { demand, source: "base-coverage-only", reason: "No flight schedule imported for this exact month — using flat base coverage plus any Manual Demand / per-shift buffer entries." };
+    return { demand, source: "base-coverage-only", reason: "No flight schedule imported for this exact month — using flat base coverage plus any Manual Demand / per-shift buffer entries.", explain };
   }
 
   const { turnRecords, charterRecords } = flightSchedule;
@@ -273,8 +287,10 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       // that merely touches the shift.
       const clipped = allEvents
         .filter(e => e.start < endAbs && e.end > startAbs)
-        .map(e => ({ start: Math.max(e.start, startAbs), end: Math.min(e.end, endAbs) }));
-      const peakConcurrency = findPeakConcurrency(clipped).peak;
+        .map(e => ({ start: Math.max(e.start, startAbs), end: Math.min(e.end, endAbs), label: e.label }));
+      const peakInfo = findPeakConcurrency(clipped);
+      const peakConcurrency = peakInfo.peak;
+      const flights = peakInfo.activeAtPeak.map(e => e.label);
       const clippedClash = clashEvents
         .filter(e => e.start < endAbs && e.end > startAbs)
         .map(e => ({ start: Math.max(e.start, startAbs), end: Math.min(e.end, endAbs) }));
@@ -286,14 +302,35 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       const combinedShortfall = clashPeak - (b1Base + cmBase);
       if (combinedShortfall > 0) cmBase += combinedShortfall; // top up CM only — B1's own floor is never inflated by a clash
 
-      demand[d][sh].B1 = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
-      demand[d][sh].CM = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
-      demand[d][sh].NCS = Math.max(Math.ceil(peakConcurrency / ratioNCS), clashPeak) + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
+      const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
+      const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
+      const ncsTotal = Math.max(Math.ceil(peakConcurrency / ratioNCS), clashPeak) + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
+
+      demand[d][sh].B1 = b1Total;
+      demand[d][sh].CM = cmTotal;
+      demand[d][sh].NCS = ncsTotal;
+
+      recordExplain("B1", sh, d, b1Total, {
+        mandatoryFloor: baseCoverage[sh] || 0, peakConcurrency, concurrencyRatio: ratioB1,
+        concurrencyDriven: Math.ceil(peakConcurrency / ratioB1),
+        manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
+      });
+      recordExplain("CM", sh, d, cmTotal, {
+        mandatoryFloor: 0, peakConcurrency, concurrencyRatio: ratioCM,
+        concurrencyDriven: Math.ceil(peakConcurrency / ratioCM), clashTopUp: Math.max(0, combinedShortfall),
+        manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
+      });
+      recordExplain("NCS", sh, d, ncsTotal, {
+        mandatoryFloor: 0, peakConcurrency, concurrencyRatio: ratioNCS,
+        concurrencyDriven: Math.ceil(peakConcurrency / ratioNCS), clashPeak,
+        manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, flights,
+      });
     });
   }
   return {
     demand, source: "flight-schedule-driven",
     reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift (B1 1-per-${ratioB1}, CM 1-per-${ratioCM}, NCS 1-per-${ratioNCS}), plus Manual Demand and the per-shift unplanned buffer. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
+    explain,
   };
 }
 

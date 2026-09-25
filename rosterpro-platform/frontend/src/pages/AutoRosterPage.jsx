@@ -1449,6 +1449,7 @@ function GenerateTab({ stationId }) {
       <div>
         <div className="card">
           <div className="card-title">👥 Category Requirement</div>
+          {plan && <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4 }}>B1/CM/NCS numbers are the worst day this month — hover a number to see which day and which flights drove it.</div>}
           {!plan ? <div style={{ fontSize: 10, color: "var(--text-dim)" }}>Run generation to see results</div> : (
             <table style={{ width: "100%", fontSize: 10 }}>
               <thead><tr>
@@ -1464,7 +1465,13 @@ function GenerateTab({ stationId }) {
                   <tr key={r.category}>
                     <td style={{ padding: "3px 5px" }}><span className={`cat-tag cat-${r.category}`}>{r.category}</span></td>
                     {["M", "A", "N"].map(sh => (
-                      <td key={sh} style={{ textAlign: "center", padding: "3px 5px", fontWeight: 700, color: r.needs[sh] > r.available ? "var(--red)" : "var(--green)" }}>{r.needs[sh]}</td>
+                      <td
+                        key={sh}
+                        title={r.explain?.[sh] || undefined}
+                        style={{ textAlign: "center", padding: "3px 5px", fontWeight: 700, color: r.needs[sh] > r.available ? "var(--red)" : "var(--green)", cursor: r.explain?.[sh] ? "help" : "default" }}
+                      >
+                        {r.needs[sh]}
+                      </td>
                     ))}
                     <td style={{ textAlign: "center", padding: "3px 5px", fontWeight: 700, color: "var(--cyan)" }}>{r.available}</td>
                     <td style={{ textAlign: "center", padding: "3px 5px" }}>
