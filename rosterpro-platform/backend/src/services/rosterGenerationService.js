@@ -322,6 +322,15 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     nightRestrictionRules: workloadContext.nightRestrictionRules,
     staffGroupMembersByGroupId: workloadContext.staffGroupMembersByGroupId,
     advisoryDemand: workloadContext.advisoryDemand,
+    // A rotation is a PERPETUAL cycle — it should never reset to the same
+    // phase just because a new month started. Anchoring the flat ROTATION
+    // and every named Staff Allocation pattern to real days-since-epoch (of
+    // this month's day 1) instead of the day-of-month keeps the cycle
+    // advancing seamlessly across every month boundary, unconditionally
+    // (not gated behind continueFromPrevious, which is specifically about
+    // the separate rest-gap look-back — a rotation's own phase was never
+    // meant to be a per-month reset in the first place).
+    absoluteDayAnchor: Math.round(monthStart.getTime() / 86400000),
   });
 
   // Resolve shift codes (M/A/N/O/L) to real ShiftDefinition ids — if any of

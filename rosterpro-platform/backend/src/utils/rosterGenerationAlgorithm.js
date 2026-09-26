@@ -111,6 +111,7 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
+  absoluteDayAnchor,
 }) {
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
@@ -119,6 +120,20 @@ function buildRosterAssignments({
     r => r.enabled && r.type === "hard" && (r.conditionType === "night_only" || r.conditionType === "no_night"),
   );
   const grid = {}; // userId -> array of nDays codes (1-indexed access via day-1)
+  // Both the flat 8-day ROTATION and a named Staff Allocation pattern are
+  // meant to be a PERPETUAL cycle — real airline rotations don't reset to
+  // day zero on the 1st of every month. Indexing purely by (day-1), the
+  // position WITHIN the currently-generated month, made every month start
+  // at the exact same phase regardless of how the previous month actually
+  // ended, which both breaks the "Continue from Previous Roster" promise
+  // and produces artificially long duty runs whenever a month's length
+  // doesn't happen to land the reset on what would have been an OFF day.
+  // absoluteDayAnchor (days between a fixed epoch and day 1 of the month
+  // being generated — 0 when the caller doesn't care, e.g. existing tests)
+  // is added to (day-1) so the cycle position keeps advancing across every
+  // month boundary instead of restarting. Defaulting to 0 keeps this a
+  // pure no-op for any caller that doesn't pass it.
+  const dayAnchor = absoluteDayAnchor || 0;
 
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
   staff.forEach((s, idx) => {
@@ -139,8 +154,8 @@ function buildRosterAssignments({
       if (onLeave) { codes[day - 1] = "L"; continue; }
 
       let proposed = pattern?.codes?.length
-        ? (pattern.codes[(day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
-        : ROTATION[(day - 1 + offset) % ROTATION.length];
+        ? (pattern.codes[(dayAnchor + day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
+        : ROTATION[(dayAnchor + day - 1 + offset) % ROTATION.length];
 
       const prev = day > 1 ? codes[day - 2] : tail[0];
       const prev2 = day > 2 ? codes[day - 3] : (day === 2 ? tail[0] : tail[1]);

@@ -174,6 +174,36 @@ describe("buildRosterAssignments — pattern-based mode (Staff Allocation tab)",
   });
 });
 
+describe("buildRosterAssignments — rotation is a perpetual cycle across month boundaries (absoluteDayAnchor)", () => {
+  const noMandatory = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+
+  it("the flat 8-day ROTATION continues seamlessly when a later month's anchor picks up where an earlier month left off", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const month1 = buildRosterAssignments({ staff, nDays: 5, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    const month2 = buildRosterAssignments({ staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 5 });
+    const combined = [...month1.assignments.map(a => a.code), ...month2.assignments.map(a => a.code)];
+    // One full, uninterrupted 8-day cycle: M,M,A,A,N,N,O,O — NOT restarting
+    // at M on month2's day 1 the way indexing purely by day-of-month would.
+    expect(combined).toEqual(["M", "M", "A", "A", "N", "N", "O", "O"]);
+  });
+
+  it("defaults absoluteDayAnchor to 0 when omitted, so existing callers (and every prior test above) are unaffected", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const withoutAnchor = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory });
+    const withZeroAnchor = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    expect(withoutAnchor.assignments.map(a => a.code)).toEqual(withZeroAnchor.assignments.map(a => a.code));
+  });
+
+  it("a named Staff Allocation pattern also continues across the boundary via the same anchor", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O", "G"], offset: 0 } }; // 4-day custom cycle
+    const month1 = buildRosterAssignments({ staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    const month2 = buildRosterAssignments({ staff, nDays: 2, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 3 });
+    const combined = [...month1.assignments.map(a => a.code), ...month2.assignments.map(a => a.code)];
+    expect(combined).toEqual(["G", "G", "O", "G", "G"]); // one full 4-day cycle, then one day into the next
+  });
+});
+
 describe("buildRosterAssignments — blocking and leave", () => {
   it("never schedules a blocked staff member — every day is OFF", () => {
     const staff = [{ id: "s1", category: "B1" }, { id: "s2", category: "B1" }];
