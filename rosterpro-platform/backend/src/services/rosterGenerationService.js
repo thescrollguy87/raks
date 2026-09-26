@@ -281,7 +281,7 @@ function buildStaffWithShifts(staff, assignments, nDays) {
 // "apply this exact previewed plan" path to keep in sync — a second call is
 // the apply.
 async function generateRoster(stationId, monthKey, actor, req, options = {}) {
-  const { preview = false, continueFromPrevious = false, usePatterns = false, applyLeave = true, aogBuffer = 0 } = options;
+  const { preview = false, continueFromPrevious = false, usePatterns = false, allowPatternOverride = false, applyLeave = true, aogBuffer = 0 } = options;
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
@@ -319,6 +319,16 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
     mandatoryCoverageConfig: workloadContext.mandatoryCoverageConfig,
     lmpmLockedUserIds,
+    // "Patterns + Automatic": patterns still set each staff member's
+    // baseline, but a pattern-locked staff member can be pulled onto their
+    // OFF day as a last resort — only when no unlocked candidate exists —
+    // rather than leaving a real coverage gap (or, worse, an entire
+    // category unstaffed) untouched just because everyone who could have
+    // covered it happened to be on a protected pattern day. Off by default
+    // (usePatterns alone keeps today's strict "never touch a pattern day"
+    // behavior) so existing stations that rely on patterns being an
+    // inviolable promise to staff see no change unless they opt in.
+    allowPatternOverrideForCoverage: usePatterns && allowPatternOverride,
     nightRestrictionRules: workloadContext.nightRestrictionRules,
     staffGroupMembersByGroupId: workloadContext.staffGroupMembersByGroupId,
     advisoryDemand: workloadContext.advisoryDemand,

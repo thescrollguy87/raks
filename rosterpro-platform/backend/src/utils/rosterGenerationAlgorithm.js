@@ -111,7 +111,7 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
-  absoluteDayAnchor,
+  absoluteDayAnchor, allowPatternOverrideForCoverage,
 }) {
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
@@ -181,13 +181,21 @@ function buildRosterAssignments({
   const violations = [];
   const advisoryGaps = [];
 
-  function findEligible(shift, category, day) {
+  function findEligible(shift, category, day, allowLocked) {
     return staff.find(s => {
       if (s.category !== category) return false;
       if (blocked.has(s.id)) return false;
       if (leaveByUserDay?.[s.id]?.has(day)) return false;
       if (grid[s.id][day - 1] !== "O") return false; // must currently be idle that day
-      if (lmpmLocked.has(s.id)) return false; // never pull a pattern-locked staff member off their pattern's OFF day
+      // A pattern-locked staff member's OFF day is protected by default —
+      // never touched just to fill a gap. allowLocked is the explicit,
+      // last-resort exception: only tried after a normal (unlocked)
+      // candidate search has already failed, and only when the planner
+      // opted into "Patterns + Automatic". Every safety check below (leave,
+      // rest-gap, night restriction) still applies exactly the same either
+      // way — this only ever relaxes the pattern-preference check, never a
+      // real safety rule.
+      if (lmpmLocked.has(s.id) && !allowLocked) return false;
       if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
       const tail = tailByUser?.[s.id] || ["O", "O", "O"];
       const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
@@ -216,7 +224,8 @@ function buildRosterAssignments({
   function fillCategory(shift, category, day, minCount, { mandatory }) {
     let onShift = staff.filter(s => s.category === category && grid[s.id][day - 1] === shift).length;
     while (onShift < minCount) {
-      const candidate = findEligible(shift, category, day);
+      const candidate = findEligible(shift, category, day, false)
+        || (allowPatternOverrideForCoverage ? findEligible(shift, category, day, true) : null);
       if (!candidate) {
         const target = mandatory ? violations : advisoryGaps;
         target.push({ day, shift, category, issue: `No available ${category} to cover ${shift} on day ${day}` });

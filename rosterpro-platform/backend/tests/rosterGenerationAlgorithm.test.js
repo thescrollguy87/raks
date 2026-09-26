@@ -256,6 +256,53 @@ describe("buildRosterAssignments — LMPM pattern lock (verification case 4)", (
   });
 });
 
+describe("buildRosterAssignments — \"Patterns + Automatic\" override (allowPatternOverrideForCoverage)", () => {
+  it("pulls a pattern-locked staff member as a last resort when no unlocked candidate exists and override is enabled", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["b1_0"],
+      allowPatternOverrideForCoverage: true,
+    });
+    // Same outcome as having no lock at all — the override successfully
+    // covers the gap the strict lock (previous test) would otherwise leave.
+    // (Only checking the M-shift violation this override actually targets —
+    // a lone staff member still can't ALSO cover A/N the same day, which is
+    // unrelated pre-existing "not enough total heads" noise from the
+    // default mandatory config, not something this change is meant to fix.)
+    expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
+    expect(result.violations.filter(v => (v.day === 3 || v.day === 6) && v.shift === "M")).toHaveLength(0);
+  });
+
+  it("still prefers an unlocked candidate over a locked one — override is a last resort, never a first choice", () => {
+    const staff = [{ id: "locked", category: "B1" }, { id: "free", category: "B1" }];
+    // Both permanently idle via a trivial always-"O" pattern — eliminates
+    // any rest-gap history so the only thing this test exercises is
+    // candidate SELECTION ORDER, not an unrelated safety rule.
+    const patternByUser = { locked: { codes: ["O"], offset: 0 }, free: { codes: ["O"], offset: 0 } };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 2, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["locked"],
+      allowPatternOverrideForCoverage: true, mandatoryCoverageConfig,
+      advisoryDemand: { 1: { M: { B1: 1 } } },
+    });
+    const day1 = result.assignments.filter(a => a.day === 1);
+    expect(day1.find(a => a.userId === "free").code).toBe("M");
+    expect(day1.find(a => a.userId === "locked").code).toBe("O"); // left alone — the unlocked candidate covered it first
+  });
+
+  it("without the override flag, a lone locked staff member still leaves the gap unfilled and reported (no accidental behavior change)", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["b1_0"],
+      allowPatternOverrideForCoverage: false,
+    });
+    expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "O", "G", "G", "O"]);
+    expect(result.violations.length).toBeGreaterThan(0);
+  });
+});
+
 describe("buildRosterAssignments — proactive night_only / no_night rule enforcement", () => {
   it("never assigns a Night shift to a staff member covered by an enabled no_night rule, in either the base rotation or coverage-fill", () => {
     const staff = [{ id: "b1_0", category: "B1" }];

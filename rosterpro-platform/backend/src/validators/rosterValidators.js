@@ -52,6 +52,7 @@ const generateRosterSchema = z.object({
   preview: z.boolean().optional(),
   continueFromPrevious: z.boolean().optional(),
   usePatterns: z.boolean().optional(),
+  allowPatternOverride: z.boolean().optional(),
   applyLeave: z.boolean().optional(),
   aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
 });

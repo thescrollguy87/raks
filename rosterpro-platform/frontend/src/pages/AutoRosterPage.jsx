@@ -1140,7 +1140,16 @@ function DailyOpsTab({ stationId }) {
 // ═══ TAB 6: GENERATE ══════════════════════════════════════════════════════════
 function GenerateTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
-  const [usePatterns, setUsePatterns] = useState(true);
+  // "off": flat auto-distributed rotation only. "strict": follow Staff
+  // Allocation patterns, and a pattern-locked staff member's OFF day is
+  // never touched even if that leaves a real coverage gap. "hybrid":
+  // follow patterns, but allow a locked staff member to be pulled onto
+  // their OFF day as a genuine last resort — only when no unlocked
+  // candidate at all can cover it — so a shared pattern landing everyone
+  // on OFF simultaneously can't leave an entire shift/category unstaffed.
+  const [patternMode, setPatternMode] = useState("strict");
+  const usePatterns = patternMode !== "off";
+  const allowPatternOverride = patternMode === "hybrid";
   const [applyLeave, setApplyLeave] = useState(true);
   const [continueFromPrevious, setContinueFromPrevious] = useState(true);
   const [aogBuffer, setAogBuffer] = useState(2);
@@ -1173,7 +1182,7 @@ function GenerateTab({ stationId }) {
     setAnalysisBusy(true);
     setError("");
     try {
-      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave, aogBuffer });
+      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
       setPreview(previewResult);
     } catch (err) { setError(err.message); } finally { setAnalysisBusy(false); }
   }
@@ -1185,7 +1194,7 @@ function GenerateTab({ stationId }) {
     try {
       const [planResult, previewResult] = await Promise.all([
         planningApi.getManpowerPlan(stationId, monthKey, aogBuffer),
-        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, applyLeave, aogBuffer }),
+        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer }),
       ]);
       setPlan(planResult);
       setPreview(previewResult);
@@ -1199,7 +1208,7 @@ function GenerateTab({ stationId }) {
     setBusy(true);
     setError("");
     try {
-      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, applyLeave, aogBuffer });
+      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
       setApplied(result);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -1369,10 +1378,11 @@ function GenerateTab({ stationId }) {
           <div className="card-title">🤖 Generate Roster</div>
           <div className="fg2" style={{ marginBottom: 12 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setPlan(null); setPreview(null); setApplied(null); }} /></div>
-            <div className="fg"><label className="fl">Use defined patterns?</label>
-              <select className="fi" value={usePatterns ? "1" : "0"} onChange={e => setUsePatterns(e.target.value === "1")}>
-                <option value="1">Yes — follow staff pattern assignments</option>
-                <option value="0">No — auto-distribute by workload only</option>
+            <div className="fg"><label className="fl">Use defined patterns? <span className="help-tip" tabIndex={0} title="Strict: a pattern-holder's OFF day is never touched, even if that leaves a gap. Patterns + Automatic: same patterns, but a pattern-holder can be pulled onto their OFF day as a last resort — only when literally no one else is available — so a shared pattern landing everyone off at once can't leave a shift or category completely unstaffed.">ⓘ</span></label>
+              <select className="fi" value={patternMode} onChange={e => setPatternMode(e.target.value)}>
+                <option value="strict">Yes — follow staff pattern assignments (strict)</option>
+                <option value="hybrid">Yes — patterns + automatic override for gaps</option>
+                <option value="off">No — auto-distribute by workload only</option>
               </select>
             </div>
             <div className="fg"><label className="fl">Apply leave entries?</label>
