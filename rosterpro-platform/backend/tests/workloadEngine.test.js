@@ -70,7 +70,7 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(findPeakConcurrency(events2).peak).toBe(1);
   });
 
-  it("a 2-way departure clash needs 1 B1 + 1 CM + 2 NCS with default ratios — NOT 2 B1", () => {
+  it("a 2-way departure clash needs 0 B1 (no mandatory floor set) + 2 CM (pooled) + 2 NCS — B1 and CM are interchangeable release capacity, not independent demand streams", () => {
     // Two short (5-min ground time) transits whose GROUND-TIME windows never
     // overlap (09:00-09:05 and 09:30-09:35), so peak transit concurrency is
     // only 1 — but their DEPARTURES (09:05 and 09:35) are 30 minutes apart,
@@ -83,18 +83,18 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
       flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    // With default ratios, the ordinary peak-concurrency figures already
-    // give B1=1 (ceil(1/4)) and CM=1 (ceil(1/1)) — combined 2, exactly
-    // matching the 2-departure clash count, so no extra top-up is needed.
-    // This reproduces the operational example exactly: "1 CM + 1 NCS & 1 B1
-    // + 1 NCS can give 1 departure each" — a mix, never 2 B1.
-    expect(result.demand[1].A.B1).toBe(1);
-    expect(result.demand[1].A.CM).toBe(1);
+    // No mandatory B1 floor is configured for this shift, so B1 is held at
+    // 0 — CM (interchangeable release capacity) pools to cover both the
+    // ordinary transit concurrency (1) AND top up to the 2-departure clash
+    // count, since B1's floor contributes nothing to the combined total.
+    expect(result.demand[1].A.B1).toBe(0);
+    expect(result.demand[1].A.CM).toBe(2);
     expect(result.demand[1].A.NCS).toBe(2);
+    expect(result.demand[1].A.B1 + result.demand[1].A.CM).toBe(2); // combined >= clash count
     expect(result.reason).toMatch(/30 shift\(s\) had a departure clash \(within 60min\)/);
   });
 
-  it("a 3-way clash needs one additional NCS and one additional (CM or B1) beyond the 2-way case", () => {
+  it("a 3-way clash needs CM to cover the full combined total when B1 has no floor", () => {
     // Three departures all mutually within 30 min of a common midpoint
     // (09:05, 09:20, 09:35) — clash windows (±30min) all overlap at 09:20,
     // giving clashPeak 3, one more than the 2-way case above.
@@ -106,32 +106,33 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
       flightSchedule: { turnRecords: [turn1, turn2, turn3], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    // B1 stays at its own natural baseline (1) — the extra head needed to
-    // reach the 3-way clash count is added to CM, not B1, matching "either
-    // 1 CM or 1 B1 more" rather than forcing another B1 specifically.
-    expect(result.demand[1].A.B1).toBe(1);
-    expect(result.demand[1].A.CM).toBe(2);
+    // B1 stays at 0 (no mandatory floor here) — CM, the interchangeable
+    // release capacity, absorbs the entire combined requirement.
+    expect(result.demand[1].A.B1).toBe(0);
+    expect(result.demand[1].A.CM).toBe(3);
     expect(result.demand[1].A.NCS).toBe(3);
     expect(result.demand[1].A.B1 + result.demand[1].A.CM).toBe(3); // combined >= clash count
   });
 
-  it("does not top up CM when B1's own existing requirement already covers the clash count", () => {
+  it("B1's Mandatory Minimum floor pools with CM — a floor that already covers the load needs zero extra CM", () => {
     const turn1 = quickTurn("09:00", "09:05");
     const turn2 = quickTurn("09:30", "09:35"); // same 2-departure clash as above
-    // Mandatory coverage already requires 3 B1 in shift A regardless of
-    // flights — that alone (combined with CM's own baseline of 1) already
-    // exceeds the 2-departure clash count, so CM must NOT be inflated.
+    // Mandatory coverage requires 3 B1 in shift A regardless of flights —
+    // at the default ratio (1 B1 covers 4 concurrent movements), 3 B1
+    // covers up to 12 concurrent movements, vastly more than the observed
+    // peak concurrency (1) and the clash count (2) combined, so CM needs
+    // zero extra heads: B1's own floor alone already pools enough capacity.
     const result = computeDailyShiftDemand({
       year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 3, N: 0 },
       flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    expect(result.demand[1].A.B1).toBe(3);
-    expect(result.demand[1].A.CM).toBe(1); // its own ratio-based baseline, not inflated further
+    expect(result.demand[1].A.B1).toBe(3); // held at its floor, never inflated by concurrency
+    expect(result.demand[1].A.CM).toBe(0); // B1's floor alone already pools enough capacity
     expect(result.demand[1].A.NCS).toBe(2);
   });
 
-  it("does NOT raise the NCS floor when departures are outside the clash proximity window", () => {
+  it("does NOT raise the NCS or CM-clash-topup when departures are outside the clash proximity window", () => {
     const turn1 = quickTurn("09:00", "09:05");
     const turn2 = quickTurn("11:00", "11:05"); // 2 hours apart — no clash (clashPeak stays 1)
     const result = computeDailyShiftDemand({
@@ -139,12 +140,34 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
       flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    // Same ratio-based B1/CM baseline as the clashing case above, but NCS
-    // stays at its own ratio-based 1 instead of being floored to 2 — the
-    // direct contrast proving the clash floor only fires on a real clash.
-    expect(result.demand[1].A.B1).toBe(1);
+    // No mandatory floor -> B1 stays 0; CM pools the ordinary concurrency
+    // (1) alone since there's no clash to top it up further; NCS stays at
+    // its own ratio-based 1 instead of being floored to 2 — the direct
+    // contrast proving the clash floor only fires on a real clash.
+    expect(result.demand[1].A.B1).toBe(0);
     expect(result.demand[1].A.CM).toBe(1);
     expect(result.demand[1].A.NCS).toBe(1);
+  });
+
+  it("real operational example: B1 handles one flight, an available CM covers the overlapping one — not a second B1", () => {
+    // Two PDC-classified turns (>120min ground time) whose PDC windows
+    // overlap by 5 minutes — reproduces the exact reported scenario: 2
+    // aircraft simultaneously needing release, "Concurrent Movements per
+    // B1"=1 (one B1 can only handle one aircraft at a time), 1 B1 on the
+    // Mandatory Minimum floor for this shift.
+    const turn1 = { inboundFlt: "1902", outboundFlt: "1102", inboundArrSta: "AMD", outboundDepSta: "AMD", inboundArrMin: 8 * 60 + 20, outboundDepMin: 10 * 60 + 35, groundTimeMin: 135, effectiveDate: new Date(2026, 8, 1), discontinueDate: new Date(2026, 8, 30), daysOfWeek: decodeDaysOfWeek(1234567) };
+    const turn2 = { inboundFlt: "1101", outboundFlt: "1903", inboundArrSta: "AMD", outboundDepSta: "AMD", inboundArrMin: 8 * 60 + 55, outboundDepMin: 11 * 60 + 30, groundTimeMin: 155, effectiveDate: new Date(2026, 8, 1), discontinueDate: new Date(2026, 8, 30), daysOfWeek: decodeDaysOfWeek(1234567) };
+    const config = { ...DEFAULT_CONFIG, movementsPerB1Staff: 1, movementsPerCMStaff: 1 };
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 1, N: 0 },
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    // B1 stays at its mandatory floor of 1 (handles one aircraft); CM pools
+    // in to cover the second overlapping aircraft B1's single capacity
+    // can't reach — never a demand for a second B1.
+    expect(result.demand[1].A.B1).toBe(1);
+    expect(result.demand[1].A.CM).toBe(1);
   });
 
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {

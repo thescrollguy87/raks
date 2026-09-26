@@ -260,23 +260,43 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
   // Automatic Departure Clashes: departures within clashProximityMinutes of
   // each other (default 60) each need their own dedicated release pair —
   // ONE (B1 or CM, either one qualifies to give the departure) PLUS one NCS
-  // per clashing departure. It is NOT "1 B1 per clash" — a B1 and a CM are
-  // interchangeable for this purpose (e.g. 3 clashing departures can be
-  // covered by 1 B1 + 2 CM + 3 NCS, or 3 B1 + 3 NCS, or any mix), so the
-  // floor is expressed as two separate constraints: NCS >= clashPeak, and
-  // (B1 + CM combined) >= clashPeak. NCS is a direct Math.max floor; the
-  // combined B1+CM floor is topped up via CM specifically (leaving B1's own
-  // baseCoverage/ratio-based requirement untouched) ONLY when B1's existing
-  // requirement doesn't already cover the clash count on its own — never
-  // forcing every clash-driven head to be a B1.
+  // per clashing departure — see the general B1/CM pooling just below,
+  // which this narrower clash-window constraint tops up on top of.
   const clashEvents = buildClashEvents(turnRecords, charterRecords, year, month, homeStation, config);
   let clashDrivenShiftCount = 0;
 
-  // Builds a human-readable label for how the category's own "core"
-  // requirement (before manual demand/buffer are added) was actually
-  // combined — B1 and NCS take the MAX of two floors, never their sum, so
-  // the label must say "max(...)", not "+", or the printed arithmetic
-  // won't add up to the number it's meant to explain.
+  // B1 and CM are interchangeable release/certifying capacity, not two
+  // independent demand streams each needing to cover the full overlap
+  // alone — a station's real practice is "1 B1 takes this aircraft, the
+  // overlapping one goes to whichever CM is free," not "we need a second
+  // B1 AND a second CM." So B1 is held at its own Mandatory Minimum
+  // Coverage floor (never inflated by concurrency — that's what "prefer
+  // B1 first" means: the floor is the baseline that's always there, and
+  // any load beyond what it can cover is what actually needs an extra
+  // head), and CM absorbs whatever peak concurrency the B1 floor's own
+  // ratio-based capacity doesn't already cover. The narrower automatic-
+  // clash constraint (B1+CM combined >= clashPeak) still applies on top,
+  // in case a tight departure clash demands more combined heads than the
+  // general concurrency pooling alone would.
+  function buildB1Label(floor, peakConcurrency, ratioB1, coveredByFloor, remainder) {
+    if (floor <= 0) {
+      return remainder > 0
+        ? `no mandatory floor set for this shift — CM covers all ${peakConcurrency} concurrent aircraft`
+        : `no mandatory floor set for this shift, no concurrent aircraft`;
+    }
+    return remainder > 0
+      ? `mandatory floor ${floor} (covers ${coveredByFloor} of ${peakConcurrency} concurrent aircraft; CM covers the remaining ${remainder})=${floor}`
+      : `mandatory floor ${floor} (fully covers ${peakConcurrency} concurrent aircraft)=${floor}`;
+  }
+  function buildCmLabel(peakConcurrency, coveredByB1, remainder, ratioCM, cmFromConcurrency, clashTopUp, core) {
+    let base = remainder > 0 || coveredByB1 > 0
+      ? `concurrency remaining after B1's ${coveredByB1}-capacity ceil((${peakConcurrency}-${coveredByB1})÷${ratioCM})=${cmFromConcurrency}`
+      : `concurrency ceil(${peakConcurrency}÷${ratioCM})=${cmFromConcurrency}`;
+    if (clashTopUp > 0) return `${base} + clash top-up +${clashTopUp}=${core}`;
+    return base;
+  }
+
+  // NCS is a separate support role, not pooled with B1/CM.
   function buildCoreLabel(mandatoryFloor, peakConcurrency, ratio, concurrencyDriven, clashTopUp, clashPeak, core) {
     let base = `concurrency ceil(${peakConcurrency}÷${ratio})=${concurrencyDriven}`;
     let wrapped = false; // bare concurrency term already equals core (no floor/clash adjustment) — appending "=core" again would just repeat the same number
@@ -312,12 +332,13 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       if (clashPeak > 0) clashDrivenShiftCount++;
 
       const b1Floor = baseCoverage[sh] || 0;
-      const b1ConcurrencyDriven = Math.ceil(peakConcurrency / ratioB1);
-      const b1Base = Math.max(b1Floor, b1ConcurrencyDriven);
-      const cmConcurrencyDriven = Math.ceil(peakConcurrency / ratioCM);
-      const combinedShortfall = clashPeak - (b1Base + cmConcurrencyDriven);
-      const cmClashTopUp = Math.max(0, combinedShortfall);
-      const cmBase = cmConcurrencyDriven + cmClashTopUp; // top up CM only — B1's own floor is never inflated by a clash
+      const b1PoolCapacity = b1Floor * ratioB1;
+      const remainingAfterB1 = Math.max(0, peakConcurrency - b1PoolCapacity);
+      const cmFromConcurrency = Math.ceil(remainingAfterB1 / ratioCM);
+      const cmClashTopUp = Math.max(0, clashPeak - (b1Floor + cmFromConcurrency));
+
+      const b1Base = b1Floor; // held at its own floor — CM absorbs whatever concurrency the floor's capacity doesn't cover
+      const cmBase = cmFromConcurrency + cmClashTopUp;
       const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
       const ncsBase = Math.max(ncsConcurrencyDriven, clashPeak);
 
@@ -330,11 +351,11 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       demand[d][sh].NCS = ncsTotal;
 
       recordExplain("B1", sh, d, b1Total, {
-        core: b1Base, coreLabel: buildCoreLabel(b1Floor, peakConcurrency, ratioB1, b1ConcurrencyDriven, 0, 0, b1Base),
+        core: b1Base, coreLabel: buildB1Label(b1Floor, peakConcurrency, ratioB1, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1),
         manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
       });
       recordExplain("CM", sh, d, cmTotal, {
-        core: cmBase, coreLabel: buildCoreLabel(0, peakConcurrency, ratioCM, cmConcurrencyDriven, cmClashTopUp, 0, cmBase),
+        core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmBase),
         manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
@@ -345,7 +366,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
   }
   return {
     demand, source: "flight-schedule-driven",
-    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift (B1 1-per-${ratioB1}, CM 1-per-${ratioCM}, NCS 1-per-${ratioNCS}), plus Manual Demand and the per-shift unplanned buffer. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
+    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}); NCS sized independently at 1-per-${ratioNCS}. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
     explain,
   };
 }
