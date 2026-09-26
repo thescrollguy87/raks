@@ -315,18 +315,20 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   // matching the pre-pattern-mode behavior exactly.
   const lmpmLockedUserIds = usePatterns ? Object.keys(patternByUser || {}) : [];
 
-  const { assignments, violations, advisoryGaps } = buildRosterAssignments({
+  const { assignments, violations, advisoryGaps, flexiAssignments } = buildRosterAssignments({
     staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
     mandatoryCoverageConfig: workloadContext.mandatoryCoverageConfig,
     lmpmLockedUserIds,
-    // "Patterns + Automatic": patterns still set each staff member's
-    // baseline, but a pattern-locked staff member can be pulled onto their
-    // OFF day as a last resort — only when no unlocked candidate exists —
-    // rather than leaving a real coverage gap (or, worse, an entire
-    // category unstaffed) untouched just because everyone who could have
-    // covered it happened to be on a protected pattern day. Off by default
-    // (usePatterns alone keeps today's strict "never touch a pattern day"
-    // behavior) so existing stations that rely on patterns being an
+    // Ordinary coverage shortfalls are resolved by SAME-DAY REDISTRIBUTION
+    // (moving a staff member who's already working a different shift that
+    // day, and sits above THAT shift's own mandatory floor, onto the
+    // short-staffed one) — this always runs, regardless of usePatterns, and
+    // never touches anyone's scheduled OFF day. "Patterns + Automatic" only
+    // controls the rarer fallback beyond that: when redistribution finds
+    // nobody, an unlocked staff member's OFF day can be pulled as a genuine
+    // exigency ("flexi") fill rather than leaving the gap unstaffed — a
+    // pattern-locked staff member's OFF day is still never touched even
+    // then. Off by default so existing stations that treat patterns as an
     // inviolable promise to staff see no change unless they opt in.
     allowPatternOverrideForCoverage: usePatterns && allowPatternOverride,
     nightRestrictionRules: workloadContext.nightRestrictionRules,
@@ -410,7 +412,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   if (preview) {
     return {
       preview: true, staffCount: staff.length, blockedCount: blockedUserIds.length,
-      assignmentCount: assignments.length, violations, advisoryGaps, manpowerByShift, analysis,
+      assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis,
       existingRosterExists: !!existingRoster,
     };
   }
@@ -438,13 +440,13 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
 
   await auditTrail.logActivity(
     "Roster generated",
-    `${stationId} — ${monthKey}: ${staff.length} staff, ${blockedUserIds.length} blocked, ${violations.length} critical gap(s), ${advisoryGaps.length} advisory gap(s)`,
+    `${stationId} — ${monthKey}: ${staff.length} staff, ${blockedUserIds.length} blocked, ${violations.length} critical gap(s), ${advisoryGaps.length} advisory gap(s), ${flexiAssignments.length} flexi exigency fill(s)`,
     stationId, actor, req
   );
 
   return {
     roster, staffCount: staff.length, blockedCount: blockedUserIds.length,
-    assignmentCount: assignments.length, violations, advisoryGaps, manpowerByShift, analysis,
+    assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis,
   };
 }
 

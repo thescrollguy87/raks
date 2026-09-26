@@ -32,18 +32,30 @@
 //      then tops up further, non-critical shortfalls against
 //      `advisoryDemand` (the day/shift/category targets
 //      workloadEngine.computeDailyShiftDemand produces) exactly as the
-//      reference's fillAdvisory() does. Both passes share one eligibility
-//      guard: the candidate must currently be OFF that day, must not be
-//      locked to an approved LMPM pattern (`lmpmLockedUserIds` — pulling a
-//      pattern-locked staff member onto a shift their pattern says they're
-//      off is never allowed, even under coverage pressure, matching the
-//      reference's `ALLOCATIONS[s.si].patternId !== 'MANUAL'` check), must
-//      not violate any enabled night_only/no_night rule that applies to
-//      them, and must not land on a day the rest-gap pass already committed
-//      to as a mandatory rest day or create a fresh rest-gap violation.
-//      Where NO eligible candidate exists for a MANDATORY slot, it's
-//      reported as a (critical) violation; an unmet ADVISORY slot is
-//      reported separately as a non-critical gap, never blocking generation.
+//      reference's fillAdvisory() does. NEITHER tier ever pulls a staff
+//      member off their scheduled OFF day for routine coverage — real
+//      operational feedback was explicit that a rest day is never a
+//      resource to draw on for ordinary understaffing. Instead, a
+//      shortfall on one shift is covered by SAME-DAY REDISTRIBUTION: moving
+//      a staff member who is already working a DIFFERENT shift that day
+//      and currently sits ABOVE that shift's own Mandatory Minimum floor (a
+//      genuine surplus, never someone still needed there) onto the
+//      short-staffed shift instead — respecting every rest-gap and
+//      night-restriction rule for the shift they'd move INTO exactly as
+//      strictly as a fresh assignment would. This keeps "as far as possible
+//      follow the defined pattern" true in the sense that mattered to the
+//      request: nobody's actual day off is ever touched, only which of
+//      their scheduled WORKING shifts they cover that day. Only when
+//      allowPatternOverrideForCoverage (the Generate tab's "Patterns +
+//      Automatic" mode) is on, and same-day redistribution genuinely finds
+//      nobody, is a last-resort "flexi" exigency fill allowed to draw on an
+//      unlocked staff member's OFF day — tracked separately in
+//      `flexiAssignments`, never silently indistinguishable from a routine
+//      fill, and still never touching a pattern-locked staff member's
+//      protected OFF day even then. Where NO eligible candidate exists at
+//      all for a MANDATORY slot, it's reported as a (critical) violation;
+//      an unmet ADVISORY slot is reported separately as a non-critical gap,
+//      never blocking generation.
 
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
@@ -175,73 +187,111 @@ function buildRosterAssignments({
     grid[s.id] = codes;
   });
 
-  // Step 5: two-tier coverage pass, per day in shift order M, A, N — first
-  // Mandatory Minimum Coverage (critical if unmet), then Advisory workload-
-  // driven sizing on top of it (non-critical if unmet).
+  // Step 5: two-tier coverage pass, per day — first Mandatory Minimum
+  // Coverage (critical if unmet), then Advisory workload-driven sizing on
+  // top of it (non-critical if unmet). See the module-header comment above
+  // for the full same-day-redistribution / flexi-exigency design.
   const violations = [];
   const advisoryGaps = [];
+  const flexiAssignments = []; // last-resort off-day fills, kept separate from ordinary assignments for transparency
 
-  function findEligible(shift, category, day, allowLocked) {
-    return staff.find(s => {
-      if (s.category !== category) return false;
-      if (blocked.has(s.id)) return false;
-      if (leaveByUserDay?.[s.id]?.has(day)) return false;
-      if (grid[s.id][day - 1] !== "O") return false; // must currently be idle that day
-      // A pattern-locked staff member's OFF day is protected by default —
-      // never touched just to fill a gap. allowLocked is the explicit,
-      // last-resort exception: only tried after a normal (unlocked)
-      // candidate search has already failed, and only when the planner
-      // opted into "Patterns + Automatic". Every safety check below (leave,
-      // rest-gap, night restriction) still applies exactly the same either
-      // way — this only ever relaxes the pattern-preference check, never a
-      // real safety rule.
-      if (lmpmLocked.has(s.id) && !allowLocked) return false;
-      if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
-      const tail = tailByUser?.[s.id] || ["O", "O", "O"];
-      const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
-      const prev2 = day > 2 ? grid[s.id][day - 3] : (day === 2 ? tail[0] : tail[1]);
-      const prev3 = day > 3 ? grid[s.id][day - 4] : (day === 3 ? tail[0] : day === 2 ? tail[1] : tail[2]);
-      // The reference's own fillMinCat has no guard here at all, which lets
-      // any fill — not just a Night fill — land on a day the earlier
-      // rest-gap pass already committed to as a mandatory rest day (the day
-      // right after 2 consecutive nights, or the second OFF day after that),
-      // undoing that rest. This is the one place this port deliberately
-      // diverges from a literal reference copy: a tightly-staffed scenario
-      // must never have coverage-filling reintroduce a rest-gap violation
-      // the earlier pass just removed.
-      if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) return false;
-      if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") return false;
-      if (shift === "M" && (isNight(prev, shiftDefsByCode) || isAft(prev))) return false; // rest-gap guard
-      if (shift === "A" && isNight(prev, shiftDefsByCode)) return false;
-      if (shift === "N") {
-        const next = day < nDays ? grid[s.id][day] : undefined;
-        if (isMorn(next)) return false; // would put an N immediately before an already-fixed Morning
-      }
-      return true;
-    });
+  function eligibleBase(s, day) {
+    if (blocked.has(s.id)) return false;
+    if (leaveByUserDay?.[s.id]?.has(day)) return false;
+    return true;
   }
 
-  function fillCategory(shift, category, day, minCount, { mandatory }) {
-    let onShift = staff.filter(s => s.category === category && grid[s.id][day - 1] === shift).length;
-    while (onShift < minCount) {
-      const candidate = findEligible(shift, category, day, false)
-        || (allowPatternOverrideForCoverage ? findEligible(shift, category, day, true) : null);
-      if (!candidate) {
-        const target = mandatory ? violations : advisoryGaps;
-        target.push({ day, shift, category, issue: `No available ${category} to cover ${shift} on day ${day}` });
+  // Whether `s` could safely be assigned `shift` on `day`, looking only at
+  // the days BEFORE it (their own grid up to day-1, or tailByUser for days
+  // 1-3) and, for a Night assignment, the day after — independent of
+  // whatever `s` is currently doing on `day` itself, since same-day
+  // redistribution REPLACES that day's assignment rather than adding a
+  // second one. Every real DGCA-style rest-gap/night-restriction rule
+  // applies exactly as strictly as it would for a fresh assignment.
+  function restGapOk(s, day, shift) {
+    if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
+    const tail = tailByUser?.[s.id] || ["O", "O", "O"];
+    const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
+    const prev2 = day > 2 ? grid[s.id][day - 3] : (day === 2 ? tail[0] : tail[1]);
+    const prev3 = day > 3 ? grid[s.id][day - 4] : (day === 3 ? tail[0] : day === 2 ? tail[1] : tail[2]);
+    if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) return false;
+    if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") return false;
+    if (shift === "M" && (isNight(prev, shiftDefsByCode) || isAft(prev))) return false;
+    if (shift === "A" && isNight(prev, shiftDefsByCode)) return false;
+    if (shift === "N") {
+      const next = day < nDays ? grid[s.id][day] : undefined;
+      if (isMorn(next)) return false; // would put an N immediately before an already-fixed Morning
+    }
+    return true;
+  }
+
+  // Rebalances one day for one category against per-shift targets (the
+  // Mandatory floors themselves during the mandatory pass, or the fuller
+  // Advisory targets layered on top during the advisory pass).
+  // mandatoryFloors is passed separately so "surplus" always means "above
+  // this shift's own Mandatory Minimum floor" even during the advisory
+  // pass — never treating someone still needed to hit their OWN shift's
+  // hard floor as available to give away.
+  function rebalanceDay(day, category, targets, mandatoryFloors, { mandatory }) {
+    const shifts = ["M", "A", "N"];
+    const bucket = {};
+    shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === sh); });
+
+    shifts.forEach(deficitShift => {
+      const target = targets[deficitShift] || 0;
+      while (bucket[deficitShift].length < target) {
+        // 1) Same-day redistribution: move a genuine surplus staff member
+        // from a different shift they're already working today — never
+        // touches anyone whose day is OFF.
+        let moved = false;
+        for (const sourceShift of shifts) {
+          if (sourceShift === deficitShift) continue;
+          const floor = mandatoryFloors?.[sourceShift] || 0;
+          if (bucket[sourceShift].length <= floor) continue; // no real surplus there
+          const donorIdx = bucket[sourceShift].findIndex(s => restGapOk(s, day, deficitShift));
+          if (donorIdx === -1) continue;
+          const [donor] = bucket[sourceShift].splice(donorIdx, 1);
+          grid[donor.id][day - 1] = deficitShift;
+          bucket[deficitShift].push(donor);
+          moved = true;
+          break;
+        }
+        if (moved) continue;
+
+        // 2) Exigency "flexi" fallback — a genuine last resort, only when
+        // the planner opted into "Patterns + Automatic", drawing on an
+        // UNLOCKED staff member's OFF day (a pattern-locked staff member's
+        // OFF day stays protected even here).
+        if (allowPatternOverrideForCoverage) {
+          const flexiCandidate = staff.find(s => (
+            s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
+            && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
+          ));
+          if (flexiCandidate) {
+            grid[flexiCandidate.id][day - 1] = deficitShift;
+            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category });
+            bucket[deficitShift].push(flexiCandidate);
+            continue;
+          }
+        }
+
+        // 3) Genuinely can't be covered — report honestly rather than
+        // fabricating coverage or breaking a safety rule.
+        const target_ = mandatory ? violations : advisoryGaps;
+        target_.push({ day, shift: deficitShift, category, issue: `No available ${category} to cover ${deficitShift} on day ${day}` });
         break;
       }
-      grid[candidate.id][day - 1] = shift;
-      onShift++;
-    }
+    });
   }
 
   for (let day = 1; day <= nDays; day++) {
     ["B1", "B2", "CM", "NCS"].forEach(category => {
-      ["M", "A", "N"].forEach(shift => {
-        const cfg = coverageConfig[category]?.[shift];
-        if (cfg && cfg.enabled) fillCategory(shift, category, day, Math.max(1, +cfg.min || 1), { mandatory: true });
+      const floors = {};
+      ["M", "A", "N"].forEach(sh => {
+        const cfg = coverageConfig[category]?.[sh];
+        floors[sh] = cfg && cfg.enabled ? Math.max(1, +cfg.min || 1) : 0;
       });
+      if (floors.M || floors.A || floors.N) rebalanceDay(day, category, floors, floors, { mandatory: true });
     });
   }
 
@@ -249,13 +299,17 @@ function buildRosterAssignments({
     for (let day = 1; day <= nDays; day++) {
       const dayDemand = advisoryDemand[day];
       if (!dayDemand) continue;
-      ["M", "A", "N"].forEach(shift => {
-        const shiftDemand = dayDemand[shift];
-        if (!shiftDemand) return;
-        Object.entries(shiftDemand).forEach(([category, target]) => {
-          if (!target || target <= 0) return;
-          fillCategory(shift, category, day, target, { mandatory: false });
+      const categoriesToday = new Set();
+      ["M", "A", "N"].forEach(sh => { const sd = dayDemand[sh]; if (sd) Object.keys(sd).forEach(c => categoriesToday.add(c)); });
+      categoriesToday.forEach(category => {
+        const floors = {};
+        const targets = {};
+        ["M", "A", "N"].forEach(sh => {
+          const cfg = coverageConfig[category]?.[sh];
+          floors[sh] = cfg && cfg.enabled ? Math.max(1, +cfg.min || 1) : 0;
+          targets[sh] = Math.max(floors[sh], dayDemand[sh]?.[category] || 0);
         });
+        rebalanceDay(day, category, targets, floors, { mandatory: false });
       });
     }
   }
@@ -267,7 +321,7 @@ function buildRosterAssignments({
     }
   }
 
-  return { assignments, violations, advisoryGaps, staffCount: staff.length };
+  return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
 module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily };

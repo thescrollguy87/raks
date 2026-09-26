@@ -1141,12 +1141,14 @@ function DailyOpsTab({ stationId }) {
 function GenerateTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   // "off": flat auto-distributed rotation only. "strict": follow Staff
-  // Allocation patterns, and a pattern-locked staff member's OFF day is
-  // never touched even if that leaves a real coverage gap. "hybrid":
-  // follow patterns, but allow a locked staff member to be pulled onto
-  // their OFF day as a genuine last resort — only when no unlocked
-  // candidate at all can cover it — so a shared pattern landing everyone
-  // on OFF simultaneously can't leave an entire shift/category unstaffed.
+  // Allocation patterns; coverage gaps are covered by same-day
+  // redistribution alone (moving a staff member already on duty elsewhere
+  // that day, above their shift's own mandatory floor) — nobody's OFF day is
+  // ever touched. "hybrid": same patterns and same redistribution, plus a
+  // genuine last-resort "flexi" exigency fallback — when redistribution
+  // finds nobody, an UNLOCKED staff member's OFF day can be pulled to plug
+  // the gap (a pattern-locked staff member's OFF day is still never
+  // touched, even in hybrid mode).
   const [patternMode, setPatternMode] = useState("strict");
   const usePatterns = patternMode !== "off";
   const allowPatternOverride = patternMode === "hybrid";
@@ -1378,7 +1380,7 @@ function GenerateTab({ stationId }) {
           <div className="card-title">🤖 Generate Roster</div>
           <div className="fg2" style={{ marginBottom: 12 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setPlan(null); setPreview(null); setApplied(null); }} /></div>
-            <div className="fg"><label className="fl">Use defined patterns? <span className="help-tip" tabIndex={0} title="Strict: a pattern-holder's OFF day is never touched, even if that leaves a gap. Patterns + Automatic: same patterns, but a pattern-holder can be pulled onto their OFF day as a last resort — only when literally no one else is available — so a shared pattern landing everyone off at once can't leave a shift or category completely unstaffed.">ⓘ</span></label>
+            <div className="fg"><label className="fl">Use defined patterns? <span className="help-tip" tabIndex={0} title="Both modes never pull anyone off their scheduled OFF day for routine coverage. A shortfall is first covered by moving a staff member already on duty elsewhere that day (above their shift's own mandatory minimum) onto the short-staffed shift, respecting rest-gap rules — e.g. a surplus Morning NCS covers an Afternoon shortfall. Strict: if that redistribution can't fully cover it, the gap is reported, not force-filled. Patterns + Automatic: adds one further, rare fallback — an UNLOCKED staff member's OFF day can be rostered as a flexi/exigency shift when redistribution genuinely finds nobody. A pattern-locked staff member's OFF day is never touched, in either mode.">ⓘ</span></label>
               <select className="fi" value={patternMode} onChange={e => setPatternMode(e.target.value)}>
                 <option value="strict">Yes — follow staff pattern assignments (strict)</option>
                 <option value="hybrid">Yes — patterns + automatic override for gaps</option>
@@ -1427,7 +1429,7 @@ function GenerateTab({ stationId }) {
             {preview && (
               <div className="card" style={{ borderColor: preview.violations.length ? "var(--amber)" : "var(--rp-green)" }}>
                 <div className="card-title">{preview.violations.length ? `⚠️ ${preview.violations.length} Critical Coverage Gaps in Generated Roster` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
-                <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{preview.advisoryGaps?.length ? ` · ${preview.advisoryGaps.length} advisory gap(s)` : ""}</div>
+                <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{preview.advisoryGaps?.length ? ` · ${preview.advisoryGaps.length} advisory gap(s)` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)` : ""}</div>
               </div>
             )}
 
@@ -1452,7 +1454,7 @@ function GenerateTab({ stationId }) {
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
             <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {applied.violations.length} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${applied.advisoryGaps.length} advisory gap(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {applied.violations.length} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${applied.advisoryGaps.length} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
       </div>
