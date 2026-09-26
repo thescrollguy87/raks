@@ -166,6 +166,21 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     const cfg = mandatoryCoverageConfig?.B1?.[sh];
     baseCoverage[sh] = cfg?.enabled ? Math.max(1, +cfg.min || 1) : 0;
   });
+  // NCS's own Mandatory Minimum Coverage floor — previously read and
+  // enforced by buildRosterAssignments's separate hard-fill loop but never
+  // passed into computeDailyShiftDemand, so a station that set e.g. a
+  // Night floor of 4 for NCS would see that floor correctly guaranteed in
+  // the actually-generated roster, but Category Requirement / Real
+  // Requirement's PRE-generation display would still show whatever the
+  // pure concurrency/clash math alone produced (often much lower) —
+  // display and generation silently disagreeing. Folded in the same way
+  // B1's floor already is, so NCS's displayed number can no longer be
+  // lower than what generation actually guarantees.
+  const baseCoverageNCS = {};
+  ["M", "A", "N"].forEach(sh => {
+    const cfg = mandatoryCoverageConfig?.NCS?.[sh];
+    baseCoverageNCS[sh] = cfg?.enabled ? Math.max(1, +cfg.min || 1) : 0;
+  });
   // AOG Buffer (a Generate-tab, per-run planning input — not a stored
   // config value) is spread evenly across the 3 shifts and folded into B1's
   // per-shift buffer, exactly like the station's own configured Per-Shift
@@ -177,7 +192,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   const perShiftBuffer = { B1: (config.bufferB1 || 0) + aogPerShift, B2: config.bufferB2, CM: config.bufferCM, NCS: config.bufferNCS };
 
   const demandResult = computeDailyShiftDemand({
-    year, month, homeStation: station?.iataCode, baseCoverage,
+    year, month, homeStation: station?.iataCode, baseCoverage, ncsBaseCoverage: baseCoverageNCS,
     flightSchedule: flightSchedule ? { turnRecords: flightSchedule.turnRecords, charterRecords: flightSchedule.charterRecords } : null,
     config, manualDemandEntries, shiftDefs: shiftDefsFull, perShiftBuffer,
   });

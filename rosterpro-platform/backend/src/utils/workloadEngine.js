@@ -213,11 +213,12 @@ function getManualDemandByDayShift(manualDemandEntries, year, month, shiftDefs) 
 // average), converted to headcount via the configurable movements-per-
 // staff ratios. Falls back cleanly to flat base coverage when no flight
 // schedule exists for the target month.
-function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer }) {
+function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBaseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer }) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const demand = {};
   const manualByDayShift = getManualDemandByDayShift(manualDemandEntries || [], year, month, shiftDefs);
   const buf = perShiftBuffer || { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  const ncsFloorBy = ncsBaseCoverage || { M: 0, A: 0, N: 0 };
 
   for (let d = 1; d <= daysInMonth; d++) {
     const manual = manualByDayShift[d];
@@ -226,7 +227,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       demand[d][sh] = {
         B1: (baseCoverage[sh] || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0),
         CM: (manual?.[sh].CM || 0) + (buf.CM || 0),
-        NCS: (manual?.[sh].NCS || 0) + (buf.NCS || 0),
+        NCS: (ncsFloorBy[sh] || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0),
       };
     });
   }
@@ -339,8 +340,9 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
 
       const b1Base = b1Floor; // held at its own floor — CM absorbs whatever concurrency the floor's capacity doesn't cover
       const cmBase = cmFromConcurrency + cmClashTopUp;
+      const ncsFloor = ncsFloorBy[sh] || 0;
       const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
-      const ncsBase = Math.max(ncsConcurrencyDriven, clashPeak);
+      const ncsBase = Math.max(ncsFloor, ncsConcurrencyDriven, clashPeak);
 
       const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
       const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
@@ -359,14 +361,14 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
         manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
-        core: ncsBase, coreLabel: buildCoreLabel(0, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, ncsBase),
+        core: ncsBase, coreLabel: buildCoreLabel(ncsFloor, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, ncsBase),
         manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, flights,
       });
     });
   }
   return {
     demand, source: "flight-schedule-driven",
-    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}); NCS sized independently at 1-per-${ratioNCS}. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
+    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}); NCS takes the max of its own Mandatory Minimum floor and 1-per-${ratioNCS} concurrency. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
     explain,
   };
 }
