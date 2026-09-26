@@ -272,6 +272,20 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
   const clashEvents = buildClashEvents(turnRecords, charterRecords, year, month, homeStation, config);
   let clashDrivenShiftCount = 0;
 
+  // Builds a human-readable label for how the category's own "core"
+  // requirement (before manual demand/buffer are added) was actually
+  // combined — B1 and NCS take the MAX of two floors, never their sum, so
+  // the label must say "max(...)", not "+", or the printed arithmetic
+  // won't add up to the number it's meant to explain.
+  function buildCoreLabel(mandatoryFloor, peakConcurrency, ratio, concurrencyDriven, clashTopUp, clashPeak, core) {
+    let base = `concurrency ceil(${peakConcurrency}÷${ratio})=${concurrencyDriven}`;
+    let wrapped = false; // bare concurrency term already equals core (no floor/clash adjustment) — appending "=core" again would just repeat the same number
+    if (mandatoryFloor > 0) { base = `max(mandatory floor ${mandatoryFloor}, ${base})`; wrapped = true; }
+    if (clashTopUp > 0) { base = `${base} + clash top-up +${clashTopUp}`; wrapped = true; }
+    if (clashPeak > 0) { base = `max(${base}, clash floor ${clashPeak})`; wrapped = true; }
+    return wrapped ? `${base}=${core}` : base;
+  }
+
   for (let d = 1; d <= daysInMonth; d++) {
     const date = new Date(year, month - 1, d);
     const manual = manualByDayShift[d];
@@ -297,32 +311,34 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, fligh
       const clashPeak = findPeakConcurrency(clippedClash).peak;
       if (clashPeak > 0) clashDrivenShiftCount++;
 
-      const b1Base = Math.max(baseCoverage[sh] || 0, Math.ceil(peakConcurrency / ratioB1));
-      let cmBase = Math.ceil(peakConcurrency / ratioCM);
-      const combinedShortfall = clashPeak - (b1Base + cmBase);
-      if (combinedShortfall > 0) cmBase += combinedShortfall; // top up CM only — B1's own floor is never inflated by a clash
+      const b1Floor = baseCoverage[sh] || 0;
+      const b1ConcurrencyDriven = Math.ceil(peakConcurrency / ratioB1);
+      const b1Base = Math.max(b1Floor, b1ConcurrencyDriven);
+      const cmConcurrencyDriven = Math.ceil(peakConcurrency / ratioCM);
+      const combinedShortfall = clashPeak - (b1Base + cmConcurrencyDriven);
+      const cmClashTopUp = Math.max(0, combinedShortfall);
+      const cmBase = cmConcurrencyDriven + cmClashTopUp; // top up CM only — B1's own floor is never inflated by a clash
+      const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
+      const ncsBase = Math.max(ncsConcurrencyDriven, clashPeak);
 
       const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
       const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
-      const ncsTotal = Math.max(Math.ceil(peakConcurrency / ratioNCS), clashPeak) + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
+      const ncsTotal = ncsBase + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
 
       demand[d][sh].B1 = b1Total;
       demand[d][sh].CM = cmTotal;
       demand[d][sh].NCS = ncsTotal;
 
       recordExplain("B1", sh, d, b1Total, {
-        mandatoryFloor: baseCoverage[sh] || 0, peakConcurrency, concurrencyRatio: ratioB1,
-        concurrencyDriven: Math.ceil(peakConcurrency / ratioB1),
+        core: b1Base, coreLabel: buildCoreLabel(b1Floor, peakConcurrency, ratioB1, b1ConcurrencyDriven, 0, 0, b1Base),
         manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
       });
       recordExplain("CM", sh, d, cmTotal, {
-        mandatoryFloor: 0, peakConcurrency, concurrencyRatio: ratioCM,
-        concurrencyDriven: Math.ceil(peakConcurrency / ratioCM), clashTopUp: Math.max(0, combinedShortfall),
+        core: cmBase, coreLabel: buildCoreLabel(0, peakConcurrency, ratioCM, cmConcurrencyDriven, cmClashTopUp, 0, cmBase),
         manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
-        mandatoryFloor: 0, peakConcurrency, concurrencyRatio: ratioNCS,
-        concurrencyDriven: Math.ceil(peakConcurrency / ratioNCS), clashPeak,
+        core: ncsBase, coreLabel: buildCoreLabel(0, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, ncsBase),
         manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, flights,
       });
     });

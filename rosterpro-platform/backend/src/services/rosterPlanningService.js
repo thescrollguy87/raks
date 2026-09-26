@@ -157,9 +157,7 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   // month, not the day they happened to be looking at).
   function formatExplain(e) {
     if (!e) return null;
-    const parts = [`floor ${e.mandatoryFloor}`, `concurrency ceil(${e.peakConcurrency}÷${e.concurrencyRatio})=${e.concurrencyDriven}`];
-    if (e.clashTopUp) parts.push(`clash top-up +${e.clashTopUp}`);
-    if (e.clashPeak) parts.push(`clash floor ${e.clashPeak}`);
+    const parts = [e.coreLabel];
     if (e.manual) parts.push(`manual demand +${e.manual}`);
     if (e.buffer) parts.push(`buffer +${e.buffer}`);
     const flightsText = e.flights.length ? e.flights.join(", ") : "none — no aircraft on ground/PDC at that instant";
