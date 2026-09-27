@@ -213,22 +213,29 @@ function getManualDemandByDayShift(manualDemandEntries, year, month, shiftDefs) 
 // average), converted to headcount via the configurable movements-per-
 // staff ratios. Falls back cleanly to flat base coverage when no flight
 // schedule exists for the target month.
-function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBaseCoverage, cmBaseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer }) {
+function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBaseCoverage, cmBaseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer, taskMasterByShiftCategory }) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const demand = {};
   const manualByDayShift = getManualDemandByDayShift(manualDemandEntries || [], year, month, shiftDefs);
   const buf = perShiftBuffer || { B1: 0, B2: 0, CM: 0, NCS: 0 };
   const ncsFloorBy = ncsBaseCoverage || { M: 0, A: 0, N: 0 };
   const cmFloorBy = cmBaseCoverage || { M: 0, A: 0, N: 0 };
+  // Planned Maintenance Tasks (Task Master) + Unplanned Workload, already
+  // pre-averaged into a per-day, per-shift, per-category headcount by the
+  // caller — an additive term exactly like manual demand and the per-shift
+  // buffer already are, so it lands in both `demand` and the `explain`
+  // breakdown below together, never leaving a tooltip's stated total out of
+  // sync with the actual number.
+  const tmBy = taskMasterByShiftCategory || { M: {}, A: {}, N: {} };
 
   for (let d = 1; d <= daysInMonth; d++) {
     const manual = manualByDayShift[d];
     demand[d] = {};
     ["M", "A", "N"].forEach(sh => {
       demand[d][sh] = {
-        B1: (baseCoverage[sh] || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0),
-        CM: (cmFloorBy[sh] || 0) + (manual?.[sh].CM || 0) + (buf.CM || 0),
-        NCS: (ncsFloorBy[sh] || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0),
+        B1: (baseCoverage[sh] || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0) + (tmBy[sh]?.B1 || 0),
+        CM: (cmFloorBy[sh] || 0) + (manual?.[sh].CM || 0) + (buf.CM || 0) + (tmBy[sh]?.CM || 0),
+        NCS: (ncsFloorBy[sh] || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0) + (tmBy[sh]?.NCS || 0),
       };
     });
   }
@@ -248,7 +255,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
   };
 
   if (!flightSchedule) {
-    return { demand, source: "base-coverage-only", reason: "No flight schedule imported for this exact month — using flat base coverage plus any Manual Demand / per-shift buffer entries.", explain };
+    return { demand, source: "base-coverage-only", reason: "No flight schedule imported for this exact month — using flat base coverage plus any Manual Demand, per-shift buffer, and Planned/Unplanned Task Master workload.", explain };
   }
 
   const { turnRecords, charterRecords } = flightSchedule;
@@ -353,9 +360,10 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
       const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
       const ncsBase = Math.max(ncsFloor, ncsConcurrencyDriven, clashPeak);
 
-      const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
-      const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
-      const ncsTotal = ncsBase + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
+      const tmB1 = tmBy[sh]?.B1 || 0, tmCM = tmBy[sh]?.CM || 0, tmNCS = tmBy[sh]?.NCS || 0;
+      const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0) + tmB1;
+      const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0) + tmCM;
+      const ncsTotal = ncsBase + (manual?.[sh].NCS || 0) + (buf.NCS || 0) + tmNCS;
 
       demand[d][sh].B1 = b1Total;
       demand[d][sh].CM = cmTotal;
@@ -363,15 +371,15 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
 
       recordExplain("B1", sh, d, b1Total, {
         core: b1Base, coreLabel: buildB1Label(b1Floor, peakConcurrency, ratioB1, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1),
-        manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
+        manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, taskMaster: tmB1, flights,
       });
       recordExplain("CM", sh, d, cmTotal, {
         core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmFloor, cmBase),
-        manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
+        manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, taskMaster: tmCM, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
         core: ncsBase, coreLabel: buildCoreLabel(ncsFloor, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, ncsBase),
-        manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, flights,
+        manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, taskMaster: tmNCS, flights,
       });
     });
   }

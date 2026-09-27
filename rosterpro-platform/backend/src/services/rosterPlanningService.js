@@ -158,6 +158,7 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   function formatExplain(e) {
     if (!e) return null;
     const parts = [e.coreLabel];
+    if (e.taskMaster) parts.push(`planned/unplanned task master +${e.taskMaster}`);
     if (e.manual) parts.push(`manual demand +${e.manual}`);
     if (e.buffer) parts.push(`buffer +${e.buffer}`);
     const flightsText = e.flights.length ? e.flights.join(", ") : "none — no aircraft on ground/PDC at that instant";

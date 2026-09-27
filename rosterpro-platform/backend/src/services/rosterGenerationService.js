@@ -204,10 +204,46 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   const aogPerShift = Math.ceil((+aogBuffer || 0) / 3);
   const perShiftBuffer = { B1: (config.bufferB1 || 0) + aogPerShift, B2: config.bufferB2, CM: config.bufferCM, NCS: config.bufferNCS };
 
+  const flightSummary = flightSchedule
+    ? computeFlightWorkloadSummary(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month)
+    : { totalMovements: 0, operatingDays: 0, daysInMonth: nDays };
+  const plannedDemand = computeTaskMasterDemand(plannedTasks, nDays, flightSummary.operatingDays);
+  const unplannedDemand = computeUnplannedWorkload(unplannedTasks, config, plannedDemand.totalHours);
+
+  // Planned Maintenance Tasks (Task Master — Weekly Check, Service Check,
+  // Wheel Change, Brake Change, layover coverage, etc.) and Unplanned
+  // Workload were previously computed ONLY for the Workload Summary /
+  // Explainable Manpower display panels further below — never actually
+  // folded into the per-day/per-shift target buildRosterAssignments fills
+  // against, so a station could configure real recurring task-master
+  // workload, see it reflected in "how many people we need" on screen, and
+  // still have Auto Generate roster as if none of it existed. Each task's
+  // monthly total hours are spread evenly across the month's days — the
+  // same averaging computeExplainableManpower already uses for its own
+  // numbers below, so display and generation agree — and passed into
+  // computeDailyShiftDemand as another additive term (like manual demand
+  // and the per-shift buffer already are) so it lands in demand/explain
+  // together, never producing a tooltip whose stated total doesn't match
+  // the actual number. B2 (which has no entry in computeDailyShiftDemand's
+  // output at all) is folded in separately where advisoryDemand.B2 is
+  // built below.
+  const HOURS_PER_SHIFT = 8; // matches computeExplainableManpower's own assumption
+  const unplannedPerCategory = {};
+  ["B1", "B2", "CM", "NCS"].forEach(cat => {
+    unplannedPerCategory[cat] = (unplannedDemand.byCategory[cat] || 0) / 3 / nDays / HOURS_PER_SHIFT;
+  });
+  const taskMasterByShiftCategory = { M: {}, A: {}, N: {} };
+  ["M", "A", "N"].forEach(sh => {
+    ["B1", "B2", "CM", "NCS"].forEach(cat => {
+      const plannedPerDay = (plannedDemand.byShiftCategory[sh][cat] || 0) / nDays / HOURS_PER_SHIFT;
+      taskMasterByShiftCategory[sh][cat] = Math.round(plannedPerDay + unplannedPerCategory[cat]);
+    });
+  });
+
   const demandResult = computeDailyShiftDemand({
     year, month, homeStation: station?.iataCode, baseCoverage, ncsBaseCoverage: baseCoverageNCS, cmBaseCoverage: baseCoverageCM,
     flightSchedule: flightSchedule ? { turnRecords: flightSchedule.turnRecords, charterRecords: flightSchedule.charterRecords } : null,
-    config, manualDemandEntries, shiftDefs: shiftDefsFull, perShiftBuffer,
+    config, manualDemandEntries, shiftDefs: shiftDefsFull, perShiftBuffer, taskMasterByShiftCategory,
   });
 
   // B2 has no flight-schedule-driven peak-concurrency demand (deliberately —
@@ -229,18 +265,13 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
         B1: demandResult.demand[d][sh].B1,
         CM: demandResult.demand[d][sh].CM,
         NCS: demandResult.demand[d][sh].NCS,
-        B2: baseCoverageB2[sh] + (perShiftBuffer.B2 || 0) + (manualByDayShift[d]?.[sh]?.B2 || 0),
+        B2: baseCoverageB2[sh] + (perShiftBuffer.B2 || 0) + (manualByDayShift[d]?.[sh]?.B2 || 0) + taskMasterByShiftCategory[sh].B2,
       };
     });
   }
 
   const nightRestrictionRules = rules.filter(r => r.enabled && r.type === "hard" && (r.conditionType === "night_only" || r.conditionType === "no_night"));
 
-  const flightSummary = flightSchedule
-    ? computeFlightWorkloadSummary(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month)
-    : { totalMovements: 0, operatingDays: 0, daysInMonth: nDays };
-  const plannedDemand = computeTaskMasterDemand(plannedTasks, nDays, flightSummary.operatingDays);
-  const unplannedDemand = computeUnplannedWorkload(unplannedTasks, config, plannedDemand.totalHours);
   const explainableManpower = computeExplainableManpower(flightSummary, plannedDemand, unplannedDemand, nDays);
   const averagePeakByShift = computeAveragePeakByShift(demandResult.demand, nDays);
 

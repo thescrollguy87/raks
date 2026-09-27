@@ -230,6 +230,36 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(result.demand[1].A.CM).toBe(5); // floor wins over the lower concurrency/clash-driven count
   });
 
+  it("Planned/Unplanned Task Master workload (layover, weekly check, wheel change, etc.) is added on top, not just displayed", () => {
+    // Previously computeTaskMasterDemand/computeUnplannedWorkload's output
+    // fed only the Workload Summary / Explainable Manpower display panels —
+    // never the actual demand generation fills against — so a station with
+    // real recurring task-master workload could see it reflected on screen
+    // and still have Auto Generate roster as if none of it existed.
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      taskMasterByShiftCategory: { M: { B1: 0, B2: 0, CM: 3, NCS: 0 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 0 } },
+      flightSchedule: null, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(result.demand[1].M.CM).toBe(3);
+    expect(result.demand[1].A.CM).toBe(0); // only applies to the shift it's attributed to
+  });
+
+  it("Task Master workload also applies on the flight-schedule-driven path, adding on top of the concurrency-driven figure", () => {
+    const turn1 = quickTurn("09:00", "09:05");
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      taskMasterByShiftCategory: { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 2, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 0 } },
+      flightSchedule: { turnRecords: [turn1], charterRecords: [] }, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    // baseCoverage.A is 0 (no mandatory floor) and there's no B1-relevant
+    // concurrency requirement here beyond the single turn, so B1's Afternoon
+    // figure is purely the +2 task-master addition.
+    expect(result.demand[1].A.B1).toBe(2);
+  });
+
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
     // Ground time exactly at the 120-min threshold -> Transit; one minute over -> PDC, not both.
     const quickRec = quickTurn("09:00", "11:00"); // 120 min ground time
