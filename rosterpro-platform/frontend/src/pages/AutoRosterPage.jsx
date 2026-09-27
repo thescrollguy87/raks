@@ -1238,7 +1238,7 @@ function GenerateTab({ stationId }) {
   return (
     <div>
       <HowToUseTab>
-        Every number below is broken down into what produced it — flight/PDC demand, planned maintenance, and unplanned reserve — never a single opaque total. The mandatory safety floor per shift is set separately in the Mandatory Minimum Coverage table below, not here. Requires a Flight Schedule import (see the Flight Schedule tab) for the target month.
+        Every number below is broken down into what produced it — flight/PDC demand, planned maintenance, and unplanned reserve — never a single opaque total. This isn't just a display: Planned/Unplanned Task Master workload (Layover, Weekly Check, Service Check, Wheel Change, Brake Change, etc.) is spread across the month and folded directly into Category Requirement and what Auto Generate actually rosters, alongside flight-schedule demand. The mandatory safety floor per shift is set separately in the Mandatory Minimum Coverage table below, not here. Requires a Flight Schedule import (see the Flight Schedule tab) for the target month.
       </HowToUseTab>
 
       <div className="card">
