@@ -434,6 +434,13 @@ function computeTaskMasterDemand(taskMaster, daysInMonth, operatingDays) {
 function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours) {
   let hours = 0;
   const byCategory = { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  // Same per-shift routing as computeTaskMasterDemand: an unplanned task's
+  // own Preferred Shift (Wheel Change/Troubleshooting/Brake Change are
+  // typically Night; AOG Rectification etc. "Any") decides which shift its
+  // hours land on, rather than every unplanned task's hours getting spread
+  // evenly across all three shifts regardless of when the work actually
+  // happens.
+  const byShiftCategory = { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 0 } };
   if (config.unplannedMethod === "frequency" || config.unplannedMethod === "both") {
     unplannedTaskMaster.forEach(t => {
       const hoursPerOcc = (t.avgDurationMin || 0) / 60;
@@ -443,6 +450,14 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
       byCategory.B2 += t.avgFreqPerMonth * hoursPerOcc * (t.reqB2 || 0);
       byCategory.CM += t.avgFreqPerMonth * hoursPerOcc * (t.reqCM || 0);
       byCategory.NCS += t.avgFreqPerMonth * hoursPerOcc * (t.reqNCS || 0);
+      const shifts = (t.preferredShift === "M" || t.preferredShift === "A" || t.preferredShift === "N") ? [t.preferredShift] : ["M", "A", "N"];
+      const shiftSplit = 1 / shifts.length;
+      shifts.forEach(sh => {
+        byShiftCategory[sh].B1 += t.avgFreqPerMonth * hoursPerOcc * (t.reqB1 || 0) * shiftSplit;
+        byShiftCategory[sh].B2 += t.avgFreqPerMonth * hoursPerOcc * (t.reqB2 || 0) * shiftSplit;
+        byShiftCategory[sh].CM += t.avgFreqPerMonth * hoursPerOcc * (t.reqCM || 0) * shiftSplit;
+        byShiftCategory[sh].NCS += t.avgFreqPerMonth * hoursPerOcc * (t.reqNCS || 0) * shiftSplit;
+      });
     });
   }
   if (config.unplannedMethod === "manpower_hours" || config.unplannedMethod === "both") {
@@ -453,7 +468,7 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
     fromTasksOrAllowance: Math.round(hours * 10) / 10,
     bufferHours: Math.round(bufferHours * 10) / 10,
     totalHours: Math.round((hours + bufferHours) * 10) / 10,
-    byCategory,
+    byCategory, byShiftCategory,
     label: "EXPECTED UNPLANNED WORKLOAD — planning estimate, not a confirmed maintenance event",
   };
 }

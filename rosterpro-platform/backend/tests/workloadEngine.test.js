@@ -260,6 +260,26 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(result.demand[1].A.B1).toBe(2);
   });
 
+  it("computeUnplannedWorkload routes each task's hours to its own Preferred Shift instead of spreading everything evenly", () => {
+    // Previously the caller had no per-shift breakdown for unplanned tasks
+    // at all and had to spread the whole monthly total evenly across M/A/N
+    // regardless of each task's actual Preferred Shift — e.g. Wheel Change
+    // and Troubleshooting set to Night would incorrectly leak hours onto
+    // Morning/Afternoon too, while genuinely diluting Night's real figure.
+    const unplannedTaskMaster = [
+      { name: "Wheel Change", avgFreqPerMonth: 25, avgDurationMin: 45, reqCM: 1, reqNCS: 1, preferredShift: "N" },
+      { name: "AOG Rectification", avgFreqPerMonth: 2, avgDurationMin: 360, reqB1: 1, reqNCS: 2, preferredShift: null }, // "Any" -> split evenly
+    ];
+    const config = { unplannedMethod: "frequency", unplannedManpowerHoursPerMonth: 0, unplannedBufferPct: 0 };
+    const result = computeUnplannedWorkload(unplannedTaskMaster, config, 0);
+    // Wheel Change: 25 * 0.75h * 1 NCS = 18.75h, all on Night.
+    // AOG Rectification: 2 * 6h * 2 NCS = 24h, split evenly -> 8h per shift.
+    expect(result.byShiftCategory.N.NCS).toBeCloseTo(18.75 + 8, 5);
+    expect(result.byShiftCategory.M.NCS).toBeCloseTo(8, 5);
+    expect(result.byShiftCategory.A.NCS).toBeCloseTo(8, 5);
+    expect(result.byShiftCategory.N.CM).toBeCloseTo(25 * 0.75, 5); // Wheel Change's CM share, Night only
+  });
+
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
     // Ground time exactly at the 120-min threshold -> Transit; one minute over -> PDC, not both.
     const quickRec = quickTurn("09:00", "11:00"); // 120 min ground time

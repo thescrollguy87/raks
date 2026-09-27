@@ -228,15 +228,12 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   // output at all) is folded in separately where advisoryDemand.B2 is
   // built below.
   const HOURS_PER_SHIFT = 8; // matches computeExplainableManpower's own assumption
-  const unplannedPerCategory = {};
-  ["B1", "B2", "CM", "NCS"].forEach(cat => {
-    unplannedPerCategory[cat] = (unplannedDemand.byCategory[cat] || 0) / 3 / nDays / HOURS_PER_SHIFT;
-  });
   const taskMasterByShiftCategory = { M: {}, A: {}, N: {} };
   ["M", "A", "N"].forEach(sh => {
     ["B1", "B2", "CM", "NCS"].forEach(cat => {
       const plannedPerDay = (plannedDemand.byShiftCategory[sh][cat] || 0) / nDays / HOURS_PER_SHIFT;
-      taskMasterByShiftCategory[sh][cat] = Math.round(plannedPerDay + unplannedPerCategory[cat]);
+      const unplannedPerDay = (unplannedDemand.byShiftCategory[sh][cat] || 0) / nDays / HOURS_PER_SHIFT;
+      taskMasterByShiftCategory[sh][cat] = Math.round(plannedPerDay + unplannedPerDay);
     });
   });
 
