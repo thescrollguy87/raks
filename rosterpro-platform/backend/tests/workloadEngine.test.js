@@ -200,6 +200,36 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(result.demand[1].A.NCS).toBe(5); // floor wins over the lower concurrency/clash-driven count
   });
 
+  it("CM's own Mandatory Minimum floor is reflected in the demand, not just B1's leftover pooling", () => {
+    // No flight schedule at all — pure base-coverage fallback path. CM's
+    // demand previously came ONLY from concurrency left over after B1's
+    // floor capacity (see the B1/CM pooling above), so a station that set
+    // e.g. a Night floor of 2 directly on CM (independent of any B1
+    // pooling) would see the demand/Category-Requirement display show 0
+    // whenever there was no flight-driven concurrency at that shift.
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      cmBaseCoverage: { M: 0, A: 0, N: 2 },
+      flightSchedule: null, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(result.demand[1].N.CM).toBe(2);
+    expect(result.demand[1].M.CM).toBe(0); // floor only applies to the shift it's configured for
+  });
+
+  it("CM's floor also applies on the flight-schedule-driven path, taking the max with the B1-pooling result", () => {
+    const turn1 = quickTurn("09:00", "09:05");
+    const turn2 = quickTurn("09:30", "09:35"); // 2-way clash -> concurrency-driven CM (after B1 pooling) would be 1
+    const config = { ...DEFAULT_CONFIG, movementsPerB1Staff: 1, movementsPerCMStaff: 1 };
+    const result = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 1, N: 0 },
+      cmBaseCoverage: { M: 0, A: 5, N: 0 }, // floor (5) deliberately higher than the pooled concurrency-driven count
+      flightSchedule: { turnRecords: [turn1, turn2], charterRecords: [] }, config,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(result.demand[1].A.CM).toBe(5); // floor wins over the lower concurrency/clash-driven count
+  });
+
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
     // Ground time exactly at the 120-min threshold -> Transit; one minute over -> PDC, not both.
     const quickRec = quickTurn("09:00", "11:00"); // 120 min ground time

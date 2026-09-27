@@ -213,12 +213,13 @@ function getManualDemandByDayShift(manualDemandEntries, year, month, shiftDefs) 
 // average), converted to headcount via the configurable movements-per-
 // staff ratios. Falls back cleanly to flat base coverage when no flight
 // schedule exists for the target month.
-function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBaseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer }) {
+function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBaseCoverage, cmBaseCoverage, flightSchedule, config, manualDemandEntries, shiftDefs, perShiftBuffer }) {
   const daysInMonth = new Date(year, month, 0).getDate();
   const demand = {};
   const manualByDayShift = getManualDemandByDayShift(manualDemandEntries || [], year, month, shiftDefs);
   const buf = perShiftBuffer || { B1: 0, B2: 0, CM: 0, NCS: 0 };
   const ncsFloorBy = ncsBaseCoverage || { M: 0, A: 0, N: 0 };
+  const cmFloorBy = cmBaseCoverage || { M: 0, A: 0, N: 0 };
 
   for (let d = 1; d <= daysInMonth; d++) {
     const manual = manualByDayShift[d];
@@ -226,7 +227,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
     ["M", "A", "N"].forEach(sh => {
       demand[d][sh] = {
         B1: (baseCoverage[sh] || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0),
-        CM: (manual?.[sh].CM || 0) + (buf.CM || 0),
+        CM: (cmFloorBy[sh] || 0) + (manual?.[sh].CM || 0) + (buf.CM || 0),
         NCS: (ncsFloorBy[sh] || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0),
       };
     });
@@ -289,12 +290,14 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
       ? `mandatory floor ${floor} (covers ${coveredByFloor} of ${peakConcurrency} concurrent aircraft; CM covers the remaining ${remainder})=${floor}`
       : `mandatory floor ${floor} (fully covers ${peakConcurrency} concurrent aircraft)=${floor}`;
   }
-  function buildCmLabel(peakConcurrency, coveredByB1, remainder, ratioCM, cmFromConcurrency, clashTopUp, core) {
+  function buildCmLabel(peakConcurrency, coveredByB1, remainder, ratioCM, cmFromConcurrency, clashTopUp, mandatoryFloor, core) {
     let base = remainder > 0 || coveredByB1 > 0
       ? `concurrency remaining after B1's ${coveredByB1}-capacity ceil((${peakConcurrency}-${coveredByB1})÷${ratioCM})=${cmFromConcurrency}`
       : `concurrency ceil(${peakConcurrency}÷${ratioCM})=${cmFromConcurrency}`;
-    if (clashTopUp > 0) return `${base} + clash top-up +${clashTopUp}=${core}`;
-    return base;
+    let wrapped = false;
+    if (clashTopUp > 0) { base = `${base} + clash top-up +${clashTopUp}`; wrapped = true; }
+    if (mandatoryFloor > 0) { base = `max(mandatory floor ${mandatoryFloor}, ${base})`; wrapped = true; }
+    return wrapped ? `${base}=${core}` : base;
   }
 
   // NCS is a separate support role, not pooled with B1/CM.
@@ -333,13 +336,19 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
       if (clashPeak > 0) clashDrivenShiftCount++;
 
       const b1Floor = baseCoverage[sh] || 0;
+      const cmFloor = cmFloorBy[sh] || 0;
       const b1PoolCapacity = b1Floor * ratioB1;
       const remainingAfterB1 = Math.max(0, peakConcurrency - b1PoolCapacity);
       const cmFromConcurrency = Math.ceil(remainingAfterB1 / ratioCM);
       const cmClashTopUp = Math.max(0, clashPeak - (b1Floor + cmFromConcurrency));
 
       const b1Base = b1Floor; // held at its own floor — CM absorbs whatever concurrency the floor's capacity doesn't cover
-      const cmBase = cmFromConcurrency + cmClashTopUp;
+      // CM's own Mandatory Minimum floor is a separate, independent baseline
+      // from the concurrency-driven pooling above — e.g. a station may
+      // require >=2 CM on Night regardless of flight activity — so the
+      // final figure is whichever is larger, exactly like NCS's ncsBase
+      // below, never just the concurrency-derived amount alone.
+      const cmBase = Math.max(cmFloor, cmFromConcurrency + cmClashTopUp);
       const ncsFloor = ncsFloorBy[sh] || 0;
       const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
       const ncsBase = Math.max(ncsFloor, ncsConcurrencyDriven, clashPeak);
@@ -357,7 +366,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
         manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
       });
       recordExplain("CM", sh, d, cmTotal, {
-        core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmBase),
+        core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmFloor, cmBase),
         manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
@@ -368,7 +377,7 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
   }
   return {
     demand, source: "flight-schedule-driven",
-    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}); NCS takes the max of its own Mandatory Minimum floor and 1-per-${ratioNCS} concurrency. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
+    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}), then takes the max of that and its own Mandatory Minimum floor; NCS takes the max of its own Mandatory Minimum floor and 1-per-${ratioNCS} concurrency. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
     explain,
   };
 }

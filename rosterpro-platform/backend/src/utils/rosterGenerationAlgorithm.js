@@ -201,13 +201,22 @@ function buildRosterAssignments({
     return true;
   }
 
-  // Whether `s` could safely be assigned `shift` on `day`, looking only at
+  // Whether `s` could safely be assigned `shift` on `day`, looking at both
   // the days BEFORE it (their own grid up to day-1, or tailByUser for days
-  // 1-3) and, for a Night assignment, the day after — independent of
-  // whatever `s` is currently doing on `day` itself, since same-day
-  // redistribution REPLACES that day's assignment rather than adding a
-  // second one. Every real DGCA-style rest-gap/night-restriction rule
-  // applies exactly as strictly as it would for a fresh assignment.
+  // 1-3) AND the days after — independent of whatever `s` is currently
+  // doing on `day` itself, since same-day redistribution REPLACES that
+  // day's assignment rather than adding a second one. Every real
+  // DGCA-style rest-gap/night-restriction rule applies exactly as strictly
+  // as it would for a fresh assignment.
+  //
+  // The forward check matters because day+1 (and day+2) may already be
+  // fixed from Step 1/the base pattern, computed on the assumption of
+  // whatever `day`'s ORIGINAL shift was — redistribution changing `day`
+  // can silently invalidate that already-computed future day (e.g. `day`
+  // becomes Night while day+1 was already fixed as Afternoon, which is
+  // exactly as illegal as a fresh Afternoon-after-Night assignment would
+  // be). Re-running the same rules forward, treating `shift` as what
+  // day+1 would see as its own "prev", closes that gap.
   function restGapOk(s, day, shift) {
     if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
     const tail = tailByUser?.[s.id] || ["O", "O", "O"];
@@ -218,9 +227,15 @@ function buildRosterAssignments({
     if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") return false;
     if (shift === "M" && (isNight(prev, shiftDefsByCode) || isAft(prev))) return false;
     if (shift === "A" && isNight(prev, shiftDefsByCode)) return false;
-    if (shift === "N") {
-      const next = day < nDays ? grid[s.id][day] : undefined;
-      if (isMorn(next)) return false; // would put an N immediately before an already-fixed Morning
+
+    const next = day < nDays ? grid[s.id][day] : undefined;
+    if (next !== undefined) {
+      if (isMorn(next) && (isNight(shift, shiftDefsByCode) || isAft(shift))) return false; // day+1 Morning can't follow this Night/Afternoon
+      if (isAft(next) && isNight(shift, shiftDefsByCode)) return false; // day+1 Afternoon can't follow this Night
+      if (isNight(shift, shiftDefsByCode) && isNight(next, shiftDefsByCode)) {
+        const next2 = day + 1 < nDays ? grid[s.id][day + 1] : undefined;
+        if (next2 !== undefined && next2 !== "O") return false; // two Nights in a row need an OFF day right after
+      }
     }
     return true;
   }

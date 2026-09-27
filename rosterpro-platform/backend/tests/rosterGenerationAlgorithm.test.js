@@ -270,6 +270,28 @@ describe("buildRosterAssignments — same-day surplus/deficit redistribution (ne
     expect(locked.violations.some(v => v.day === 3)).toBe(true);
   });
 
+  it("never redistributes a surplus staff member into a shift that would break their OWN already-fixed next day", () => {
+    // ncs0 is fixed Morning-then-Afternoon (day 1 -> day 2) — a legal pair
+    // on its own. If redistribution moved ncs0 from day 1's Morning onto
+    // Night (to cover a Night shortfall), day 2's already-fixed Afternoon
+    // would now illegally follow a Night, which nothing else re-validates
+    // once day 2 has already been computed. ncs1 (Morning then OFF) has no
+    // such conflict and must be picked instead.
+    const staff = [{ id: "ncs0", category: "NCS" }, { id: "ncs1", category: "NCS" }];
+    const patternByUser = { ncs0: { codes: ["M", "A"], offset: 0 }, ncs1: { codes: ["M", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 2, leaveByUserDay: {}, blockedUserIds: [], patternByUser,
+      advisoryDemand: { 1: { N: { NCS: 1 } } },
+    });
+    const day1 = result.assignments.filter(a => a.day === 1);
+    const day2 = result.assignments.filter(a => a.day === 2);
+    expect(day1.find(a => a.userId === "ncs0").code).toBe("M"); // stays — moving them would break day 2's already-fixed Afternoon
+    expect(day1.find(a => a.userId === "ncs1").code).toBe("N"); // the safe donor covers it instead
+    expect(day2.find(a => a.userId === "ncs0").code).toBe("A"); // untouched
+    expect(day2.find(a => a.userId === "ncs1").code).toBe("O"); // untouched
+    expect(result.violations.some(v => v.category === "NCS")).toBe(false);
+  });
+
   it("respects a night-restriction rule on the shift a surplus staff member would move INTO", () => {
     // Both start the day on Afternoon and Night is short-staffed. ncs0 has a
     // hard no_night rule, so moving them onto Night would violate it — the
