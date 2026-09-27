@@ -423,7 +423,18 @@ function computeTaskMasterDemand(taskMaster, daysInMonth, operatingDays) {
       byShiftCategory[sh].CM += occurrences * hoursPerOccurrence * (t.reqCM || 0) * shiftSplit;
       byShiftCategory[sh].NCS += occurrences * hoursPerOccurrence * (t.reqNCS || 0) * shiftSplit;
     });
-    if (occurrences > 0) taskBreakdown.push({ name: t.name, occurrences: Math.round(occurrences * 10) / 10, totalHours: Math.round(taskTotalHours * 10) / 10, preferredShift: t.preferredShift || "Any" });
+    if (occurrences > 0) {
+      taskBreakdown.push({
+        name: t.name, occurrences: Math.round(occurrences * 10) / 10, totalHours: Math.round(taskTotalHours * 10) / 10,
+        preferredShift: t.preferredShift || "Any",
+        byCategory: {
+          B1: Math.round(occurrences * hoursPerOccurrence * (t.reqB1 || 0) * 10) / 10,
+          B2: Math.round(occurrences * hoursPerOccurrence * (t.reqB2 || 0) * 10) / 10,
+          CM: Math.round(occurrences * hoursPerOccurrence * (t.reqCM || 0) * 10) / 10,
+          NCS: Math.round(occurrences * hoursPerOccurrence * (t.reqNCS || 0) * 10) / 10,
+        },
+      });
+    }
   });
   return { totalHours: Math.round(totalHours * 10) / 10, byCategory, byShift, byShiftCategory, taskBreakdown };
 }
@@ -441,6 +452,12 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
   // evenly across all three shifts regardless of when the work actually
   // happens.
   const byShiftCategory = { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 0 } };
+  // Per-task hours, same purpose as computeTaskMasterDemand's own
+  // taskBreakdown: lets the Workload Summary/Explainable Manpower panels
+  // show WHICH specific task is actually driving a category's total,
+  // instead of only ever showing an opaque combined number a planner has
+  // no way to trace back to one row in the Task Master table.
+  const taskBreakdown = [];
   if (config.unplannedMethod === "frequency" || config.unplannedMethod === "both") {
     unplannedTaskMaster.forEach(t => {
       const hoursPerOcc = (t.avgDurationMin || 0) / 60;
@@ -458,6 +475,18 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
         byShiftCategory[sh].CM += t.avgFreqPerMonth * hoursPerOcc * (t.reqCM || 0) * shiftSplit;
         byShiftCategory[sh].NCS += t.avgFreqPerMonth * hoursPerOcc * (t.reqNCS || 0) * shiftSplit;
       });
+      if (manHours > 0) {
+        taskBreakdown.push({
+          name: t.name, occurrences: t.avgFreqPerMonth, totalHours: Math.round(manHours * 10) / 10,
+          preferredShift: t.preferredShift || "Any",
+          byCategory: {
+            B1: Math.round(t.avgFreqPerMonth * hoursPerOcc * (t.reqB1 || 0) * 10) / 10,
+            B2: Math.round(t.avgFreqPerMonth * hoursPerOcc * (t.reqB2 || 0) * 10) / 10,
+            CM: Math.round(t.avgFreqPerMonth * hoursPerOcc * (t.reqCM || 0) * 10) / 10,
+            NCS: Math.round(t.avgFreqPerMonth * hoursPerOcc * (t.reqNCS || 0) * 10) / 10,
+          },
+        });
+      }
     });
   }
   if (config.unplannedMethod === "manpower_hours" || config.unplannedMethod === "both") {
@@ -468,7 +497,7 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
     fromTasksOrAllowance: Math.round(hours * 10) / 10,
     bufferHours: Math.round(bufferHours * 10) / 10,
     totalHours: Math.round((hours + bufferHours) * 10) / 10,
-    byCategory, byShiftCategory,
+    byCategory, byShiftCategory, taskBreakdown,
     label: "EXPECTED UNPLANNED WORKLOAD — planning estimate, not a confirmed maintenance event",
   };
 }

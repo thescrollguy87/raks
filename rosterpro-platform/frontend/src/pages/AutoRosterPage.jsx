@@ -1287,11 +1287,35 @@ function GenerateTab({ stationId }) {
               <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 4 }}>
                 By shift (per each task's own Preferred Shift, not an even split): Morning {a.plannedMaintenance.byShift.M.toFixed(1)}h · Afternoon {a.plannedMaintenance.byShift.A.toFixed(1)}h · Night {a.plannedMaintenance.byShift.N.toFixed(1)}h
               </div>
+              {a.plannedMaintenance.taskBreakdown?.length > 0 && (
+                <div style={{ fontSize: 9, marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 4 }}>
+                  {/* Which specific Task Master row is actually driving this
+                      total — traces "why is this number what it is" back to
+                      one row instead of leaving it as an opaque combined
+                      figure a planner has no way to verify. */}
+                  {[...a.plannedMaintenance.taskBreakdown].sort((x, y) => y.totalHours - x.totalHours).map((t, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                      <span>{t.name} ({t.occurrences}× {t.preferredShift})</span>
+                      <strong>{t.totalHours}h <span style={{ fontWeight: 400, color: "var(--text-dim)" }}>(B1 {t.byCategory.B1} · B2 {t.byCategory.B2} · CM {t.byCategory.CM} · NCS {t.byCategory.NCS})</span></strong>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="card">
               <div className="card-title">⚠ Expected Unplanned Workload</div>
               <div style={{ fontSize: 11 }}>From Tasks/Allowance: <strong>{a.unplannedWorkload.fromTasksOrAllowance}h</strong> + Buffer ({a.unplannedWorkload.bufferPct}%): <strong>{a.unplannedWorkload.bufferHours}h</strong></div>
               <div style={{ fontSize: 11, marginTop: 4 }}>Total: <strong>{a.unplannedWorkload.totalHours}h</strong> — planning estimate, not a confirmed maintenance event</div>
+              {a.unplannedWorkload.taskBreakdown?.length > 0 && (
+                <div style={{ fontSize: 9, marginTop: 6, borderTop: "1px solid var(--border)", paddingTop: 4 }}>
+                  {[...a.unplannedWorkload.taskBreakdown].sort((x, y) => y.totalHours - x.totalHours).map((t, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+                      <span>{t.name} ({t.occurrences}× {t.preferredShift})</span>
+                      <strong>{t.totalHours}h <span style={{ fontWeight: 400, color: "var(--text-dim)" }}>(B1 {t.byCategory.B1} · B2 {t.byCategory.B2} · CM {t.byCategory.CM} · NCS {t.byCategory.NCS})</span></strong>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

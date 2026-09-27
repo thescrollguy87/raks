@@ -443,6 +443,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     plannedMaintenance: {
       expectedManpowerHours: workloadContext.plannedDemand.totalHours,
       byCategory: workloadContext.plannedDemand.byCategory, byShift: workloadContext.plannedDemand.byShift,
+      taskBreakdown: workloadContext.plannedDemand.taskBreakdown,
     },
     unplannedWorkload: { ...workloadContext.unplannedDemand, bufferPct: workloadContext.config.unplannedBufferPct },
     manpowerRequirement: workloadContext.explainableManpower,
