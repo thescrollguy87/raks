@@ -222,10 +222,15 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
   const cmFloorBy = cmBaseCoverage || { M: 0, A: 0, N: 0 };
   // Planned Maintenance Tasks (Task Master) + Unplanned Workload, already
   // pre-averaged into a per-day, per-shift, per-category headcount by the
-  // caller — an additive term exactly like manual demand and the per-shift
-  // buffer already are, so it lands in both `demand` and the `explain`
-  // breakdown below together, never leaving a tooltip's stated total out of
-  // sync with the actual number.
+  // caller. Real operational feedback: the Mandatory Minimum floor is meant
+  // to already represent "enough for a typical shift including our normal
+  // recurring workload," not a number set in ignorance of it — so Task
+  // Master demand takes the MAX with the floor (like flight concurrency
+  // already does for NCS), never gets summed on top of it. Manual Demand
+  // and the per-shift buffer stay purely additive on top of that max, since
+  // those represent genuinely separate, situational extras (a specific
+  // date's planner override, a standing ad-hoc safety margin) rather than
+  // another estimate of the same baseline workload.
   const tmBy = taskMasterByShiftCategory || { M: {}, A: {}, N: {} };
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -233,9 +238,9 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
     demand[d] = {};
     ["M", "A", "N"].forEach(sh => {
       demand[d][sh] = {
-        B1: (baseCoverage[sh] || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0) + (tmBy[sh]?.B1 || 0),
-        CM: (cmFloorBy[sh] || 0) + (manual?.[sh].CM || 0) + (buf.CM || 0) + (tmBy[sh]?.CM || 0),
-        NCS: (ncsFloorBy[sh] || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0) + (tmBy[sh]?.NCS || 0),
+        B1: Math.max(baseCoverage[sh] || 0, tmBy[sh]?.B1 || 0) + (manual?.[sh].B1 || 0) + (buf.B1 || 0),
+        CM: Math.max(cmFloorBy[sh] || 0, tmBy[sh]?.CM || 0) + (manual?.[sh].CM || 0) + (buf.CM || 0),
+        NCS: Math.max(ncsFloorBy[sh] || 0, tmBy[sh]?.NCS || 0) + (manual?.[sh].NCS || 0) + (buf.NCS || 0),
       };
     });
   }
@@ -283,38 +288,58 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
   // B1 first" means: the floor is the baseline that's always there, and
   // any load beyond what it can cover is what actually needs an extra
   // head), and CM absorbs whatever peak concurrency the B1 floor's own
-  // ratio-based capacity doesn't already cover. The narrower automatic-
-  // clash constraint (B1+CM combined >= clashPeak) still applies on top,
-  // in case a tight departure clash demands more combined heads than the
+  // ratio-based capacity doesn't already cover. Task Master workload is a
+  // separate axis from concurrency — it takes the MAX with the Mandatory
+  // Minimum floor rather than adding to it, since the floor is meant to
+  // already represent "enough for a typical shift including our normal
+  // recurring workload," not a number set in ignorance of it (real
+  // feedback: summing them double-counted the same baseline workload
+  // twice). The narrower automatic-clash constraint (B1+CM combined >=
+  // clashPeak) still applies on top, in case a tight departure clash
+  // demands more combined heads than the
   // general concurrency pooling alone would.
-  function buildB1Label(floor, peakConcurrency, ratioB1, coveredByFloor, remainder) {
-    if (floor <= 0) {
-      return remainder > 0
+  function buildB1Label(floor, peakConcurrency, coveredByFloor, remainder, taskMaster, core) {
+    const floorPart = floor > 0
+      ? (remainder > 0
+        ? `mandatory floor ${floor} (covers ${coveredByFloor} of ${peakConcurrency} concurrent aircraft; CM covers the remaining ${remainder})`
+        : `mandatory floor ${floor} (fully covers ${peakConcurrency} concurrent aircraft)`)
+      : (remainder > 0
         ? `no mandatory floor set for this shift — CM covers all ${peakConcurrency} concurrent aircraft`
-        : `no mandatory floor set for this shift, no concurrent aircraft`;
-    }
-    return remainder > 0
-      ? `mandatory floor ${floor} (covers ${coveredByFloor} of ${peakConcurrency} concurrent aircraft; CM covers the remaining ${remainder})=${floor}`
-      : `mandatory floor ${floor} (fully covers ${peakConcurrency} concurrent aircraft)=${floor}`;
+        : `no mandatory floor set for this shift, no concurrent aircraft`);
+    // Task Master demand takes the MAX with the floor (never summed on top
+    // of it) — the floor is meant to already represent "enough for typical
+    // recurring workload," so this is "whichever asks for more," not two
+    // separate requirements stacked.
+    return taskMaster > floor ? `max(${floorPart}, task master ${taskMaster})=${core}` : `${floorPart}=${core}`;
   }
-  function buildCmLabel(peakConcurrency, coveredByB1, remainder, ratioCM, cmFromConcurrency, clashTopUp, mandatoryFloor, core) {
+  function buildCmLabel(peakConcurrency, coveredByB1, remainder, ratioCM, cmFromConcurrency, clashTopUp, mandatoryFloor, taskMaster, core) {
     let base = remainder > 0 || coveredByB1 > 0
       ? `concurrency remaining after B1's ${coveredByB1}-capacity ceil((${peakConcurrency}-${coveredByB1})÷${ratioCM})=${cmFromConcurrency}`
       : `concurrency ceil(${peakConcurrency}÷${ratioCM})=${cmFromConcurrency}`;
     let wrapped = false;
     if (clashTopUp > 0) { base = `${base} + clash top-up +${clashTopUp}`; wrapped = true; }
-    if (mandatoryFloor > 0) { base = `max(mandatory floor ${mandatoryFloor}, ${base})`; wrapped = true; }
+    const maxTerms = [];
+    if (mandatoryFloor > 0) maxTerms.push(`mandatory floor ${mandatoryFloor}`);
+    maxTerms.push(base);
+    if (taskMaster > 0) maxTerms.push(`task master ${taskMaster}`);
+    if (maxTerms.length > 1) { base = `max(${maxTerms.join(", ")})`; wrapped = true; }
     return wrapped ? `${base}=${core}` : base;
   }
 
-  // NCS is a separate support role, not pooled with B1/CM.
-  function buildCoreLabel(mandatoryFloor, peakConcurrency, ratio, concurrencyDriven, clashTopUp, clashPeak, core) {
+  // NCS is a separate support role, not pooled with B1/CM. Task Master
+  // demand joins the same max() as the mandatory floor and clash floor —
+  // the floor is meant to already represent "enough for typical recurring
+  // workload," so this is "whichever asks for more," never a sum of both.
+  function buildCoreLabel(mandatoryFloor, peakConcurrency, ratio, concurrencyDriven, clashTopUp, clashPeak, taskMaster, core) {
     let base = `concurrency ceil(${peakConcurrency}÷${ratio})=${concurrencyDriven}`;
-    let wrapped = false; // bare concurrency term already equals core (no floor/clash adjustment) — appending "=core" again would just repeat the same number
-    if (mandatoryFloor > 0) { base = `max(mandatory floor ${mandatoryFloor}, ${base})`; wrapped = true; }
-    if (clashTopUp > 0) { base = `${base} + clash top-up +${clashTopUp}`; wrapped = true; }
-    if (clashPeak > 0) { base = `max(${base}, clash floor ${clashPeak})`; wrapped = true; }
-    return wrapped ? `${base}=${core}` : base;
+    if (clashTopUp > 0) base = `${base} + clash top-up +${clashTopUp}`;
+    const maxTerms = [];
+    if (mandatoryFloor > 0) maxTerms.push(`mandatory floor ${mandatoryFloor}`);
+    maxTerms.push(base);
+    if (taskMaster > 0) maxTerms.push(`task master ${taskMaster}`);
+    if (clashPeak > 0) maxTerms.push(`clash floor ${clashPeak}`);
+    if (maxTerms.length > 1) return `max(${maxTerms.join(", ")})=${core}`;
+    return base;
   }
 
   for (let d = 1; d <= daysInMonth; d++) {
@@ -344,48 +369,52 @@ function computeDailyShiftDemand({ year, month, homeStation, baseCoverage, ncsBa
 
       const b1Floor = baseCoverage[sh] || 0;
       const cmFloor = cmFloorBy[sh] || 0;
-      const b1PoolCapacity = b1Floor * ratioB1;
+      const tmB1 = tmBy[sh]?.B1 || 0, tmCM = tmBy[sh]?.CM || 0, tmNCS = tmBy[sh]?.NCS || 0;
+
+      // The Mandatory Minimum floor is meant to already represent "enough
+      // for a typical shift including our normal recurring workload," not a
+      // number set in ignorance of Task Master's own hours — so Task Master
+      // demand takes the MAX with the floor, never gets summed on top of
+      // it, exactly like flight concurrency already does for NCS/CM below.
+      // B1's real guaranteed headcount (b1Base) folds in BEFORE computing
+      // its pooling capacity, so if Task Master pushes B1 above its floor,
+      // that extra B1 headcount also helps absorb concurrency — reducing
+      // what CM needs to cover, same as any other B1 presence would.
+      const b1Base = Math.max(b1Floor, tmB1);
+      const b1PoolCapacity = b1Base * ratioB1;
       const remainingAfterB1 = Math.max(0, peakConcurrency - b1PoolCapacity);
       const cmFromConcurrency = Math.ceil(remainingAfterB1 / ratioCM);
-      const cmClashTopUp = Math.max(0, clashPeak - (b1Floor + cmFromConcurrency));
-
-      const b1Base = b1Floor; // held at its own floor — CM absorbs whatever concurrency the floor's capacity doesn't cover
-      // CM's own Mandatory Minimum floor is a separate, independent baseline
-      // from the concurrency-driven pooling above — e.g. a station may
-      // require >=2 CM on Night regardless of flight activity — so the
-      // final figure is whichever is larger, exactly like NCS's ncsBase
-      // below, never just the concurrency-derived amount alone.
-      const cmBase = Math.max(cmFloor, cmFromConcurrency + cmClashTopUp);
+      const cmClashTopUp = Math.max(0, clashPeak - (b1Base + cmFromConcurrency));
+      const cmBase = Math.max(cmFloor, cmFromConcurrency + cmClashTopUp, tmCM);
       const ncsFloor = ncsFloorBy[sh] || 0;
       const ncsConcurrencyDriven = Math.ceil(peakConcurrency / ratioNCS);
-      const ncsBase = Math.max(ncsFloor, ncsConcurrencyDriven, clashPeak);
+      const ncsBase = Math.max(ncsFloor, ncsConcurrencyDriven, clashPeak, tmNCS);
 
-      const tmB1 = tmBy[sh]?.B1 || 0, tmCM = tmBy[sh]?.CM || 0, tmNCS = tmBy[sh]?.NCS || 0;
-      const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0) + tmB1;
-      const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0) + tmCM;
-      const ncsTotal = ncsBase + (manual?.[sh].NCS || 0) + (buf.NCS || 0) + tmNCS;
+      const b1Total = b1Base + (manual?.[sh].B1 || 0) + (buf.B1 || 0);
+      const cmTotal = cmBase + (manual?.[sh].CM || 0) + (buf.CM || 0);
+      const ncsTotal = ncsBase + (manual?.[sh].NCS || 0) + (buf.NCS || 0);
 
       demand[d][sh].B1 = b1Total;
       demand[d][sh].CM = cmTotal;
       demand[d][sh].NCS = ncsTotal;
 
       recordExplain("B1", sh, d, b1Total, {
-        core: b1Base, coreLabel: buildB1Label(b1Floor, peakConcurrency, ratioB1, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1),
-        manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, taskMaster: tmB1, flights,
+        core: b1Base, coreLabel: buildB1Label(b1Floor, peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, tmB1, b1Base),
+        manual: manual?.[sh].B1 || 0, buffer: buf.B1 || 0, flights,
       });
       recordExplain("CM", sh, d, cmTotal, {
-        core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmFloor, cmBase),
-        manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, taskMaster: tmCM, flights,
+        core: cmBase, coreLabel: buildCmLabel(peakConcurrency, Math.min(b1PoolCapacity, peakConcurrency), remainingAfterB1, ratioCM, cmFromConcurrency, cmClashTopUp, cmFloor, tmCM, cmBase),
+        manual: manual?.[sh].CM || 0, buffer: buf.CM || 0, flights,
       });
       recordExplain("NCS", sh, d, ncsTotal, {
-        core: ncsBase, coreLabel: buildCoreLabel(ncsFloor, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, ncsBase),
-        manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, taskMaster: tmNCS, flights,
+        core: ncsBase, coreLabel: buildCoreLabel(ncsFloor, peakConcurrency, ratioNCS, ncsConcurrencyDriven, 0, clashPeak, tmNCS, ncsBase),
+        manual: manual?.[sh].NCS || 0, buffer: buf.NCS || 0, flights,
       });
     });
   }
   return {
     demand, source: "flight-schedule-driven",
-    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 held at its Mandatory Minimum floor; CM pools with it to cover the rest (1-per-${ratioCM}), then takes the max of that and its own Mandatory Minimum floor; NCS takes the max of its own Mandatory Minimum floor and 1-per-${ratioNCS} concurrency. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
+    reason: `Derived from ${allEvents.length} real transit/PDC events, using PEAK CONCURRENCY per shift. B1 is the max of its Mandatory Minimum floor and its own Task Master workload; CM pools with B1's real headcount to cover the rest (1-per-${ratioCM}), then takes the max of that, its own Mandatory Minimum floor, and its own Task Master workload; NCS takes the max of its own Mandatory Minimum floor, 1-per-${ratioNCS} concurrency, and its own Task Master workload. Task Master demand is never summed on top of a Mandatory Minimum floor — the floor is meant to already cover typical recurring workload, so whichever is larger wins. ${clashDrivenShiftCount} shift(s) had a departure clash (within ${config.clashProximityMinutes}min) that required NCS >= the clash count and (B1+CM combined) >= the clash count.`,
     explain,
   };
 }

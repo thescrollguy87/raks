@@ -221,11 +221,13 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   // monthly total hours are spread evenly across the month's days — the
   // same averaging computeExplainableManpower already uses for its own
   // numbers below, so display and generation agree — and passed into
-  // computeDailyShiftDemand as another additive term (like manual demand
-  // and the per-shift buffer already are) so it lands in demand/explain
-  // together, never producing a tooltip whose stated total doesn't match
-  // the actual number. B2 (which has no entry in computeDailyShiftDemand's
-  // output at all) is folded in separately where advisoryDemand.B2 is
+  // computeDailyShiftDemand, which takes the MAX of this and the Mandatory
+  // Minimum floor (never sums them — real feedback was explicit that the
+  // floor is meant to already represent "enough for a typical shift
+  // including our normal recurring workload," not a separate number to
+  // stack on top of), exactly like flight concurrency already does for
+  // NCS/CM. B2 (which has no entry in computeDailyShiftDemand's output at
+  // all) is folded in the same max-not-sum way where advisoryDemand.B2 is
   // built below.
   const HOURS_PER_SHIFT = 8; // matches computeExplainableManpower's own assumption
   const taskMasterByShiftCategory = { M: {}, A: {}, N: {} };
@@ -262,7 +264,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
         B1: demandResult.demand[d][sh].B1,
         CM: demandResult.demand[d][sh].CM,
         NCS: demandResult.demand[d][sh].NCS,
-        B2: baseCoverageB2[sh] + (perShiftBuffer.B2 || 0) + (manualByDayShift[d]?.[sh]?.B2 || 0) + taskMasterByShiftCategory[sh].B2,
+        B2: Math.max(baseCoverageB2[sh], taskMasterByShiftCategory[sh].B2) + (perShiftBuffer.B2 || 0) + (manualByDayShift[d]?.[sh]?.B2 || 0),
       };
     });
   }

@@ -230,7 +230,7 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(result.demand[1].A.CM).toBe(5); // floor wins over the lower concurrency/clash-driven count
   });
 
-  it("Planned/Unplanned Task Master workload (layover, weekly check, wheel change, etc.) is added on top, not just displayed", () => {
+  it("Planned/Unplanned Task Master workload (layover, weekly check, wheel change, etc.) feeds actual demand, not just the display", () => {
     // Previously computeTaskMasterDemand/computeUnplannedWorkload's output
     // fed only the Workload Summary / Explainable Manpower display panels —
     // never the actual demand generation fills against — so a station with
@@ -246,18 +246,45 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
     expect(result.demand[1].A.CM).toBe(0); // only applies to the shift it's attributed to
   });
 
-  it("Task Master workload also applies on the flight-schedule-driven path, adding on top of the concurrency-driven figure", () => {
+  it("Task Master demand takes the MAX with the Mandatory Minimum floor, never summed on top of it", () => {
+    // Real feedback: the Mandatory Minimum floor is meant to already
+    // represent "enough for a typical shift including our normal recurring
+    // workload" — a station that set NCS Night's floor to 4 did not mean
+    // "4, plus however many more Task Master's own math comes up with." A
+    // floor of 4 with 2h/day of averaged Task Master workload (well under
+    // one extra head) must stay at 4, not become 6.
+    const small = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      ncsBaseCoverage: { M: 0, A: 0, N: 4 },
+      taskMasterByShiftCategory: { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 2 } },
+      flightSchedule: null, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(small.demand[1].N.NCS).toBe(4); // floor wins — task master's 2 doesn't add on top
+
+    // And when Task Master's own workload genuinely exceeds the floor, IT
+    // wins instead (still not summed with the floor).
+    const large = computeDailyShiftDemand({
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      ncsBaseCoverage: { M: 0, A: 0, N: 4 },
+      taskMasterByShiftCategory: { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 7 } },
+      flightSchedule: null, config: DEFAULT_CONFIG,
+      manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
+    });
+    expect(large.demand[1].N.NCS).toBe(7); // task master's 7 wins over the floor of 4 — still not 11
+  });
+
+  it("Task Master workload also takes the MAX with the floor on the flight-schedule-driven path, adding nothing extra when the floor already wins", () => {
     const turn1 = quickTurn("09:00", "09:05");
     const result = computeDailyShiftDemand({
-      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 0, N: 0 },
+      year: 2026, month: 9, homeStation: "AMD", baseCoverage: { M: 0, A: 5, N: 0 }, // B1 floor 5 on Afternoon
       taskMasterByShiftCategory: { M: { B1: 0, B2: 0, CM: 0, NCS: 0 }, A: { B1: 2, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 0, CM: 0, NCS: 0 } },
       flightSchedule: { turnRecords: [turn1], charterRecords: [] }, config: DEFAULT_CONFIG,
       manualDemandEntries: [], shiftDefs: SHIFT_DEFS, perShiftBuffer: { B1: 0, B2: 0, CM: 0, NCS: 0 },
     });
-    // baseCoverage.A is 0 (no mandatory floor) and there's no B1-relevant
-    // concurrency requirement here beyond the single turn, so B1's Afternoon
-    // figure is purely the +2 task-master addition.
-    expect(result.demand[1].A.B1).toBe(2);
+    // The floor (5) already exceeds task master's 2, so B1's Afternoon
+    // figure is exactly the floor — never 7.
+    expect(result.demand[1].A.B1).toBe(5);
   });
 
   it("computeUnplannedWorkload routes each task's hours to its own Preferred Shift instead of spreading everything evenly", () => {
