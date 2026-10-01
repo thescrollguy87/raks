@@ -1154,6 +1154,14 @@ function sumShortfall(gaps) {
   return (gaps || []).reduce((sum, g) => sum + (g.shortfall ?? 1), 0);
 }
 
+// How many flexi exigency fills were pulled to close a MANDATORY (not
+// advisory) shortfall — those happen automatically, unlike advisory ones
+// which only fire under "Patterns + Automatic", so worth calling out
+// separately rather than one undifferentiated count.
+function countMandatoryFlexi(flexiAssignments) {
+  return (flexiAssignments || []).filter(f => f.mandatory).length;
+}
+
 function GenerateTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   // "off": flat auto-distributed rotation only. "strict": follow Staff
@@ -1485,7 +1493,7 @@ function GenerateTab({ stationId }) {
               return (
                 <div className="card" style={{ borderColor: missing ? "var(--amber)" : "var(--rp-green)" }}>
                   <div className="card-title">{missing ? `⚠️ ${missing} Critical Coverage Gap(s) in Generated Roster (${preview.violations.length} shift/day combination(s))` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
-                  <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{advisoryMissing ? ` · ${advisoryMissing} advisory gap(s) short (${preview.advisoryGaps.length} combination(s))` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)` : ""}</div>
+                  <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{advisoryMissing ? ` · ${advisoryMissing} advisory gap(s) short (${preview.advisoryGaps.length} combination(s))` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(preview.flexiAssignments) ? ` (${countMandatoryFlexi(preview.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""}</div>
                 </div>
               );
             })()}
@@ -1511,7 +1519,7 @@ function GenerateTab({ stationId }) {
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
             <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
       </div>

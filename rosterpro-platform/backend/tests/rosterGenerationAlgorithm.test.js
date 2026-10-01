@@ -140,13 +140,15 @@ describe("buildRosterAssignments — pattern-based mode (Staff Allocation tab)",
     const result = buildRosterAssignments({ staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser });
     const codes = result.assignments.map(a => a.code);
     // The pattern sets the baseline (G,G,O,G,G,O). With only one B1 staff
-    // member, there's no one else to redistribute a shortfall from and
-    // no override enabled, so the pattern's own OFF days (3 and 6) are
-    // left untouched — a real staff day off is never pulled for ordinary
-    // coverage, even when that leaves the "every shift needs >=1 B1"
-    // mandatory minimum unmet (reported as a violation instead).
-    expect(codes).toEqual(["G", "G", "O", "G", "G", "O"]);
-    expect(result.violations.some(v => v.day === 3 && v.shift === "M")).toBe(true);
+    // member there's no one else to redistribute a shortfall from — but
+    // the default Mandatory Minimum Coverage floor (>=1 B1 every shift) is
+    // non-negotiable, so the flexi exigency fallback pulls this staff
+    // member's own OFF days (3 and 6) to meet it even without the
+    // "Patterns + Automatic" override enabled, rather than leaving the
+    // floor unmet.
+    expect(codes).toEqual(["G", "G", "M", "G", "G", "M"]);
+    expect(result.violations.some(v => v.day === 3 && v.shift === "M")).toBe(false);
+    expect(result.flexiAssignments.every(f => f.mandatory)).toBe(true);
   });
 
   it("still enforces the N-then-M rest-gap rule on a pattern using custom shift codes, via shiftDefsByCode type lookup", () => {
@@ -308,14 +310,19 @@ describe("buildRosterAssignments — same-day surplus/deficit redistribution (ne
     expect(result.violations[0].issue).toMatch(/2 NCS short/);
   });
 
-  it("a lone staff member's own OFF day is never touched by redistribution, locked or unlocked, and the gap is honestly reported", () => {
+  it("a lone staff member's own OFF day is never touched by same-day REDISTRIBUTION (step 1) regardless of lock state — only the mandatory-floor flexi step can reach it, and only when unlocked", () => {
     const staff = [{ id: "b1_0", category: "B1" }];
     const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
     const unlocked = buildRosterAssignments({ staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: [] });
     const locked = buildRosterAssignments({ staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["b1_0"] });
-    expect(unlocked.assignments.map(a => a.code)).toEqual(["G", "G", "O", "G", "G", "O"]);
+    // Unlocked: no one to redistribute FROM (step 1 never applies with a
+    // single staff member), but the default mandatory B1 floor is
+    // non-negotiable, so the flexi step (step 2) pulls their own OFF days.
+    expect(unlocked.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
+    expect(unlocked.violations.some(v => v.day === 3 && v.shift === "M")).toBe(false);
+    // Locked: the flexi step never touches a pattern-locked staff member's
+    // OFF day either, so the floor genuinely goes unmet and is reported.
     expect(locked.assignments.map(a => a.code)).toEqual(["G", "G", "O", "G", "G", "O"]);
-    expect(unlocked.violations.some(v => v.day === 3)).toBe(true);
     expect(locked.violations.some(v => v.day === 3)).toBe(true);
   });
 
@@ -406,8 +413,8 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
     expect(result.violations.filter(v => (v.day === 3 || v.day === 6) && v.shift === "M")).toHaveLength(0);
     expect(result.flexiAssignments).toEqual([
-      { userId: "b1_0", day: 3, shift: "M", category: "B1" },
-      { userId: "b1_0", day: 6, shift: "M", category: "B1" },
+      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true },
+      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true },
     ]);
   });
 
@@ -423,7 +430,7 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     expect(result.violations.some(v => v.day === 3)).toBe(true);
   });
 
-  it("among off-day candidates, picks the unlocked one over the locked one", () => {
+  it("among off-day candidates, picks the unlocked one over the locked one (advisory shortfall)", () => {
     const staff = [{ id: "locked", category: "B1" }, { id: "free", category: "B1" }];
     const patternByUser = { locked: { codes: ["O"], offset: 0 }, free: { codes: ["O"], offset: 0 } };
     const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
@@ -435,7 +442,7 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     const day1 = result.assignments.filter(a => a.day === 1);
     expect(day1.find(a => a.userId === "free").code).toBe("M");
     expect(day1.find(a => a.userId === "locked").code).toBe("O");
-    expect(result.flexiAssignments).toEqual([{ userId: "free", day: 1, shift: "M", category: "B1" }]);
+    expect(result.flexiAssignments).toEqual([{ userId: "free", day: 1, shift: "M", category: "B1", mandatory: false }]);
   });
 
   it("still prefers same-day redistribution over the flexi fallback when both could resolve the gap", () => {
@@ -452,16 +459,54 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     expect(result.flexiAssignments).toHaveLength(0);
   });
 
-  it("without the override flag, a lone staff member's OFF day is never touched even for a mandatory shortfall", () => {
+  // Confirmed directly with the user: a MANDATORY floor is non-negotiable,
+  // so — unlike an ordinary advisory shortfall — it automatically tries the
+  // off-day flexi fallback even without "Patterns + Automatic" turned on.
+  it("WITHOUT the override flag, a mandatory shortfall still pulls an off-day staff member as a last resort", () => {
     const staff = [{ id: "b1_0", category: "B1" }];
     const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
     const result = buildRosterAssignments({
       staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: [],
       allowPatternOverrideForCoverage: false,
     });
+    expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
+    expect(result.flexiAssignments).toEqual([
+      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true },
+      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true },
+    ]);
+    // The Morning floor this flexi fill targeted is resolved; a lone staff
+    // member obviously still can't also cover Afternoon/Night/B2 the same
+    // day, so those floors remain honestly reported rather than hidden.
+    expect(result.violations.filter(v => (v.day === 3 || v.day === 6) && v.shift === "M")).toHaveLength(0);
+  });
+
+  it("WITHOUT the override flag, an ADVISORY shortfall still never touches anyone's OFF day", () => {
+    const staff = [{ id: "ncs_0", category: "NCS" }];
+    const patternByUser = { ncs_0: { codes: ["O"], offset: 0 } };
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+      allowPatternOverrideForCoverage: false,
+      advisoryDemand: { 1: { M: { NCS: 1 } } },
+    });
+    expect(result.assignments[0].code).toBe("O");
+    expect(result.flexiAssignments).toHaveLength(0);
+    expect(result.advisoryGaps).toHaveLength(1);
+  });
+
+  // The same lone-pattern-locked-staff-member scenario as above, but for a
+  // mandatory floor: the lock must still win even though mandatory shortfalls
+  // now auto-escalate to flexi — "last resort" never overrides the lock.
+  it("a pattern-locked staff member's OFF day stays protected even for a mandatory shortfall with the override flag off", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 6, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: ["b1_0"],
+      allowPatternOverrideForCoverage: false,
+    });
     expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "O", "G", "G", "O"]);
     expect(result.flexiAssignments).toHaveLength(0);
-    expect(result.violations.length).toBeGreaterThan(0);
+    expect(result.violations.some(v => v.day === 3)).toBe(true);
   });
 });
 

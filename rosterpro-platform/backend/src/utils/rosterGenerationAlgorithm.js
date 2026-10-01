@@ -45,17 +45,24 @@
 //      strictly as a fresh assignment would. This keeps "as far as possible
 //      follow the defined pattern" true in the sense that mattered to the
 //      request: nobody's actual day off is ever touched, only which of
-//      their scheduled WORKING shifts they cover that day. Only when
-//      allowPatternOverrideForCoverage (the Generate tab's "Patterns +
-//      Automatic" mode) is on, and same-day redistribution genuinely finds
-//      nobody, is a last-resort "flexi" exigency fill allowed to draw on an
-//      unlocked staff member's OFF day — tracked separately in
-//      `flexiAssignments`, never silently indistinguishable from a routine
-//      fill, and still never touching a pattern-locked staff member's
-//      protected OFF day even then. Where NO eligible candidate exists at
-//      all for a MANDATORY slot, it's reported as a (critical) violation;
-//      an unmet ADVISORY slot is reported separately as a non-critical gap,
-//      never blocking generation.
+//      their scheduled WORKING shifts they cover that day. When same-day
+//      redistribution genuinely finds nobody, a last-resort "flexi"
+//      exigency fill is allowed to draw on an unlocked staff member's OFF
+//      day instead — ALWAYS for a MANDATORY slot (that floor is described
+//      everywhere else in this app as non-negotiable, so leaving it fully
+//      unmet when one off-day pull could close it is the worse outcome),
+//      but for an ADVISORY slot only when allowPatternOverrideForCoverage
+//      (the Generate tab's "Patterns + Automatic" mode) is on. Either way
+//      the candidate still has to pass every real rest-gap/night-
+//      restriction/compliance check a fresh assignment would — "last
+//      resort" never means "unsafe" — tracked separately in
+//      `flexiAssignments` (each entry flagged `mandatory: true/false`),
+//      never silently indistinguishable from a routine fill, and still
+//      never touching a pattern-locked staff member's protected OFF day
+//      even then. Where NO eligible candidate exists at all for a
+//      MANDATORY slot, it's reported as a (critical) violation; an unmet
+//      ADVISORY slot is reported separately as a non-critical gap, never
+//      blocking generation.
 
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
@@ -291,18 +298,28 @@ function buildRosterAssignments({
         }
         if (moved) continue;
 
-        // 2) Exigency "flexi" fallback — a genuine last resort, only when
-        // the planner opted into "Patterns + Automatic", drawing on an
-        // UNLOCKED staff member's OFF day (a pattern-locked staff member's
-        // OFF day stays protected even here).
-        if (allowPatternOverrideForCoverage) {
+        // 2) Exigency "flexi" fallback — drawing on an UNLOCKED staff
+        // member's OFF day (a pattern-locked staff member's OFF day stays
+        // protected even here). For a MANDATORY floor this always applies:
+        // the Mandatory Minimum Coverage grid is described everywhere else
+        // in this app as a non-negotiable safety floor, so leaving it
+        // completely unmet when one off-day pull could have closed the gap
+        // is a worse outcome than that pull — confirmed directly with the
+        // user. For an ADVISORY shortfall it stays opt-in behind "Patterns
+        // + Automatic", exactly as before — ordinary workload-driven
+        // understaffing is never, by itself, a reason to touch someone's
+        // day off. Either way this candidate still has to pass the exact
+        // same eligibility/rest-gap/night-restriction checks a fresh
+        // assignment would (eligibleBase, restGapOk) — "last resort" never
+        // means "unsafe."
+        if (mandatory || allowPatternOverrideForCoverage) {
           const flexiCandidate = staff.find(s => (
             s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
             && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
           ));
           if (flexiCandidate) {
             grid[flexiCandidate.id][day - 1] = deficitShift;
-            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category });
+            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory });
             bucket[deficitShift].push(flexiCandidate);
             continue;
           }
