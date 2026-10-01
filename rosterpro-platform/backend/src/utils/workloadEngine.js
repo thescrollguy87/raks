@@ -85,8 +85,22 @@ function buildPDCWorkloadEvents(turnRecords, charterRecords, year, month, homeSt
     if (groundTime !== null && groundTime <= threshold) return; // quick turn — classified as Transit instead
     const dates = expandOperatingDates(rec.effectiveDate, rec.discontinueDate, rec.daysOfWeek, year, month);
     dates.forEach(date => {
-      const end = dateAndMinutesToAbsMin(date, rec.outboundDepMin);
-      events.push({ start: end - pdcMin, end, date, label: `Flt ${rec.outboundFlt}` });
+      // `date` is the inbound arrival's operating date — for a long-ground-
+      // time turn (that's what makes it a PDC rather than a Transit) the
+      // outbound departure can genuinely fall on the CALENDAR DAY AFTER
+      // that (aircraft arrives late evening, PDC work runs into/past
+      // midnight for a next-morning departure). Transit events already
+      // detect this same wrap by comparing arrival vs. departure
+      // minutes-of-day; PDC previously never did, so an overnight PDC's
+      // date/absolute time stayed anchored to the arrival day, misfiling
+      // it a day early in both the peak-concurrency bucketing and the
+      // per-day shift-window clipping.
+      let depDate = date;
+      if (rec.inboundArrMin !== null && rec.inboundArrMin !== undefined && rec.outboundDepMin <= rec.inboundArrMin) {
+        depDate = new Date(date.getTime() + 86400000);
+      }
+      const end = dateAndMinutesToAbsMin(depDate, rec.outboundDepMin);
+      events.push({ start: end - pdcMin, end, date: depDate, label: `Flt ${rec.outboundFlt}` });
     });
   });
   charterRecords.forEach(rec => {

@@ -1,6 +1,7 @@
 const {
   findPeakConcurrency, computeDailyShiftDemand, computeTaskMasterDemand,
   computeExplainableManpower, computeUnplannedWorkload, computeAveragePeakByShift,
+  buildPDCWorkloadEvents,
 } = require("../src/utils/workloadEngine");
 const { decodeDaysOfWeek } = require("../src/utils/flightScheduleParser");
 
@@ -389,5 +390,50 @@ describe("computeAveragePeakByShift — Real Requirement Average vs Peak Day tab
     const demand = { 1: { M: { B1: 0, CM: 0, NCS: 0 }, A: { B1: 0, CM: 0, NCS: 0 }, N: { B1: 0, CM: 0, NCS: 0 } } };
     const result = computeAveragePeakByShift(demand, 1);
     expect(result.A.B1).toEqual({ avg: 0, peak: 0 });
+  });
+});
+
+describe("buildPDCWorkloadEvents — overnight date handling", () => {
+  it("shifts the event to the day AFTER arrival when the outbound departure wraps past midnight", () => {
+    // Aircraft arrives 23:00, long ground time, departs 06:00 the NEXT
+    // calendar day for an overnight PDC job — same wrap Transit events
+    // already detect by comparing arrival vs. departure minutes-of-day.
+    const turn = {
+      inboundFlt: "IN", outboundFlt: "OUT", outboundDepSta: "AMD", inboundArrSta: "AMD",
+      inboundArrMin: 23 * 60, outboundDepMin: 6 * 60, groundTimeMin: 420, // 7h ground time, well above the PDC threshold
+      effectiveDate: new Date(2026, 8, 5), discontinueDate: new Date(2026, 8, 5),
+      daysOfWeek: decodeDaysOfWeek(1234567),
+    };
+    const events = buildPDCWorkloadEvents([turn], [], 2026, 9, "AMD", DEFAULT_CONFIG);
+    expect(events).toHaveLength(1);
+    // The event's date must be Sep 6 (the real departure day), not Sep 5
+    // (the arrival day expandOperatingDates anchors to) — otherwise the
+    // PDC workload is misfiled into the wrong day's peak-concurrency bucket.
+    expect(events[0].date.toISOString().slice(0, 10)).toBe("2026-09-06");
+    // Its absolute end time must likewise land on Sep 6 06:00, not Sep 5.
+    const expectedEnd = Math.floor(new Date(2026, 8, 6).getTime() / 60000) + 6 * 60;
+    expect(events[0].end).toBe(expectedEnd);
+  });
+
+  it("keeps the same-day date when the outbound departure does not wrap past midnight", () => {
+    const turn = {
+      inboundFlt: "IN", outboundFlt: "OUT", outboundDepSta: "AMD", inboundArrSta: "AMD",
+      inboundArrMin: 8 * 60, outboundDepMin: 11 * 60, groundTimeMin: 180,
+      effectiveDate: new Date(2026, 8, 5), discontinueDate: new Date(2026, 8, 5),
+      daysOfWeek: decodeDaysOfWeek(1234567),
+    };
+    const events = buildPDCWorkloadEvents([turn], [], 2026, 9, "AMD", DEFAULT_CONFIG);
+    expect(events[0].date.toISOString().slice(0, 10)).toBe("2026-09-05");
+  });
+
+  it("leaves a PDC turn with no matching inbound arrival (null inboundArrMin) anchored to its own operating date", () => {
+    const turn = {
+      inboundFlt: null, outboundFlt: "OUT", outboundDepSta: "AMD", inboundArrSta: null,
+      inboundArrMin: null, outboundDepMin: 2 * 60, groundTimeMin: null,
+      effectiveDate: new Date(2026, 8, 5), discontinueDate: new Date(2026, 8, 5),
+      daysOfWeek: decodeDaysOfWeek(1234567),
+    };
+    const events = buildPDCWorkloadEvents([turn], [], 2026, 9, "AMD", DEFAULT_CONFIG);
+    expect(events[0].date.toISOString().slice(0, 10)).toBe("2026-09-05");
   });
 });
