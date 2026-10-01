@@ -240,6 +240,7 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
     // showed blank because this was never returned, only computed and
     // folded into the demand numbers above without being exposed.
     aogPerShift: workloadContext.aogPerShift,
+    flightScheduleFallback: workloadContext.flightScheduleFallback,
   };
 }
 

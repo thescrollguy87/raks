@@ -139,7 +139,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   const nDays = daysInMonth(monthKey);
 
   const [config, mandatoryCoverageConfig, rules, staffGroupMembersByGroupId, staffGroupNameById,
-    plannedTasks, unplannedTasks, manualDemandEntries, flightSchedule, allShiftDefs, station] = await Promise.all([
+    plannedTasks, unplannedTasks, manualDemandEntries, importedFlightSchedule, allShiftDefs, station] = await Promise.all([
     workloadConfigService.getWorkloadConfig(stationId),
     mandatoryCoverageConfigOverride || workloadConfigService.getMandatoryCoverageConfigForGeneration(stationId),
     ruleBuilderService.listRules(stationId),
@@ -152,6 +152,34 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     rosterRepo.findAllShiftDefs(airlineId),
     rosterRepo.findStationById(stationId),
   ]);
+
+  // No flight schedule imported for THIS exact month — fall back to the
+  // most recent PREVIOUS month's import instead of flat base-coverage-only
+  // demand. Each record's own effectiveDate/discontinueDate were scoped to
+  // the month it was originally imported for, so handing them to
+  // expandOperatingDates as-is against the TARGET month would find zero
+  // matching days; re-anchoring them to span the whole target month lets
+  // the SAME days-of-week pattern recur onto the new month's real
+  // calendar, same convention (LOCAL Date construction) expandOperatingDates
+  // itself uses internally, so this doesn't depend on server timezone any
+  // more than the rest of that pipeline does.
+  let flightSchedule = importedFlightSchedule;
+  let flightScheduleFallback = null;
+  if (!flightSchedule) {
+    const prevKey = previousMonthKey(monthKey);
+    const { year: prevYear, month: prevMonth } = yearMonth(prevKey);
+    const prevSchedule = await flightScheduleService.getFlightScheduleForMonth(stationId, prevYear, prevMonth);
+    if (prevSchedule) {
+      const targetMonthStart = new Date(year, month - 1, 1);
+      const targetMonthEnd = new Date(year, month, 0);
+      const reanchor = rec => ({ ...rec, effectiveDate: targetMonthStart, discontinueDate: targetMonthEnd });
+      flightSchedule = {
+        turnRecords: prevSchedule.turnRecords.map(reanchor),
+        charterRecords: prevSchedule.charterRecords.map(reanchor),
+      };
+      flightScheduleFallback = { used: true, fromMonthKey: prevKey };
+    }
+  }
 
   const shiftDefsFull = {};
   ["M", "A", "N"].forEach(code => {
@@ -254,6 +282,9 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     flightSchedule: flightSchedule ? { turnRecords: flightSchedule.turnRecords, charterRecords: flightSchedule.charterRecords } : null,
     config, manualDemandEntries, shiftDefs: shiftDefsFull, perShiftBuffer, taskMasterByShiftCategory,
   });
+  if (flightScheduleFallback) {
+    demandResult.reason = `No flight schedule imported for ${monthKey} — using ${flightScheduleFallback.fromMonthKey}'s imported flight schedule as a fallback estimate (same days-of-week pattern, re-applied to ${monthKey}'s actual calendar). ${demandResult.reason}`;
+  }
 
   // B2 has no flight-schedule-driven peak-concurrency demand (deliberately —
   // there's no B2-specific movement ratio the way B1/CM/NCS have), but it
@@ -316,7 +347,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason, demandExplain: demandResult.explain,
     explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
     automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
-    manualAdditionalDemand, config, ruleShiftDefsByCode, aogPerShift,
+    manualAdditionalDemand, config, ruleShiftDefsByCode, aogPerShift, flightScheduleFallback,
   };
 }
 
@@ -442,6 +473,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const avgDailyTransit = fs.operatingDays ? Math.round((workloadContext.transitOccurrences / fs.operatingDays) * 10) / 10 : 0;
   const analysis = {
     demandSource: workloadContext.demandSource, demandReason: workloadContext.demandReason,
+    flightScheduleFallback: workloadContext.flightScheduleFallback,
     flightWorkload: {
       operatingDays: fs.operatingDays || 0, daysInMonth: fs.daysInMonth || nDays,
       totalMovements: fs.totalMovements || 0, avgDailyMovements: fs.avgDailyMovements || 0,

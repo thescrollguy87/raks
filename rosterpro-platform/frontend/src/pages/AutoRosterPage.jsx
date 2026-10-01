@@ -1267,6 +1267,11 @@ function GenerateTab({ stationId }) {
 
       {a && (
         <>
+          {a.flightScheduleFallback?.used && (
+            <div className="ab amber" style={{ marginBottom: 10 }}>
+              ⚠ No flight schedule imported for {monthKey} — using {a.flightScheduleFallback.fromMonthKey}'s imported flight schedule as a fallback estimate (same days-of-week pattern, re-applied to this month's actual dates). Import this month's real flight schedule for an accurate figure.
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div className="card">
               <div className="card-title">✈ Flight Workload</div>
@@ -1454,6 +1459,11 @@ function GenerateTab({ stationId }) {
 
         {plan && (
           <>
+            {plan.flightScheduleFallback?.used && (
+              <div className="ab amber" style={{ marginBottom: 10 }}>
+                ⚠ No flight schedule imported for {monthKey} — this plan uses {plan.flightScheduleFallback.fromMonthKey}'s imported flight schedule as a fallback estimate. Import this month's real flight schedule for an accurate figure.
+              </div>
+            )}
             <div className={`ab ${plan.sufficient ? "green" : "red"}`}>
               {plan.sufficient ? "✅" : "⚠"} Peak daily need: <strong>{plan.grandNeeded}</strong> · Available: <strong title={`Excludes ${plan.blockedCount ?? 0} compliance-blocked and ${plan.onLeaveCount ?? 0} on approved leave this month`}>{plan.effectiveStaff}</strong> · {plan.sufficient ? "Sufficient coverage" : `⚠ Shortfall of ${plan.shortfall} staff`}
             </div>
