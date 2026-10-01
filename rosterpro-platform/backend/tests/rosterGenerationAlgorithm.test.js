@@ -341,6 +341,39 @@ describe("buildRosterAssignments — same-day surplus/deficit redistribution (ne
     expect(result.violations.some(v => v.category === "NCS")).toBe(false);
   });
 
+  it("never redistributes into a Night that would leave only ONE of the two mandatory rest days after it", () => {
+    // ncs0's own pattern (A, N, O, M) is perfectly legal as originally
+    // computed — day 2's lone Night has nothing adjacent to it, so Step 1
+    // never required a second rest day. But if redistribution moves ncs0's
+    // day 1 from Afternoon onto Night (to cover a Night shortfall), day 1
+    // and day 2 become two Nights in a row — which means BOTH day 3 and
+    // day 4 are now required to be OFF. Day 3 already is (coincidentally),
+    // but day 4 is already fixed as a working Morning — exactly the
+    // "2nd mandatory rest day" that must never go missing. ncs1 (A, N, O,
+    // O) has no such conflict and must be picked instead.
+    const staff = [{ id: "ncs0", category: "NCS" }, { id: "ncs1", category: "NCS" }];
+    const patternByUser = {
+      ncs0: { codes: ["A", "N", "O", "M"], offset: 0 },
+      ncs1: { codes: ["A", "N", "O", "O"], offset: 0 },
+    };
+    // Target scoped to day 1 only (like the neighboring test above) so this
+    // doesn't also trigger a separate, unrelated redistribution into day
+    // 4's own Night requirement — the point here is purely what happens
+    // when day 1 is redistributed. Mandatory config disabled entirely
+    // since there's no B1/B2 staff in this scenario (the default config
+    // would otherwise report unrelated B1/B2 shortfalls).
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } }, B2: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+      advisoryDemand: { 1: { N: { NCS: 1 } } },
+    });
+    const byDay = d => result.assignments.filter(a => a.day === d);
+    expect(byDay(1).find(a => a.userId === "ncs0").code).toBe("A"); // stays — moving them would break day 4's already-fixed Morning as the 2nd rest day
+    expect(byDay(1).find(a => a.userId === "ncs1").code).toBe("N"); // the safe donor covers it instead
+    expect(byDay(4).find(a => a.userId === "ncs0").code).toBe("M"); // untouched
+    expect(result.violations.some(v => v.category === "NCS")).toBe(false);
+  });
+
   it("respects a night-restriction rule on the shift a surplus staff member would move INTO", () => {
     // Both start the day on Afternoon and Night is short-staffed. ncs0 has a
     // hard no_night rule, so moving them onto Night would violate it — the

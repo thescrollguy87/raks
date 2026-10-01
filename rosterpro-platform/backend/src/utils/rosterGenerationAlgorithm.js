@@ -233,8 +233,18 @@ function buildRosterAssignments({
       if (isMorn(next) && (isNight(shift, shiftDefsByCode) || isAft(shift))) return false; // day+1 Morning can't follow this Night/Afternoon
       if (isAft(next) && isNight(shift, shiftDefsByCode)) return false; // day+1 Afternoon can't follow this Night
       if (isNight(shift, shiftDefsByCode) && isNight(next, shiftDefsByCode)) {
+        // Two Nights in a row (this move's `shift` plus the already-fixed
+        // `next`) need BOTH mandatory rest days after them, mirroring Step
+        // 1's rule 5 exactly (night, night, O, O) — not just the first.
+        // Checking only the first rest day left a real gap: a move could
+        // legally create day+1's OFF day while silently leaving day+2 as
+        // whatever it happened to already be (a working shift), which is
+        // exactly the "2nd mandatory OFF day" the base rotation itself
+        // would never have allowed to go missing.
         const next2 = day + 1 < nDays ? grid[s.id][day + 1] : undefined;
-        if (next2 !== undefined && next2 !== "O") return false; // two Nights in a row need an OFF day right after
+        if (next2 !== undefined && next2 !== "O") return false; // 1st mandatory rest day
+        const next3 = day + 2 < nDays ? grid[s.id][day + 2] : undefined;
+        if (next3 !== undefined && next3 !== "O") return false; // 2nd mandatory rest day
       }
     }
     return true;
