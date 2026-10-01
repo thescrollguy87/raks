@@ -1275,7 +1275,10 @@ function GenerateTab({ stationId }) {
               </div>
             </div>
             <div className="card">
-              <div className="card-title">⚡ Automatic Departure Clashes (2+ Simultaneous)</div>
+              <div className="card-title">⚡ Automatic Departure Clashes <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— days with 2+ overlapping departures</span></div>
+              <div style={{ fontSize: 9, color: "var(--text-dim)", marginBottom: 4 }}>
+                Every departure already gets its own certifying staff + NCS pair. This only lists days where 2 or more departures overlap within the configured clash window, which tops up staffing further for those specific days — it is not a minimum applied elsewhere.
+              </div>
               {a.automaticClashes.clashDays.length === 0 ? (
                 <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No clashes detected.</div>
               ) : (
