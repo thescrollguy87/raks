@@ -225,6 +225,7 @@ table{border-collapse:collapse}
 .rt th.wknd{background:#E8EFFB}
 .rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(15,23,42,.07)}
 .rt td.sc{position:sticky;left:0;z-index:5;background:var(--navy-mid);padding-left:7px;text-align:left}
+.rt td.sc-training-pending{background:rgba(245,166,35,.28)!important}
 .rt td.sc2{position:sticky;left:165px;z-index:5;background:var(--navy-mid)}
 .rt td.wknd{background:rgba(59,130,246,.045)}
 .rt td.today,.rt th.today{background:#DCEAFE!important}

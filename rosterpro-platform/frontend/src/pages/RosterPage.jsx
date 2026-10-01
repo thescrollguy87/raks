@@ -1113,7 +1113,7 @@ const RosterRow = memo(function RosterRow({
 
   return (
     <tr>
-      <td className="sc" style={!isBlocked && trainingPending ? { background: "rgba(245,166,35,.15)" } : undefined}>
+      <td className={`sc${!isBlocked && trainingPending ? " sc-training-pending" : ""}`}>
         <button
           className="staff-name-btn" onClick={() => onStaffClick(userId)}
           title={!isBlocked && trainingPending ? `Mandatory training pending — not available for ${cat || "category"} duty, admin/office work only${trainingPendingNote ? `: ${trainingPendingNote}` : ""}` : "View staff details"}
