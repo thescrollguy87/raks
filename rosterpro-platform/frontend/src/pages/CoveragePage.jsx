@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import * as rosterApi from "../api/roster.js";
+import * as workloadConfigApi from "../api/workloadConfig.js";
 import { shiftNetHours } from "../utils/shiftHours.js";
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
@@ -40,6 +41,7 @@ export default function CoveragePage() {
   const [windowSize, setWindowSize] = useState(7); // 1 = Daily Coverage, 7 = Rolling 7-Day
   const [showHours, setShowHours] = useState(false); // Rolling 7-Day HOURS table (DGCA fatigue view), separate from the who's-on-shift views above
   const [staff, setStaff] = useState(null);
+  const [mandatoryRules, setMandatoryRules] = useState(null);
   const [error, setError] = useState("");
 
   usePageHeader({
@@ -53,6 +55,25 @@ export default function CoveragePage() {
       .then(grid => setStaff(grid.staff))
       .catch(err => setError(err.message));
   }, [stationId, startDate]);
+
+  // The station's real configured Mandatory Minimum Coverage grid — this
+  // page previously used a hardcoded "1 B1 on every shift, 1 B2 at Night"
+  // rule that ignored whatever a station actually configured (e.g. CM
+  // required at Night, or a B1 minimum above 1), so a station with a
+  // different real requirement saw an incorrect gap/no-gap verdict here.
+  useEffect(() => {
+    if (!stationId) return;
+    workloadConfigApi.listMandatoryCoverageRules(stationId)
+      .then(setMandatoryRules)
+      .catch(err => setError(err.message));
+  }, [stationId]);
+
+  // {shift: [{category, minCount}, ...]} — enabled rules only, keyed by shift.
+  const requiredByShift = useMemo(() => {
+    const by = { M: [], A: [], N: [] };
+    (mandatoryRules || []).forEach(r => { if (r.enabled && by[r.shift]) by[r.shift].push({ category: r.category, minCount: r.minCount }); });
+    return by;
+  }, [mandatoryRules]);
 
   const days = useMemo(() => Array.from({ length: windowSize }, (_, i) => addDays(startDate, i)), [startDate, windowSize]);
 
@@ -148,14 +169,21 @@ export default function CoveragePage() {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginTop: 8 }}>
                 {SHIFTS.map(sh => {
                   const onShift = day.byShift[sh.key];
-                  const hasB1 = onShift.some(s => s.category === "B1");
-                  const hasB2 = onShift.some(s => s.category === "B2");
-                  const gap = !hasB1 || (sh.key === "N" && !hasB2);
+                  // Short against the station's REAL configured Mandatory
+                  // Minimum for THIS shift, per category — not a hardcoded
+                  // "1 B1 + 1 B2 at Night" rule. A station requiring e.g.
+                  // 2 CM at Night, or no B2 minimum at all, now sees that
+                  // reflected here instead of a fixed assumption.
+                  const shortCategories = requiredByShift[sh.key].filter(req => {
+                    const have = onShift.filter(s => (s.category || "NCS") === req.category).length;
+                    return have < req.minCount;
+                  });
+                  const gap = shortCategories.length > 0;
                   return (
                     <div key={sh.key} style={{ border: `1px solid ${gap ? "var(--rp-red)" : "var(--border)"}`, borderRadius: 7, padding: 8 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-dim)", marginBottom: 4 }}>
                         {sh.label} <span className="tag" style={{ marginLeft: 4 }}>{onShift.length}</span>
-                        {gap && <span className="tag" style={{ marginLeft: 4, background: "rgba(229,57,53,.18)", color: "var(--rp-red)" }}>⚠ Gap</span>}
+                        {gap && <span className="tag" title={`Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount})`).join(", ")}`} style={{ marginLeft: 4, background: "rgba(229,57,53,.18)", color: "var(--rp-red)" }}>⚠ Gap: {shortCategories.map(c => c.category).join(", ")}</span>}
                       </div>
                       {onShift.length === 0 ? (
                         <div style={{ fontSize: 10, color: "var(--text-dim)" }}>No staff assigned</div>

@@ -591,24 +591,36 @@ export default function RosterPage() {
   // already configured in Workload Config (Rule Builder's own minimum-
   // staffing source), never an invented target.
   const kpi = useMemo(() => {
-    const requiredByShift = { M: 0, A: 0, N: 0 };
+    // Per-category required counts — NOT summed into one combined number
+    // per shift, since a shift can look "fully staffed" on a combined
+    // total while actually missing a required category (e.g. 4 CM
+    // covering a shift that needed 1 B1 + 1 CM).
+    const requiredByShift = { M: [], A: [], N: [] };
     mandatoryRules.filter(r => r.enabled).forEach(r => {
-      if (requiredByShift[r.shift] != null) requiredByShift[r.shift] += r.minCount;
+      if (requiredByShift[r.shift]) requiredByShift[r.shift].push({ category: r.category, minCount: r.minCount });
     });
     const assignedToday = { M: 0, A: 0, N: 0 };
+    const assignedTodayByCategory = { M: {}, A: {}, N: {} };
     if (isCurrentMonth) {
       for (const s of staff) {
         const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayStr);
         const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
-        if (bucket) assignedToday[bucket]++;
+        if (bucket) {
+          assignedToday[bucket]++;
+          const cat = s.category || "NCS";
+          assignedTodayByCategory[bucket][cat] = (assignedTodayByCategory[bucket][cat] || 0) + 1;
+        }
       }
     }
-    const totalReq = requiredByShift.M + requiredByShift.A + requiredByShift.N;
-    let coveragePct = 100;
-    if (totalReq > 0) {
-      const covered = Math.min(assignedToday.M, requiredByShift.M) + Math.min(assignedToday.A, requiredByShift.A) + Math.min(assignedToday.N, requiredByShift.N);
-      coveragePct = Math.round((covered / totalReq) * 100);
+    let totalReq = 0;
+    let covered = 0;
+    for (const sh of ["M", "A", "N"]) {
+      for (const req of requiredByShift[sh]) {
+        totalReq += req.minCount;
+        covered += Math.min(assignedTodayByCategory[sh][req.category] || 0, req.minCount);
+      }
     }
+    const coveragePct = totalReq > 0 ? Math.round((covered / totalReq) * 100) : 100;
     return {
       totalStaff: staff.length,
       flights: dashboardSummary?.flightCoverage?.totalFlights ?? 0,
@@ -1234,26 +1246,34 @@ function CoverageRows({ staff, dayRange, monthKey, todayDayNum, showTotals, nDay
 // staff on that shift that day, same computation the in-grid coverage rows
 // above use.
 function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandatoryRules, todayDayNum }) {
+  // {shift: [{category, minCount}, ...]} — enabled rules only, per category
+  // (NOT summed into a single combined number — a shift can look "fully
+  // staffed" on a combined total while actually missing a required category,
+  // e.g. 4 CM covering a shift that needed 1 B1 + 1 CM).
   const requiredByShift = useMemo(() => {
-    const req = { M: 0, A: 0, N: 0 };
-    mandatoryRules.filter(r => r.enabled).forEach(r => { if (req[r.shift] != null) req[r.shift] += r.minCount; });
+    const req = { M: [], A: [], N: [] };
+    mandatoryRules.filter(r => r.enabled).forEach(r => { if (req[r.shift]) req[r.shift].push({ category: r.category, minCount: r.minCount }); });
     return req;
   }, [mandatoryRules]);
 
   const assignedByDayShift = useMemo(() => {
     return dayRange.map(day => {
       const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
-      const counts = { M: 0, A: 0, N: 0 };
+      const counts = { M: {}, A: {}, N: {} };
       for (const s of staff) {
         const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
         const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
-        if (bucket) counts[bucket]++;
+        if (bucket) {
+          const cat = s.category || "NCS";
+          counts[bucket][cat] = (counts[bucket][cat] || 0) + 1;
+        }
       }
       return { day, counts };
     });
   }, [staff, dayRange, monthKey, shiftDefByCode]);
 
   const hasRules = mandatoryRules.some(r => r.enabled);
+  const totalAssigned = counts => Object.values(counts).reduce((sum, n) => sum + n, 0);
 
   return (
     <div className="card">
@@ -1270,20 +1290,28 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
             </tr>
           </thead>
           <tbody>
-            {SHIFT_KEYS.map(sh => (
-              <tr key={sh.key}>
-                <td>{sh.label}{hasRules ? ` (Req ${requiredByShift[sh.key]})` : ""}</td>
-                {assignedByDayShift.map(({ day, counts }) => {
-                  const assigned = counts[sh.key];
-                  const required = requiredByShift[sh.key];
-                  const short = hasRules && required > 0 && assigned < required;
-                  return <td key={day} className={short ? "dc-short" : hasRules && required > 0 ? "dc-ok" : undefined}>{assigned}</td>;
-                })}
-              </tr>
-            ))}
+            {SHIFT_KEYS.map(sh => {
+              const reqs = requiredByShift[sh.key];
+              const totalReq = reqs.reduce((sum, r) => sum + r.minCount, 0);
+              return (
+                <tr key={sh.key}>
+                  <td>{sh.label}{hasRules && totalReq > 0 ? ` (Req ${totalReq})` : ""}</td>
+                  {assignedByDayShift.map(({ day, counts }) => {
+                    const dayCounts = counts[sh.key];
+                    const assigned = totalAssigned(dayCounts);
+                    const shortCategories = reqs.filter(r => (dayCounts[r.category] || 0) < r.minCount);
+                    const short = hasRules && shortCategories.length > 0;
+                    const title = shortCategories.length > 0
+                      ? `Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount}, have ${dayCounts[c.category] || 0})`).join(", ")}`
+                      : undefined;
+                    return <td key={day} title={title} className={short ? "dc-short" : hasRules && reqs.length > 0 ? "dc-ok" : undefined}>{assigned}</td>;
+                  })}
+                </tr>
+              );
+            })}
             <tr>
               <td>Total</td>
-              {assignedByDayShift.map(({ day, counts }) => <td key={day}>{counts.M + counts.A + counts.N}</td>)}
+              {assignedByDayShift.map(({ day, counts }) => <td key={day}>{totalAssigned(counts.M) + totalAssigned(counts.A) + totalAssigned(counts.N)}</td>)}
             </tr>
           </tbody>
         </table>
