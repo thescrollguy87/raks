@@ -195,14 +195,25 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     baseCoverageCM[sh] = cfg?.enabled ? Math.max(1, +cfg.min || 1) : 0;
   });
   // AOG Buffer (a Generate-tab, per-run planning input — not a stored
-  // config value) is spread evenly across the 3 shifts and folded into B1's
-  // per-shift buffer, exactly like the station's own configured Per-Shift
-  // Unplanned Buffer (bufferB1) — same additive treatment, so it flows
-  // through computeDailyShiftDemand into BOTH the Real Requirement
-  // Average/Peak panel and the actual advisoryDemand generation uses,
-  // instead of only affecting the separate legacy Manpower Plan display.
-  const aogPerShift = Math.ceil((+aogBuffer || 0) / 3);
-  const perShiftBuffer = { B1: (config.bufferB1 || 0) + aogPerShift, B2: config.bufferB2, CM: config.bufferCM, NCS: config.bufferNCS };
+  // config value) represents N DAYS of extra required man-hours added to
+  // this month's TOTAL requirement — confirmed directly with the user:
+  // NOT a daily or per-shift number on its own, and NOT B1-only (an AOG
+  // can strike any category, any shift). "N days" is read as N x 24h of
+  // round-the-clock extra coverage for the month, converted to a per-shift
+  // headcount using the exact same averaging Task Master demand already
+  // uses below (monthly hours ÷ days in month ÷ 8h-per-shift), and applied
+  // identically across all four categories (B1/B2/CM/NCS) rather than
+  // folded only into B1's buffer the way a single flat number previously
+  // was. Stays purely additive on top of everything else, same as the
+  // station's own configured Per-Shift Unplanned Buffer, since it
+  // represents a genuinely separate, situational safety margin rather than
+  // another estimate of the baseline workload.
+  const HOURS_PER_SHIFT = 8; // matches computeExplainableManpower's own assumption
+  const aogPerShift = Math.round(((+aogBuffer || 0) * 24) / nDays / HOURS_PER_SHIFT);
+  const perShiftBuffer = {
+    B1: (config.bufferB1 || 0) + aogPerShift, B2: (config.bufferB2 || 0) + aogPerShift,
+    CM: (config.bufferCM || 0) + aogPerShift, NCS: (config.bufferNCS || 0) + aogPerShift,
+  };
 
   const flightSummary = flightSchedule
     ? computeFlightWorkloadSummary(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month)
@@ -229,7 +240,6 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
   // NCS/CM. B2 (which has no entry in computeDailyShiftDemand's output at
   // all) is folded in the same max-not-sum way where advisoryDemand.B2 is
   // built below.
-  const HOURS_PER_SHIFT = 8; // matches computeExplainableManpower's own assumption
   const taskMasterByShiftCategory = { M: {}, A: {}, N: {} };
   ["M", "A", "N"].forEach(sh => {
     ["B1", "B2", "CM", "NCS"].forEach(cat => {
@@ -306,7 +316,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     advisoryDemand, demandSource: demandResult.source, demandReason: demandResult.reason, demandExplain: demandResult.explain,
     explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
     automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
-    manualAdditionalDemand, config, ruleShiftDefsByCode,
+    manualAdditionalDemand, config, ruleShiftDefsByCode, aogPerShift,
   };
 }
 

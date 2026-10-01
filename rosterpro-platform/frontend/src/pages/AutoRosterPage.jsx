@@ -1432,7 +1432,7 @@ function GenerateTab({ stationId }) {
                 <option value="0">No — start a completely new cycle</option>
               </select>
             </div>
-            <div className="fg"><label className="fl">AOG Buffer <span className="help-tip" tabIndex={0} title="Extra standby headcount to hold in reserve for unplanned Aircraft-On-Ground events, split evenly across the 3 shifts and added to B1 requirement. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
+            <div className="fg"><label className="fl">AOG Buffer (days) <span className="help-tip" tabIndex={0} title="Extra standby reserve for unplanned Aircraft-On-Ground events, entered as a number of DAYS of round-the-clock extra coverage for the month. Converted to man-hours (days x 24h) and spread evenly across the month the same way Task Master demand is, then added identically to B1, B2, CM, and NCS requirement — not B1 only. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
           </div>
           <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: 12, fontSize: 13 }} onClick={calculate} disabled={busy}>
             {busy ? "Calculating…" : "🤖 Calculate & Generate Roster"}

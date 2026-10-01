@@ -233,6 +233,13 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
     sufficient: effectiveStaff >= grandNeeded,
     shortfall: Math.max(0, grandNeeded - effectiveStaff),
     categoryRequirement, workloadSummary,
+    // Real per-shift headcount the AOG Buffer input actually added (same
+    // across all 4 categories and all 3 shifts, by design — see
+    // buildWorkloadContext's own note on the N-days-to-man-hours
+    // conversion) — the CSV export's "AOG Buffer" column previously always
+    // showed blank because this was never returned, only computed and
+    // folded into the demand numbers above without being exposed.
+    aogPerShift: workloadContext.aogPerShift,
   };
 }
 
