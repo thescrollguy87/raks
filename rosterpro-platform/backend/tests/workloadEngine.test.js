@@ -8,7 +8,8 @@ const { decodeDaysOfWeek } = require("../src/utils/flightScheduleParser");
 const DEFAULT_CONFIG = {
   transitMinutesDefault: 40, pdcMinutesBeforeDeparture: 60, clashProximityMinutes: 60,
   transitVsPdcThresholdMinutes: 120, movementsPerB1Staff: 4, movementsPerCMStaff: 1, movementsPerNCSStaff: 1,
-  unplannedMethod: "frequency", unplannedManpowerHoursPerMonth: 0, unplannedBufferPct: 20,
+  unplannedMethod: "frequency", unplannedBufferPct: 20,
+  unplannedHoursB1: 0, unplannedHoursB2: 0, unplannedHoursCM: 0, unplannedHoursNCS: 0,
 };
 
 // A shift window wide enough to contain all the test turn times below.
@@ -298,14 +299,52 @@ describe("computeDailyShiftDemand — peak concurrency, not raw counts (verifica
       { name: "Wheel Change", avgFreqPerMonth: 25, avgDurationMin: 45, reqCM: 1, reqNCS: 1, preferredShift: "N" },
       { name: "AOG Rectification", avgFreqPerMonth: 2, avgDurationMin: 360, reqB1: 1, reqNCS: 2, preferredShift: null }, // "Any" -> split evenly
     ];
-    const config = { unplannedMethod: "frequency", unplannedManpowerHoursPerMonth: 0, unplannedBufferPct: 0 };
-    const result = computeUnplannedWorkload(unplannedTaskMaster, config, 0);
+    const config = { unplannedMethod: "frequency", unplannedBufferPct: 0 };
+    const result = computeUnplannedWorkload(unplannedTaskMaster, config, { B1: 0, B2: 0, CM: 0, NCS: 0 });
     // Wheel Change: 25 * 0.75h * 1 NCS = 18.75h, all on Night.
     // AOG Rectification: 2 * 6h * 2 NCS = 24h, split evenly -> 8h per shift.
     expect(result.byShiftCategory.N.NCS).toBeCloseTo(18.75 + 8, 5);
     expect(result.byShiftCategory.M.NCS).toBeCloseTo(8, 5);
     expect(result.byShiftCategory.A.NCS).toBeCloseTo(8, 5);
     expect(result.byShiftCategory.N.CM).toBeCloseTo(25 * 0.75, 5); // Wheel Change's CM share, Night only
+  });
+
+  it("wires the flat Manpower-Hours Allowance into byCategory/byShiftCategory, per category, not just the combined total (Issue #6)", () => {
+    // Previously unplannedManpowerHoursPerMonth was a single combined
+    // number added only to `hours` — never to byCategory/byShiftCategory —
+    // so it showed up on the Workload Summary panel but fed ZERO actual
+    // demand, since computeDailyShiftDemand needs a per-category, per-shift
+    // figure. Now each category has its own monthly allowance, spread
+    // evenly across the month's 3 shifts like an "Any"-shift task.
+    const config = {
+      unplannedMethod: "manpower_hours", unplannedBufferPct: 0,
+      unplannedHoursB1: 30, unplannedHoursCM: 15, unplannedHoursB2: 0, unplannedHoursNCS: 0,
+    };
+    const result = computeUnplannedWorkload([], config, { B1: 0, B2: 0, CM: 0, NCS: 0 });
+    expect(result.byCategory.B1).toBe(30);
+    expect(result.byCategory.CM).toBe(15);
+    expect(result.byCategory.B2).toBe(0);
+    expect(result.fromTasksOrAllowance).toBe(45);
+    // Spread evenly across M/A/N: 30/3 = 10 per shift.
+    expect(result.byShiftCategory.M.B1).toBeCloseTo(10, 5);
+    expect(result.byShiftCategory.A.B1).toBeCloseTo(10, 5);
+    expect(result.byShiftCategory.N.B1).toBeCloseTo(10, 5);
+    expect(result.byShiftCategory.N.CM).toBeCloseTo(5, 5);
+  });
+
+  it("wires the buffer % into byCategory/byShiftCategory, scaled to each category's OWN planned hours (Issue #6)", () => {
+    // Previously bufferHours was a single combined number (plannedTotalHours
+    // * pct%) added only to the overall total — never distributed per
+    // category — so a category with zero planned work still looked
+    // unaffected, but the buffer itself never reached actual demand either.
+    const plannedByCategory = { B1: 100, B2: 0, CM: 50, NCS: 0 };
+    const config = { unplannedMethod: "frequency", unplannedBufferPct: 20 };
+    const result = computeUnplannedWorkload([], config, plannedByCategory);
+    expect(result.bufferHours).toBe(30); // 20% of (100+50) = 30
+    expect(result.byCategory.B1).toBe(20); // 20% of B1's own 100
+    expect(result.byCategory.CM).toBe(10); // 20% of CM's own 50
+    expect(result.byCategory.B2).toBe(0); // B2 had zero planned hours -> zero buffer
+    expect(result.byShiftCategory.M.B1).toBeCloseTo(20 / 3, 5);
   });
 
   it("classifies a turn as EITHER Transit or PDC, never both — ground time at the threshold boundary", () => {
@@ -336,7 +375,7 @@ describe("computeTaskMasterDemand + computeExplainableManpower — correct month
     // Monthly total: 90 occurrences x 8h x 1 head = 720 man-hours.
     expect(plannedDemand.totalHours).toBe(720);
 
-    const unplannedDemand = computeUnplannedWorkload([], { unplannedMethod: "frequency", unplannedManpowerHoursPerMonth: 0, unplannedBufferPct: 0 }, plannedDemand.totalHours);
+    const unplannedDemand = computeUnplannedWorkload([], { unplannedMethod: "frequency", unplannedBufferPct: 0 }, plannedDemand.byCategory);
     const manpower = computeExplainableManpower({ totalMovements: 0 }, plannedDemand, unplannedDemand, daysInMonth);
 
     // The bug this guards against: dividing the monthly total (720h, or per-shift

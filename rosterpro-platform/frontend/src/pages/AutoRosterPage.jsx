@@ -606,7 +606,8 @@ function WorkloadConfigTab({ stationId }) {
   const NUMERIC_CONFIG_FIELDS = [
     "transitMinutesDefault", "pdcMinutesBeforeDeparture", "clashProximityMinutes", "transitVsPdcThresholdMinutes",
     "movementsPerB1Staff", "movementsPerCMStaff", "movementsPerNCSStaff",
-    "unplannedManpowerHoursPerMonth", "unplannedBufferPct", "bufferB1", "bufferB2", "bufferCM", "bufferNCS",
+    "unplannedHoursB1", "unplannedHoursB2", "unplannedHoursCM", "unplannedHoursNCS",
+    "unplannedBufferPct", "bufferB1", "bufferB2", "bufferCM", "bufferNCS",
   ];
   async function saveConfig() {
     setBusy(true);
@@ -723,9 +724,16 @@ function WorkloadConfigTab({ stationId }) {
               <option value="both">Both (summed)</option>
             </select>
           </div>
-          <div className="fg"><label className="fl">Unplanned Manpower-Hours/Month</label><input className="fi" type="number" value={config.unplannedManpowerHoursPerMonth} onChange={e => setConfig(c => ({ ...c, unplannedManpowerHoursPerMonth: e.target.value }))} /></div>
         </div>
-        <div className="fg" style={{ marginTop: 8, maxWidth: 260 }}><label className="fl">Unplanned Buffer % (on planned hours)</label><input className="fi" type="number" value={config.unplannedBufferPct} onChange={e => setConfig(c => ({ ...c, unplannedBufferPct: e.target.value }))} /></div>
+        <div style={{ fontSize: 10, color: "var(--text-dim)", margin: "10px 0 6px" }}>
+          Unplanned Manpower-Hours Allowance, per category (monthly total) <span className="help-tip" tabIndex={0} title="Split by category, not one combined number — this is what actually feeds Generate's demand calculation (max with the Mandatory Minimum floor, same as Task Master), spread evenly across the month and across M/A/N shifts. Only used when Unplanned Method is 'Manpower-Hours Allowance' or 'Both'.">ⓘ</span>
+        </div>
+        <div className="fg2">
+          {["B1", "B2", "CM", "NCS"].map(cat => (
+            <div className="fg" key={cat}><label className="fl">{cat}</label><input className="fi" type="number" min="0" value={config[`unplannedHours${cat}`]} onChange={e => setConfig(c => ({ ...c, [`unplannedHours${cat}`]: e.target.value }))} /></div>
+          ))}
+        </div>
+        <div className="fg" style={{ marginTop: 8, maxWidth: 260 }}><label className="fl">Unplanned Buffer % (on planned hours) <span className="help-tip" tabIndex={0} title="Applied per category, scaled to that category's OWN planned hours — a category with zero planned hours gets zero buffer, not a share of another category's workload.">ⓘ</span></label><input className="fi" type="number" value={config.unplannedBufferPct} onChange={e => setConfig(c => ({ ...c, unplannedBufferPct: e.target.value }))} /></div>
         <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={saveConfig} disabled={busy}>💾 Save Config</button>
       </div>
 

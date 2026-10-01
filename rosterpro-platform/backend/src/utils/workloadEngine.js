@@ -489,8 +489,12 @@ function computeTaskMasterDemand(taskMaster, daysInMonth, operatingDays) {
 
 // Unplanned workload supports frequency-based, manpower-hour-based, or
 // both (summed), plus a configurable buffer % applied on top of the
-// PLANNED workload total.
-function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours) {
+// PLANNED workload total. plannedByCategory is the planned demand's own
+// {B1,B2,CM,NCS} hours breakdown (computeTaskMasterDemand's byCategory) —
+// needed so the buffer %, which scales with EACH category's own planned
+// load, can be distributed per category rather than only ever shown as
+// one opaque combined number.
+function computeUnplannedWorkload(unplannedTaskMaster, config, plannedByCategory) {
   let hours = 0;
   const byCategory = { B1: 0, B2: 0, CM: 0, NCS: 0 };
   // Same per-shift routing as computeTaskMasterDemand: an unplanned task's
@@ -537,10 +541,58 @@ function computeUnplannedWorkload(unplannedTaskMaster, config, plannedTotalHours
       }
     });
   }
+  // Flat Manpower-Hours Allowance — per-category (unplannedHoursB1/B2/CM/
+  // NCS), mirroring the station's own Per-Shift Buffer fields. Previously
+  // a single unplannedManpowerHoursPerMonth total got added only to the
+  // combined `hours` figure, never to byCategory/byShiftCategory, so it
+  // showed up on the Workload Summary panel but fed ZERO actual demand —
+  // computeDailyShiftDemand has no way to use a number with no category or
+  // shift attached to it. No per-task Preferred Shift exists for a flat
+  // allowance, so — same as an "Any"-shift task — it's spread evenly
+  // across M/A/N.
+  const plannedHoursBy = plannedByCategory || { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  let flatByCategory = { B1: 0, B2: 0, CM: 0, NCS: 0 };
   if (config.unplannedMethod === "manpower_hours" || config.unplannedMethod === "both") {
-    hours += config.unplannedManpowerHoursPerMonth;
+    flatByCategory = {
+      B1: config.unplannedHoursB1 || 0, B2: config.unplannedHoursB2 || 0,
+      CM: config.unplannedHoursCM || 0, NCS: config.unplannedHoursNCS || 0,
+    };
+    ["B1", "B2", "CM", "NCS"].forEach(cat => {
+      hours += flatByCategory[cat];
+      byCategory[cat] += flatByCategory[cat];
+      ["M", "A", "N"].forEach(sh => { byShiftCategory[sh][cat] += flatByCategory[cat] / 3; });
+    });
+    const flatTotal = flatByCategory.B1 + flatByCategory.B2 + flatByCategory.CM + flatByCategory.NCS;
+    if (flatTotal > 0) {
+      taskBreakdown.push({
+        name: "Unplanned Manpower-Hours Allowance", occurrences: null, totalHours: Math.round(flatTotal * 10) / 10,
+        preferredShift: "Any", byCategory: { ...flatByCategory },
+      });
+    }
   }
+  const plannedTotalHours = plannedHoursBy.B1 + plannedHoursBy.B2 + plannedHoursBy.CM + plannedHoursBy.NCS;
   const bufferHours = plannedTotalHours * (config.unplannedBufferPct / 100);
+  // Buffer % scales with EACH category's own planned load (a category with
+  // zero planned hours gets zero buffer, not an even split of someone
+  // else's workload) — same "Any"-shift even spread as the flat allowance
+  // above, since the buffer isn't tied to any one task's own shift.
+  const bufferByCategory = { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  ["B1", "B2", "CM", "NCS"].forEach(cat => {
+    const catBuffer = plannedHoursBy[cat] * (config.unplannedBufferPct / 100);
+    bufferByCategory[cat] = catBuffer;
+    byCategory[cat] += catBuffer;
+    ["M", "A", "N"].forEach(sh => { byShiftCategory[sh][cat] += catBuffer / 3; });
+  });
+  if (bufferHours > 0) {
+    taskBreakdown.push({
+      name: `Unplanned Buffer (${config.unplannedBufferPct}% of planned)`, occurrences: null,
+      totalHours: Math.round(bufferHours * 10) / 10, preferredShift: "Any",
+      byCategory: {
+        B1: Math.round(bufferByCategory.B1 * 10) / 10, B2: Math.round(bufferByCategory.B2 * 10) / 10,
+        CM: Math.round(bufferByCategory.CM * 10) / 10, NCS: Math.round(bufferByCategory.NCS * 10) / 10,
+      },
+    });
+  }
   return {
     fromTasksOrAllowance: Math.round(hours * 10) / 10,
     bufferHours: Math.round(bufferHours * 10) / 10,

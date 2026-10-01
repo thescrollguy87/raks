@@ -728,7 +728,16 @@ model StationWorkloadConfig {
   movementsPerCMStaff  Int @default(1)
   movementsPerNCSStaff Int @default(1)
   unplannedMethod                  String @default("frequency") // frequency | manpower_hours | both
-  unplannedManpowerHoursPerMonth   Int    @default(0)
+  // Per-category split of the flat "Manpower-Hours Allowance" method —
+  // mirrors bufferB1/B2/CM/NCS below. Previously a single combined
+  // unplannedManpowerHoursPerMonth total with no per-category breakdown,
+  // so it could only ever show up as an opaque number on the Workload
+  // Summary panel and never actually fed computeDailyShiftDemand (which
+  // needs a per-category, per-shift figure to fold into real demand).
+  unplannedHoursB1  Int @default(0)
+  unplannedHoursB2  Int @default(0)
+  unplannedHoursCM  Int @default(0)
+  unplannedHoursNCS Int @default(0)
   unplannedBufferPct               Int    @default(20)
   bufferB1  Int @default(0) // Per-Shift Unplanned Buffer — a standing per-shift reserve, distinct from the Unplanned Task Master's monthly frequency-based capacity
   bufferB2  Int @default(0)

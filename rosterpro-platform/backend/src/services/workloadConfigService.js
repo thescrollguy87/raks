@@ -10,7 +10,8 @@ const { assertOwnStation } = require("../utils/stationScope");
 const DEFAULT_CONFIG = {
   transitMinutesDefault: 40, pdcMinutesBeforeDeparture: 60, clashProximityMinutes: 60,
   transitVsPdcThresholdMinutes: 120, movementsPerB1Staff: 4, movementsPerCMStaff: 1, movementsPerNCSStaff: 1,
-  unplannedMethod: "frequency", unplannedManpowerHoursPerMonth: 0, unplannedBufferPct: 20,
+  unplannedMethod: "frequency", unplannedBufferPct: 20,
+  unplannedHoursB1: 0, unplannedHoursB2: 0, unplannedHoursCM: 0, unplannedHoursNCS: 0,
   bufferB1: 0, bufferB2: 0, bufferCM: 0, bufferNCS: 0,
 };
 

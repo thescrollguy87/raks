@@ -219,7 +219,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     ? computeFlightWorkloadSummary(flightSchedule.turnRecords, flightSchedule.charterRecords, year, month)
     : { totalMovements: 0, operatingDays: 0, daysInMonth: nDays };
   const plannedDemand = computeTaskMasterDemand(plannedTasks, nDays, flightSummary.operatingDays);
-  const unplannedDemand = computeUnplannedWorkload(unplannedTasks, config, plannedDemand.totalHours);
+  const unplannedDemand = computeUnplannedWorkload(unplannedTasks, config, plannedDemand.byCategory);
 
   // Planned Maintenance Tasks (Task Master — Weekly Check, Service Check,
   // Wheel Change, Brake Change, layover coverage, etc.) and Unplanned
