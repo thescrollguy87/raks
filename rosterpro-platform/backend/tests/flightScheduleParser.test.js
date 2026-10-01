@@ -4,6 +4,40 @@ const {
   computeFlightWorkloadSummary, buildDailyFlightSchedule,
 } = require("../src/utils/flightScheduleParser");
 
+describe("computeFlightWorkloadSummary — day labels stay correct regardless of server timezone", () => {
+  // The server's actual TZ (Render, or wherever this runs) is never
+  // guaranteed to be UTC — .toISOString() silently renders a locally-built
+  // midnight Date as the PREVIOUS calendar day whenever the server sits
+  // east of UTC (IST, UTC+5:30, included). Proven by actually switching
+  // process.env.TZ at runtime, not just reasoning about it, and restored
+  // afterward so it can't leak into other test files sharing this worker.
+  const originalTZ = process.env.TZ;
+  afterEach(() => { process.env.TZ = originalTZ; });
+
+  it("keeps the correct peak date under an Asia/Kolkata server timezone", () => {
+    process.env.TZ = "Asia/Kolkata";
+    const turnRecords = [{
+      inboundFlt: "IN", outboundFlt: "OUT",
+      effectiveDate: new Date(2026, 8, 15), discontinueDate: new Date(2026, 8, 15),
+      daysOfWeek: decodeDaysOfWeek(1234567),
+    }];
+    const summary = computeFlightWorkloadSummary(turnRecords, [], 2026, 9);
+    expect(summary.peakDate).toBe("2026-09-15");
+    expect(Object.keys(summary.byDate)).toEqual(["2026-09-15"]);
+  });
+
+  it("keeps the correct peak date under a UTC-negative server timezone too", () => {
+    process.env.TZ = "America/New_York";
+    const turnRecords = [{
+      inboundFlt: "IN", outboundFlt: "OUT",
+      effectiveDate: new Date(2026, 8, 15), discontinueDate: new Date(2026, 8, 15),
+      daysOfWeek: decodeDaysOfWeek(1234567),
+    }];
+    const summary = computeFlightWorkloadSummary(turnRecords, [], 2026, 9);
+    expect(summary.peakDate).toBe("2026-09-15");
+  });
+});
+
 describe("decodeDaysOfWeek — Excel's type-mangling of the 7-char days-of-week code", () => {
   it("decodes a plain string pattern (Excel couldn't parse it as a number)", () => {
     expect(decodeDaysOfWeek("1.34.6.")).toEqual({ pattern: "1.34.6.", days: [true, false, true, true, false, true, false] });

@@ -79,6 +79,19 @@ function minutesToHHMM(min) {
   return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
 }
 
+// Every calendar date in this module (excelCellToDate, expandOperatingDates)
+// is built and read using the LOCAL Date constructor/getters consistently —
+// that convention is what keeps a flight's Y/M/D intact regardless of what
+// timezone the server process happens to run in, since construction and
+// reading always resolve in the SAME frame. `.toISOString()` breaks that:
+// it always renders in UTC, so a locally-built midnight Date silently shows
+// the PREVIOUS calendar day whenever the server's TZ sits east of UTC (IST
+// included) — this reads the same local fields used to build the date in
+// the first place, so the label never depends on server TZ at all.
+function localDateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 // Finds the header row by CONTENT (searching for a known column name)
 // rather than assuming a fixed row number — the real Turn Report has a
 // title banner on row 1 and headers on row 2, but relying on that exact
@@ -164,7 +177,7 @@ function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) 
   turnRecords.forEach(rec => {
     const dates = expandOperatingDates(rec.effectiveDate, rec.discontinueDate, rec.daysOfWeek, year, month);
     dates.forEach(d => {
-      const key = d.toISOString().slice(0, 10);
+      const key = localDateKey(d);
       operatingDateSet.add(key);
       let movements = 0;
       if (rec.inboundFlt) movements++;
@@ -175,7 +188,7 @@ function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) 
   charterRecords.forEach(rec => {
     const dates = expandOperatingDates(rec.effectiveDate, rec.discontinueDate, rec.daysOfWeek, year, month);
     dates.forEach(d => {
-      const key = d.toISOString().slice(0, 10);
+      const key = localDateKey(d);
       operatingDateSet.add(key);
       byDate[key] = (byDate[key] || 0) + 1; // one leg = one movement
     });
@@ -233,7 +246,7 @@ function buildDailyFlightSchedule(turnRecords, charterRecords, year, month) {
 }
 
 module.exports = {
-  decodeDaysOfWeek, excelCellToMinutes, excelCellToDate, minutesToHHMM,
+  decodeDaysOfWeek, excelCellToMinutes, excelCellToDate, minutesToHHMM, localDateKey,
   findHeaderRow, parseTurnReportRows, parseCharterRows, expandOperatingDates,
   computeFlightWorkloadSummary, buildDailyFlightSchedule,
 };

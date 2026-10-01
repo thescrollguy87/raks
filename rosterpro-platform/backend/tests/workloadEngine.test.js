@@ -1,7 +1,7 @@
 const {
   findPeakConcurrency, computeDailyShiftDemand, computeTaskMasterDemand,
   computeExplainableManpower, computeUnplannedWorkload, computeAveragePeakByShift,
-  buildPDCWorkloadEvents,
+  buildPDCWorkloadEvents, buildTransitWorkloadEvents, computeDailyPeaks,
 } = require("../src/utils/workloadEngine");
 const { decodeDaysOfWeek } = require("../src/utils/flightScheduleParser");
 
@@ -435,5 +435,27 @@ describe("buildPDCWorkloadEvents — overnight date handling", () => {
     };
     const events = buildPDCWorkloadEvents([turn], [], 2026, 9, "AMD", DEFAULT_CONFIG);
     expect(events[0].date.toISOString().slice(0, 10)).toBe("2026-09-05");
+  });
+});
+
+describe("computeDailyPeaks — day bucketing stays correct regardless of server timezone", () => {
+  // computeDailyPeaks groups events by e.date, which is built with the
+  // LOCAL Date constructor (via expandOperatingDates) — bucketing it with
+  // .toISOString() (always UTC) used to silently misfile the event into
+  // the PREVIOUS calendar day whenever the server's TZ sits east of UTC
+  // (IST, UTC+5:30, included). Proven by actually switching process.env.TZ
+  // at runtime, restored afterward so it can't leak into sibling test files.
+  const originalTZ = process.env.TZ;
+  afterEach(() => { process.env.TZ = originalTZ; });
+
+  it("buckets a transit event into the correct day under an Asia/Kolkata server timezone", () => {
+    process.env.TZ = "Asia/Kolkata";
+    const turn = quickTurn("09:00", "09:40");
+    turn.effectiveDate = new Date(2026, 8, 20);
+    turn.discontinueDate = new Date(2026, 8, 20);
+    const events = buildTransitWorkloadEvents([turn], 2026, 9, "AMD", DEFAULT_CONFIG);
+    const peaks = computeDailyPeaks(events);
+    expect(peaks.perDay.map(d => d.date)).toEqual(["2026-09-20"]);
+    expect(peaks.monthPeakDay.date).toBe("2026-09-20");
   });
 });

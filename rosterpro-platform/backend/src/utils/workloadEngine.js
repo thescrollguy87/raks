@@ -5,7 +5,7 @@
 // divided by the wrong denominator, raw movement counts instead of peak
 // concurrency. Every comment explaining WHY a line is written the way it
 // is has been kept, not summarized away.
-const { expandOperatingDates } = require("./flightScheduleParser");
+const { expandOperatingDates, localDateKey } = require("./flightScheduleParser");
 
 // Generic sweep-line concurrency detector — used identically for transit
 // overlap and PDC overlap, since both are "find where time windows stack
@@ -145,11 +145,16 @@ function buildClashEvents(turnRecords, charterRecords, year, month, homeStation,
 }
 
 // Groups a flat list of time-windowed events by calendar day and finds the
-// peak concurrency WITHIN each day.
+// peak concurrency WITHIN each day. Uses localDateKey, NOT .toISOString(),
+// since e.date is built (via expandOperatingDates) using the LOCAL Date
+// constructor — reading it back with .toISOString() (always UTC) would
+// silently shift the label a day earlier whenever the server's timezone
+// sits east of UTC (IST included), misfiling the event into the wrong
+// day's peak-concurrency bucket.
 function computeDailyPeaks(events) {
   const byDate = {};
   events.forEach(e => {
-    const key = e.date.toISOString().slice(0, 10);
+    const key = localDateKey(e.date);
     (byDate[key] = byDate[key] || []).push(e);
   });
   const perDay = Object.entries(byDate).map(([date, dayEvents]) => {
