@@ -391,6 +391,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   ]);
 
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);
+  const trainingPendingUserIds = staff.filter(s => s.trainingPending).map(s => s.id);
   const leaveByUserDay = applyLeave ? buildLeaveByUserDay(leaves, monthKey, nDays) : {};
   const shiftDefsByCode = Object.fromEntries(shiftDefs.map(d => [d.code, d.type]));
   // Every staff member with a real (non-MANUAL) pattern assignment is locked
@@ -402,7 +403,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const { assignments, violations, advisoryGaps, flexiAssignments } = buildRosterAssignments({
     staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
     mandatoryCoverageConfig: workloadContext.mandatoryCoverageConfig,
-    lmpmLockedUserIds,
+    lmpmLockedUserIds, trainingPendingUserIds,
     // Ordinary coverage shortfalls are resolved by SAME-DAY REDISTRIBUTION
     // (moving a staff member who's already working a different shift that
     // day, and sits above THAT shift's own mandatory floor, onto the

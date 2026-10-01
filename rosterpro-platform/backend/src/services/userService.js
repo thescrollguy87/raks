@@ -17,6 +17,7 @@ function toPublicShape(user) {
     phone: user.phone, category: user.category, designation: user.designation,
     isActive: user.isActive, stationId: user.stationId, airlineId: user.airlineId,
     reportsToId: user.reportsToId, reportsToName: user.reportsTo?.fullName || null,
+    trainingPending: user.trainingPending, trainingPendingNote: user.trainingPendingNote,
     createdAt: user.createdAt, roles,
   };
 }

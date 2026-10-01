@@ -62,6 +62,7 @@ function getRosterGrid(stationId, rosterId) {
       // frontend never displays it; notifications are dispatched server-side
       // via a separate, purpose-built query (getActiveStaffContacts).
       id: true, fullName: true, category: true, designation: true, department: true, employeeId: true, rosterSortOrder: true,
+      trainingPending: true, trainingPendingNote: true,
       shiftAssignments: {
         where: { rosterId, deletedAt: null },
         select: {
@@ -126,7 +127,7 @@ function getActiveStaffContacts(stationId) {
 function getActiveStaffForGeneration(stationId) {
   return prisma.user.findMany({
     where: { stationId, isActive: true, deletedAt: null },
-    select: { id: true, fullName: true, category: true, employeeId: true, designation: true, rosterSortOrder: true },
+    select: { id: true, fullName: true, category: true, employeeId: true, designation: true, rosterSortOrder: true, trainingPending: true },
     orderBy: { fullName: "asc" },
   });
 }

@@ -130,10 +130,20 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
-  absoluteDayAnchor, allowPatternOverrideForCoverage,
+  absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds,
 }) {
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
+  // Distinct from `blocked`: a staff member whose mandatory training was
+  // never completed (not expired — there's no date to derive that from,
+  // see the schema's own note on this) is still assignable to admin/office
+  // duty via an explicit Staff Allocation pattern (the station's own
+  // deliberate choice), just never counted toward, donated from, or
+  // flexi-pulled into real category coverage. An UNPATTERNED training-
+  // pending staff member has no admin-duty alternative to fall back on, so
+  // defaults to OFF exactly like `blocked` rather than cycling through the
+  // flat rotation's real M/A/N codes with nothing to stop it.
+  const trainingPending = new Set(trainingPendingUserIds || []);
   const coverageConfig = mandatoryCoverageConfig || DEFAULT_MANDATORY_COVERAGE_CONFIG;
   const nightRules = (nightRestrictionRules || []).filter(
     r => r.enabled && r.type === "hard" && (r.conditionType === "night_only" || r.conditionType === "no_night"),
@@ -166,9 +176,10 @@ function buildRosterAssignments({
     // as in the reference: only how `proposed` is first computed differs.
     const pattern = patternByUser?.[s.id];
     const codes = new Array(nDays);
+    const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
 
     for (let day = 1; day <= nDays; day++) {
-      if (blocked.has(s.id)) { codes[day - 1] = "O"; continue; }
+      if (blocked.has(s.id) || unpatternedTrainingPending) { codes[day - 1] = "O"; continue; }
       const onLeave = leaveByUserDay?.[s.id]?.has(day);
       if (onLeave) { codes[day - 1] = "L"; continue; }
 
@@ -204,6 +215,7 @@ function buildRosterAssignments({
 
   function eligibleBase(s, day) {
     if (blocked.has(s.id)) return false;
+    if (trainingPending.has(s.id)) return false;
     if (leaveByUserDay?.[s.id]?.has(day)) return false;
     return true;
   }

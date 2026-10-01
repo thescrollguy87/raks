@@ -328,6 +328,21 @@ model User {
   // who then sorts after everyone with a real position, by name.
   rosterSortOrder   Int?
 
+  // A lightweight, manually-set marker — distinct from the Qualification/
+  // License/Training/Authorization expiry-based blocking above, which only
+  // ever catches something that LAPSED. This instead covers a staff member
+  // whose MANDATORY training was never completed in the first place (a
+  // new hire, a category change not yet signed off) — there's no expiry
+  // date to derive that from. While set, roster generation excludes them
+  // from their category's real B1/B2/CM/NCS coverage pool entirely
+  // (never counted, never a redistribution donor, never a flexi
+  // candidate), but — unlike a compliance-expired block — still leaves
+  // them assignable to admin/office duty via an explicit Staff Allocation
+  // pattern, since they're simply not yet qualified for category duty,
+  // not unavailable altogether.
+  trainingPending     Boolean  @default(false)
+  trainingPendingNote String?
+
   createdById String?
   updatedById String?
   createdAt   DateTime @default(now())

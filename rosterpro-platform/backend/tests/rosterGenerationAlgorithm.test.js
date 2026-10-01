@@ -596,3 +596,70 @@ describe("buildRosterAssignments — Mandatory vs Advisory two-tier coverage con
     expect(result.violations).toContainEqual(expect.objectContaining({ day: 1, shift: "M", category: "NCS" }));
   });
 });
+
+describe("buildRosterAssignments — trainingPendingUserIds (Section 4/4: mandatory training not yet completed)", () => {
+  it("excludes a training-pending staff member from the coverage pool — never counted, never a redistribution donor", () => {
+    // Two B1 staff; one is training-pending. A floor of 1 per shift should
+    // only ever be satisfiable using the QUALIFIED staff member — the
+    // training-pending one must never be counted as covering a shift even
+    // if their own base schedule happens to land them on one.
+    const staff = [{ id: "qualified", category: "B1" }, { id: "pending", category: "B1" }];
+    const patternByUser = {
+      qualified: { codes: ["O"], offset: 0 }, // off every day — must be pulled via flexi to meet the floor
+      pending: { codes: ["M"], offset: 0 }, // working Morning every day, but not qualified
+    };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+      trainingPendingUserIds: ["pending"],
+    });
+    const day1 = result.assignments.filter(a => a.day === 1);
+    // The training-pending staff member's own M assignment is untouched —
+    // they still show as working (e.g. admin duty per their own pattern) —
+    // but the qualified staff member was pulled in via flexi because the
+    // training-pending one was never counted toward the M floor.
+    expect(day1.find(a => a.userId === "pending").code).toBe("M");
+    expect(day1.find(a => a.userId === "qualified").code).toBe("M");
+    expect(result.flexiAssignments).toEqual([{ userId: "qualified", day: 1, shift: "M", category: "B1", mandatory: true }]);
+  });
+
+  it("defaults an UNPATTERNED training-pending staff member to OFF instead of the flat rotation's real M/A/N codes", () => {
+    const staff = [{ id: "pending", category: "B1" }];
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [],
+      trainingPendingUserIds: ["pending"],
+    });
+    // The flat 8-day ROTATION would otherwise put this person on real M/A/N
+    // duty for 6 of 8 days — none of that should leak through while
+    // training-pending and unpatterned.
+    expect(result.assignments.every(a => a.code === "O")).toBe(true);
+  });
+
+  it("still follows an explicit admin Staff Allocation pattern for a training-pending staff member", () => {
+    const staff = [{ id: "pending", category: "B1" }];
+    const patternByUser = { pending: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], patternByUser,
+      trainingPendingUserIds: ["pending"],
+    });
+    // The station's own deliberate admin-duty pattern is respected — not
+    // overridden to all-OFF the way an unpatterned training-pending staff
+    // member's flat rotation is.
+    expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "O"]);
+  });
+
+  it("never pulls a training-pending staff member via the flexi fallback, even when they're the only one OFF", () => {
+    const staff = [{ id: "pending", category: "B1" }];
+    const patternByUser = { pending: { codes: ["G", "G", "O"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], patternByUser, lmpmLockedUserIds: [],
+      trainingPendingUserIds: ["pending"],
+    });
+    // Day 3's OFF day is never touched by flexi — the training-pending
+    // exclusion applies even to the last-resort fallback, not just
+    // ordinary redistribution.
+    expect(result.assignments[2].code).toBe("O");
+    expect(result.flexiAssignments).toHaveLength(0);
+    expect(result.violations.some(v => v.day === 3)).toBe(true);
+  });
+});

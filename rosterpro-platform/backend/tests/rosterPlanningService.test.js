@@ -108,4 +108,21 @@ describe("rosterPlanningService.getManpowerPlan", () => {
     // s2 is both blocked and on leave — still only removes ONE head, not two.
     expect(plan.effectiveStaff).toBe(1);
   });
+
+  it("excludes training-pending staff from effectiveStaff, same binary treatment as blocked/on-leave", async () => {
+    rosterRepo.getActiveStaffForGeneration.mockResolvedValue([
+      { id: "s1", category: "B1" },
+      { id: "s2", category: "CM", trainingPending: true },
+      { id: "s3", category: "NCS" },
+    ]);
+    complianceService.getComplianceSummary.mockResolvedValue({ isBlocked: false });
+
+    const advisoryDemand = { 1: { M: EMPTY_SHIFT, A: EMPTY_SHIFT, N: EMPTY_SHIFT } };
+    rosterGenerationService.buildWorkloadContext.mockResolvedValue({ advisoryDemand, ...emptyWorkloadContextFields });
+
+    const plan = await getManpowerPlan("station-1", "2026-09", 0, { sub: "actor-1" });
+
+    expect(plan.effectiveStaff).toBe(2);
+    expect(plan.trainingPendingCount).toBe(1);
+  });
 });

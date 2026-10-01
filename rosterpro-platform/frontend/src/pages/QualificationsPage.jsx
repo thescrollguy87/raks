@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
-import { listStaff } from "../api/staff.js";
+import { listStaff, updateStaff } from "../api/staff.js";
 import * as complianceApi from "../api/compliance.js";
 import { getEntityHistory } from "../api/audit.js";
 import { downloadReport } from "../api/reports.js";
@@ -77,6 +77,8 @@ export default function QualificationsPage() {
   const [showAddModal, setShowAddModal] = useState(null); // null | recordType string
   const [editingRecord, setEditingRecord] = useState(null); // { type, record } | null
   const [reportBusy, setReportBusy] = useState(false);
+  const [trainingPendingBusy, setTrainingPendingBusy] = useState(false);
+  const [trainingPendingNoteDraft, setTrainingPendingNoteDraft] = useState("");
   const canEdit = hasPermission("qualification", "create");
   const canEditType = (type) => hasPermission(...EDIT_PERMISSION[type]);
   const canExport = hasPermission("reports", "export");
@@ -117,6 +119,30 @@ export default function QualificationsPage() {
   }, [selectedId, summaries]);
 
   useEffect(() => { if (activeTab === "history") loadHistory(); }, [activeTab, loadHistory]);
+
+  // Keeps the note textarea in sync with whichever staff member is
+  // currently selected, rather than carrying a stale draft across a
+  // selection change.
+  useEffect(() => {
+    const s = staffList.find(x => x.id === selectedId);
+    setTrainingPendingNoteDraft(s?.trainingPendingNote || "");
+  }, [selectedId, staffList]);
+
+  async function handleToggleTrainingPending(nextPending) {
+    if (!selectedId) return;
+    setTrainingPendingBusy(true);
+    try {
+      const updated = await updateStaff(selectedId, {
+        trainingPending: nextPending,
+        trainingPendingNote: nextPending ? trainingPendingNoteDraft : null,
+      });
+      setStaffList(list => list.map(s => (s.id === selectedId ? { ...s, ...updated } : s)));
+    } catch (err) {
+      alert(`Failed: ${err.message}`);
+    } finally {
+      setTrainingPendingBusy(false);
+    }
+  }
 
   async function handleDelete(type, record, label) {
     if (!confirm(`Delete this ${RECORD_TYPE_LABEL[type]} record — "${label}"?\n\nThis cannot be undone.`)) return;
@@ -208,6 +234,7 @@ export default function QualificationsPage() {
                   <div style={{ fontSize: 9, color: "var(--text-dim)" }}>{s.designation || s.category || "—"}</div>
                 </span>
                 <span className={`cat-tag cat-${s.category || "NCS"}`}>{s.category || "NCS"}</span>
+                {s.trainingPending && <span title={`Training pending${s.trainingPendingNote ? `: ${s.trainingPendingNote}` : ""}`} style={{ flexShrink: 0 }}>🎓</span>}
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} title={sum?.isBlocked ? "Blocked" : ""} />
               </button>
             );
@@ -222,6 +249,47 @@ export default function QualificationsPage() {
             {selectedSummary.isBlocked && (
               <div className="ab red" style={{ marginBottom: 10 }}>
                 🔒 {selectedStaff.fullName} has an expired qualification, license, training, or authorization and is currently blocked from full-scope duty.
+              </div>
+            )}
+
+            {selectedStaff.trainingPending && (
+              <div className="ab amber" style={{ marginBottom: 10 }}>
+                🎓 {selectedStaff.fullName}'s mandatory training is pending — excluded from their category's real coverage in Auto Generate (never counted, never pulled in), but still assignable to admin/office duty.
+                {selectedStaff.trainingPendingNote ? <> <strong>Note:</strong> {selectedStaff.trainingPendingNote}</> : null}
+              </div>
+            )}
+
+            {/* A lightweight, manually-set marker for a staff member whose
+                MANDATORY training was never completed in the first place —
+                distinct from the expiry-based blocking above, which only
+                catches something that LAPSED. While set, roster generation
+                excludes this person from their category's real coverage
+                pool, but still allows admin/office duty via an explicit
+                Staff Allocation pattern. */}
+            {canEdit && (
+              <div className="card" style={{ marginBottom: 10 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                  <input
+                    type="checkbox" checked={!!selectedStaff.trainingPending} disabled={trainingPendingBusy}
+                    onChange={e => handleToggleTrainingPending(e.target.checked)}
+                  />
+                  🎓 Mandatory Training Pending — not yet qualified for category duty, admin/office work only
+                </label>
+                {selectedStaff.trainingPending && (
+                  <div style={{ marginTop: 8, display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <textarea
+                      className="fi" rows={2} placeholder="Note — which training is pending, expected completion, etc."
+                      value={trainingPendingNoteDraft} onChange={e => setTrainingPendingNoteDraft(e.target.value)}
+                      style={{ flex: 1, resize: "vertical" }}
+                    />
+                    <button
+                      className="btn btn-ghost btn-sm" disabled={trainingPendingBusy}
+                      onClick={() => handleToggleTrainingPending(true)}
+                    >
+                      💾 Save note
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 

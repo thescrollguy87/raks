@@ -141,7 +141,11 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   // subtracted; a staff member on a confirmed 2-week approved leave still
   // counted as fully available).
   const onLeaveIds = new Set(leaves.map(l => l.userId));
-  const unavailableIds = new Set([...blockedIds, ...onLeaveIds]);
+  // Training-pending staff aren't available for their category's real
+  // coverage either — distinct from compliance-blocked (an expired record)
+  // or on-leave, but reduces this panel's effective headcount the same way.
+  const trainingPendingIds = new Set(staff.filter(s => s.trainingPending).map(s => s.id));
+  const unavailableIds = new Set([...blockedIds, ...onLeaveIds, ...trainingPendingIds]);
 
   const staffByCategory = {};
   for (const s of staff) {
@@ -229,7 +233,7 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
 
   return {
     peak, target, peakDay, grandNeeded, effectiveStaff,
-    blockedCount: blockedIds.size, onLeaveCount: onLeaveIds.size,
+    blockedCount: blockedIds.size, onLeaveCount: onLeaveIds.size, trainingPendingCount: trainingPendingIds.size,
     sufficient: effectiveStaff >= grandNeeded,
     shortfall: Math.max(0, grandNeeded - effectiveStaff),
     categoryRequirement, workloadSummary,

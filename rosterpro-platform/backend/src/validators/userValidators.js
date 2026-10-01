@@ -41,6 +41,8 @@ const updateUserSchema = z.object({
   // authService's reset flow, so both places share one definition of
   // "strong enough."
   password: z.string().min(1).optional(),
+  trainingPending: z.boolean().optional(),
+  trainingPendingNote: z.string().max(500).nullable().optional(),
 });
 
 const assignRolesSchema = z.object({
