@@ -1138,6 +1138,14 @@ function DailyOpsTab({ stationId }) {
 }
 
 // ═══ TAB 6: GENERATE ══════════════════════════════════════════════════════════
+// Actual missing headcount, not just a count of (day, shift, category)
+// combinations — a shift short by 3 people and one short by 1 used to look
+// identical ("1 gap" either way). Falls back to counting 1 per entry for any
+// older response shape that doesn't carry `shortfall` yet.
+function sumShortfall(gaps) {
+  return (gaps || []).reduce((sum, g) => sum + (g.shortfall ?? 1), 0);
+}
+
 function GenerateTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   // "off": flat auto-distributed rotation only. "strict": follow Staff
@@ -1450,12 +1458,16 @@ function GenerateTab({ stationId }) {
                 ))}
               </div>
             </div>
-            {preview && (
-              <div className="card" style={{ borderColor: preview.violations.length ? "var(--amber)" : "var(--rp-green)" }}>
-                <div className="card-title">{preview.violations.length ? `⚠️ ${preview.violations.length} Critical Coverage Gaps in Generated Roster` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
-                <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{preview.advisoryGaps?.length ? ` · ${preview.advisoryGaps.length} advisory gap(s)` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)` : ""}</div>
-              </div>
-            )}
+            {preview && (() => {
+              const missing = sumShortfall(preview.violations);
+              const advisoryMissing = sumShortfall(preview.advisoryGaps);
+              return (
+                <div className="card" style={{ borderColor: missing ? "var(--amber)" : "var(--rp-green)" }}>
+                  <div className="card-title">{missing ? `⚠️ ${missing} Critical Coverage Gap(s) in Generated Roster (${preview.violations.length} shift/day combination(s))` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
+                  <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{advisoryMissing ? ` · ${advisoryMissing} advisory gap(s) short (${preview.advisoryGaps.length} combination(s))` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)` : ""}</div>
+                </div>
+              );
+            })()}
 
             {preview?.analysis?.softRuleScore?.overallScore !== null && preview?.analysis && (
               <div className="card">
@@ -1478,7 +1490,7 @@ function GenerateTab({ stationId }) {
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
             <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {applied.violations.length} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${applied.advisoryGaps.length} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
       </div>

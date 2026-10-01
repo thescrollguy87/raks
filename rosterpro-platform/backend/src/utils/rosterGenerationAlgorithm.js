@@ -250,7 +250,15 @@ function buildRosterAssignments({
   function rebalanceDay(day, category, targets, mandatoryFloors, { mandatory }) {
     const shifts = ["M", "A", "N"];
     const bucket = {};
-    shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === sh); });
+    // Matched by shift FAMILY (via shiftFamily/shiftDefsByCode), not literal
+    // string equality — a custom code like "M1", "A1"/"A2"/"AS", or a
+    // station-defined Night variant ("N1"/"N2"/"N3") must count toward that
+    // shift's coverage and be eligible to donate via redistribution exactly
+    // like a plain "M"/"A"/"N" would. Previously an exact-match comparison
+    // here silently excluded every custom-coded staff member from both
+    // sides of this calculation — undercounting real coverage and making
+    // them permanently ineligible as donors.
+    shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
 
     shifts.forEach(deficitShift => {
       const target = targets[deficitShift] || 0;
@@ -291,9 +299,17 @@ function buildRosterAssignments({
         }
 
         // 3) Genuinely can't be covered — report honestly rather than
-        // fabricating coverage or breaking a safety rule.
+        // fabricating coverage or breaking a safety rule. `shortfall` is
+        // the actual missing headcount (not just "this combination has a
+        // gap"), so a shift short by 3 people is distinguishable from one
+        // short by 1 — the earlier version logged one identical-looking
+        // entry either way.
+        const shortfall = target - bucket[deficitShift].length;
         const target_ = mandatory ? violations : advisoryGaps;
-        target_.push({ day, shift: deficitShift, category, issue: `No available ${category} to cover ${deficitShift} on day ${day}` });
+        target_.push({
+          day, shift: deficitShift, category, shortfall,
+          issue: `${shortfall} ${category} short to cover ${deficitShift} on day ${day} (need ${target}, have ${bucket[deficitShift].length})`,
+        });
         break;
       }
     });

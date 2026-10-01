@@ -161,6 +161,39 @@ describe("buildRosterAssignments — pattern-based mode (Staff Allocation tab)",
     expect(codes[2]).toBe("O"); // M1 immediately after N2 must be suppressed, same rule as the default M-after-N
   });
 
+  it("counts a custom shift code toward its family's coverage, not just literal M/A/N", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["M1"], offset: 0 } };
+    const shiftDefsByCode = { M1: "duty" };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], patternByUser, shiftDefsByCode, mandatoryCoverageConfig,
+    });
+    // Previously the coverage bucket only matched literal "M" — a staff
+    // member on the custom code "M1" was invisible to it and the floor
+    // would wrongly report unmet even though someone is genuinely there.
+    expect(result.violations).toHaveLength(0);
+  });
+
+  it("allows a custom-coded staff member to donate as a same-day redistribution surplus", () => {
+    const staff = [{ id: "ncs0", category: "NCS" }, { id: "ncs1", category: "NCS" }, { id: "ncs2", category: "NCS" }];
+    const patternByUser = {
+      ncs0: { codes: ["M1"], offset: 0 }, ncs1: { codes: ["M1"], offset: 0 }, ncs2: { codes: ["M1"], offset: 0 },
+    };
+    const shiftDefsByCode = { M1: "duty" };
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], patternByUser, shiftDefsByCode, mandatoryCoverageConfig,
+    });
+    const day1 = result.assignments.filter(a => a.day === 1);
+    // All 3 started on the custom "M1" code. M's floor is 1, so 2 are
+    // genuine surplus — one of them must be usable to cover Afternoon's
+    // floor of 1, exactly as if they'd started on a plain "M".
+    expect(day1.filter(a => a.code === "M1").length).toBe(2);
+    expect(day1.filter(a => a.code === "A").length).toBe(1);
+    expect(result.violations).toHaveLength(0);
+  });
+
   it("leaves an unpatterned staff member (no entry in patternByUser) on the default rotation even when other staff have patterns", () => {
     const staff = [{ id: "patterned", category: "B1" }, { id: "unpatterned", category: "B1" }];
     const patternByUser = { patterned: { codes: ["G"], offset: 0 } };
@@ -256,7 +289,23 @@ describe("buildRosterAssignments — same-day surplus/deficit redistribution (ne
     });
     const day1 = result.assignments.filter(a => a.day === 1);
     expect(day1.find(a => a.userId === "ncs0").code).toBe("M"); // stays put — M is exactly at its own floor, no surplus to give
-    expect(result.violations.some(v => v.shift === "A" && v.category === "NCS")).toBe(true); // Afternoon's shortfall is honestly reported instead
+    const gap = result.violations.find(v => v.shift === "A" && v.category === "NCS");
+    expect(gap).toBeTruthy(); // Afternoon's shortfall is honestly reported instead
+    expect(gap.shortfall).toBe(1); // exactly 1 missing, not just "a gap exists"
+  });
+
+  it("reports the real missing headcount, not just 1, when a shift is short by more than one person", () => {
+    const staff = [{ id: "ncs0", category: "NCS" }];
+    const patternByUser = { ncs0: { codes: ["M"], offset: 0 } };
+    // Floor of 3 with only 1 person total and nobody to redistribute from —
+    // the gap is 2 people short, not 1.
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 3 }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+    });
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].shortfall).toBe(2);
+    expect(result.violations[0].issue).toMatch(/2 NCS short/);
   });
 
   it("a lone staff member's own OFF day is never touched by redistribution, locked or unlocked, and the gap is honestly reported", () => {
