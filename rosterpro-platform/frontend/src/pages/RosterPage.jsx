@@ -1113,15 +1113,18 @@ const RosterRow = memo(function RosterRow({
 
   return (
     <tr>
-      <td className="sc">
-        <button className="staff-name-btn" onClick={() => onStaffClick(userId)} title="View staff details">
+      <td className="sc" style={!isBlocked && trainingPending ? { background: "rgba(245,166,35,.15)" } : undefined}>
+        <button
+          className="staff-name-btn" onClick={() => onStaffClick(userId)}
+          title={!isBlocked && trainingPending ? `Mandatory training pending — not available for ${cat || "category"} duty, admin/office work only${trainingPendingNote ? `: ${trainingPendingNote}` : ""}` : "View staff details"}
+        >
           <div className="sn">
             {fullName.split("(")[0].trim().substring(0, 20)}
             {isBlocked && (
               <span title={`Blocked from duty — ${blockReason || "expired compliance record"}`} style={{ marginLeft: 4, color: "var(--rp-red)" }}>🔒</span>
             )}
             {!isBlocked && trainingPending && (
-              <span title={`Mandatory training pending — not available for ${cat || "category"} duty, admin/office work only${trainingPendingNote ? `: ${trainingPendingNote}` : ""}`} style={{ marginLeft: 4, color: "var(--amber)" }}>🎓</span>
+              <span style={{ marginLeft: 4, color: "var(--amber)" }}>🎓</span>
             )}
           </div>
           <div className="sr">{designation}</div>
