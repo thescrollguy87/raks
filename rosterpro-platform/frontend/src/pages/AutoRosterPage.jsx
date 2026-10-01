@@ -1444,7 +1444,7 @@ function GenerateTab({ stationId }) {
         {plan && (
           <>
             <div className={`ab ${plan.sufficient ? "green" : "red"}`}>
-              {plan.sufficient ? "✅" : "⚠"} Peak daily need: <strong>{plan.grandNeeded}</strong> · Available: <strong>{plan.effectiveStaff}</strong> · {plan.sufficient ? "Sufficient coverage" : `⚠ Shortfall of ${plan.shortfall} staff`}
+              {plan.sufficient ? "✅" : "⚠"} Peak daily need: <strong>{plan.grandNeeded}</strong> · Available: <strong title={`Excludes ${plan.blockedCount ?? 0} compliance-blocked and ${plan.onLeaveCount ?? 0} on approved leave this month`}>{plan.effectiveStaff}</strong> · {plan.sufficient ? "Sufficient coverage" : `⚠ Shortfall of ${plan.shortfall} staff`}
             </div>
             <div className="result-box">
               <div className="result-title" style={{ fontSize: 11, fontWeight: 700, marginBottom: 8 }}>📊 Manpower Requirement — {monthKey}</div>

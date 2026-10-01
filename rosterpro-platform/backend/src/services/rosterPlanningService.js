@@ -1,6 +1,7 @@
 const rosterRepo = require("../repositories/rosterRepository");
 const planningRepo = require("../repositories/rosterPlanningRepository");
 const userRepo = require("../repositories/userRepository");
+const leaveRepo = require("../repositories/leaveRepository");
 const complianceService = require("./complianceService");
 const auditTrail = require("../utils/auditTrail");
 const ApiError = require("../utils/ApiError");
@@ -118,60 +119,76 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   const rosterGenerationService = require("./rosterGenerationService");
   const airlineId = await resolveAirlineId(actor, stationId);
 
+  const nDays = rosterGenerationService.daysInMonth(monthKey);
+  const monthStart = rosterGenerationService.dateAt(monthKey, 1);
+  const monthEnd = rosterGenerationService.dateAt(monthKey, nDays);
+
   const [workloadContext, staff] = await Promise.all([
     rosterGenerationService.buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, airlineId),
     rosterRepo.getActiveStaffForGeneration(stationId),
   ]);
-  const summaries = await Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id)));
+  const [summaries, leaves] = await Promise.all([
+    Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
+    leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
+  ]);
   const blockedIds = new Set(staff.filter((s, i) => summaries[i].isBlocked).map(s => s.id));
+  // Approved leave anywhere in the month takes a staff member out of this
+  // month's effective headcount, same binary treatment as compliance
+  // blocking — this panel is a monthly snapshot, not a day-by-day
+  // availability check, so "on leave for part of the month" reduces the
+  // count exactly like "compliance-blocked" already does, rather than
+  // being silently ignored (previously only compliance blocking was
+  // subtracted; a staff member on a confirmed 2-week approved leave still
+  // counted as fully available).
+  const onLeaveIds = new Set(leaves.map(l => l.userId));
+  const unavailableIds = new Set([...blockedIds, ...onLeaveIds]);
 
   const staffByCategory = {};
   for (const s of staff) {
-    if (blockedIds.has(s.id)) continue;
+    if (unavailableIds.has(s.id)) continue;
     const cat = s.category || "NCS";
     staffByCategory[cat] = (staffByCategory[cat] || 0) + 1;
   }
 
-  const nDays = rosterGenerationService.daysInMonth(monthKey);
-  const avgPeak = workloadContext.averagePeakByShift;
-  const peak = {}, target = {};
+  // For each shift, find the SINGLE day whose combined B1+B2+CM+NCS demand
+  // is highest, and use THAT day's actual per-category numbers — not each
+  // category's own independently-worst day. Each category previously took
+  // its own peak day in isolation (B1's worst day might be the 5th, CM's
+  // the 12th, NCS's the 20th), then those independent peaks were summed as
+  // if all four categories' worst cases landed on the same shift at once,
+  // which overstated Grand Needed well above any day that actually occurs.
+  const peak = {}, target = {}, peakDay = {};
   ["M", "A", "N"].forEach(sh => {
-    // B2 has no flight-schedule-driven peak-concurrency demand (see
-    // rosterGenerationService's own note on this) — its real per-shift
-    // requirement is the mandatory floor + configured buffer + manual
-    // demand, already folded into advisoryDemand day-by-day; take the
-    // month's peak day for it exactly like B1/CM/NCS's averagePeakByShift.
-    let b2Peak = 0;
-    for (let d = 1; d <= nDays; d++) b2Peak = Math.max(b2Peak, workloadContext.advisoryDemand[d]?.[sh]?.B2 || 0);
-    peak[sh] = { b1: avgPeak[sh].B1.peak, b2: b2Peak, cm: avgPeak[sh].CM.peak, ncs: avgPeak[sh].NCS.peak };
+    let bestDay = 1, bestTotal = -1;
+    for (let d = 1; d <= nDays; d++) {
+      const dd = workloadContext.advisoryDemand[d]?.[sh] || { B1: 0, B2: 0, CM: 0, NCS: 0 };
+      const combined = (dd.B1 || 0) + (dd.B2 || 0) + (dd.CM || 0) + (dd.NCS || 0);
+      if (combined > bestTotal) { bestTotal = combined; bestDay = d; }
+    }
+    const dd = workloadContext.advisoryDemand[bestDay]?.[sh] || { B1: 0, B2: 0, CM: 0, NCS: 0 };
+    peak[sh] = { b1: dd.B1 || 0, b2: dd.B2 || 0, cm: dd.CM || 0, ncs: dd.NCS || 0 };
     target[sh] = peak[sh].b1 + peak[sh].b2 + peak[sh].cm + peak[sh].ncs;
+    peakDay[sh] = bestDay;
   });
   const grandNeeded = target.M + target.A + target.N;
-  const effectiveStaff = Math.max(0, staff.length - blockedIds.size);
+  const effectiveStaff = Math.max(0, staff.length - unavailableIds.size);
 
-  // One-line, human-readable trace of exactly which day and which real
-  // flights produced a category/shift's worst-case number — built so a
-  // planner can hover a Category Requirement cell and see the answer
-  // themselves instead of having to ask why a number "doesn't match the
-  // flight schedule" (it's near-always because it's the WORST day of the
-  // month, not the day they happened to be looking at).
-  function formatExplain(e) {
-    if (!e) return null;
-    const parts = [e.coreLabel];
-    if (e.taskMaster) parts.push(`planned/unplanned task master +${e.taskMaster}`);
-    if (e.manual) parts.push(`manual demand +${e.manual}`);
-    if (e.buffer) parts.push(`buffer +${e.buffer}`);
-    const flightsText = e.flights.length ? e.flights.join(", ") : "none — no aircraft on ground/PDC at that instant";
-    return `Day ${e.day}: ${e.total} needed = ${parts.join(" + ")}. Aircraft active at peak concurrency: ${flightsText}.`;
+  // One-line, human-readable trace of which single day drove each shift's
+  // combined peak — a planner can see all four categories' numbers come
+  // from the SAME day, not four different worst-case days stitched together.
+  function formatExplain(sh) {
+    const d = peakDay[sh];
+    const dd = workloadContext.advisoryDemand[d]?.[sh] || { B1: 0, B2: 0, CM: 0, NCS: 0 };
+    return `Day ${d}: highest combined demand this shift = B1 ${dd.B1 || 0} + B2 ${dd.B2 || 0} + CM ${dd.CM || 0} + NCS ${dd.NCS || 0} = ${target[sh]}.`;
   }
+  const explainByShift = { M: formatExplain("M"), A: formatExplain("A"), N: formatExplain("N") };
 
   const CAT_KEY = { B1: "b1", B2: "b2", CM: "cm", NCS: "ncs", STO: null };
   const categoryRequirement = Object.entries(CAT_KEY).map(([cat, key]) => {
     const needs = key ? { M: peak.M[key], A: peak.A[key], N: peak.N[key] } : { M: 0, A: 0, N: 0 };
     const available = staffByCategory[cat] || 0;
     const maxNeed = Math.max(needs.M, needs.A, needs.N, 0);
-    const catExplain = workloadContext.demandExplain?.[cat];
-    const explain = catExplain ? { M: formatExplain(catExplain.M), A: formatExplain(catExplain.A), N: formatExplain(catExplain.N) } : null;
+    const explain = key ? explainByShift : null;
     return { category: cat, needs, available, status: available >= maxNeed ? "OK" : "SHORT", explain };
   });
 
@@ -211,7 +228,8 @@ async function getManpowerPlan(stationId, monthKey, aogBuffer = 0, actor) {
   }
 
   return {
-    peak, target, grandNeeded, effectiveStaff,
+    peak, target, peakDay, grandNeeded, effectiveStaff,
+    blockedCount: blockedIds.size, onLeaveCount: onLeaveIds.size,
     sufficient: effectiveStaff >= grandNeeded,
     shortfall: Math.max(0, grandNeeded - effectiveStaff),
     categoryRequirement, workloadSummary,
