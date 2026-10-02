@@ -299,6 +299,16 @@ model User {
   phone             String?
   passwordHash      String
   category          StaffCategory?
+  // Additional category(ies) this staff member is ALSO genuinely qualified
+  // for beyond their primary `category` above — e.g. a Station I/C who
+  // holds a B1 license but is also CM-certified. Roster generation and
+  // Coverage Analysis both credit a shift this person works toward any
+  // category listed here, not just their primary — see
+  // rosterGenerationAlgorithm.js's categoryEligible() and
+  // rosterAnalysisService.js's coverage tally for the two places this
+  // actually matters. Empty by default, so nobody's behavior changes
+  // unless a station explicitly flags someone as dual-qualified.
+  secondaryCategories StaffCategory[] @default([])
   designation       String?
   department        String? // e.g. "Line Maintenance" — free text, matches the Employee Master import's Department column
 

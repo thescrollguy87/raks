@@ -79,6 +79,7 @@ export default function QualificationsPage() {
   const [reportBusy, setReportBusy] = useState(false);
   const [trainingPendingBusy, setTrainingPendingBusy] = useState(false);
   const [trainingPendingNoteDraft, setTrainingPendingNoteDraft] = useState("");
+  const [secondaryCatBusy, setSecondaryCatBusy] = useState(false);
   const canEdit = hasPermission("qualification", "create");
   const canEditType = (type) => hasPermission(...EDIT_PERMISSION[type]);
   const canExport = hasPermission("reports", "export");
@@ -141,6 +142,25 @@ export default function QualificationsPage() {
       alert(`Failed: ${err.message}`);
     } finally {
       setTrainingPendingBusy(false);
+    }
+  }
+
+  // Toggles ONE category in/out of the selected staff member's secondary
+  // list — e.g. flagging a B1-licensed Station I/C as also CM-certified.
+  // Roster generation and Coverage Analysis both then credit a shift this
+  // person works toward that category too, not just their primary one.
+  async function handleToggleSecondaryCategory(cat, checked) {
+    if (!selectedId || !selectedStaff) return;
+    const current = selectedStaff.secondaryCategories || [];
+    const next = checked ? [...new Set([...current, cat])] : current.filter(c => c !== cat);
+    setSecondaryCatBusy(true);
+    try {
+      const updated = await updateStaff(selectedId, { secondaryCategories: next });
+      setStaffList(list => list.map(s => (s.id === selectedId ? { ...s, ...updated } : s)));
+    } catch (err) {
+      alert(`Failed: ${err.message}`);
+    } finally {
+      setSecondaryCatBusy(false);
     }
   }
 
@@ -234,6 +254,7 @@ export default function QualificationsPage() {
                   <div style={{ fontSize: 9, color: "var(--text-dim)" }}>{s.designation || s.category || "—"}</div>
                 </span>
                 <span className={`cat-tag cat-${s.category || "NCS"}`}>{s.category || "NCS"}</span>
+                {s.secondaryCategories?.length > 0 && <span title={`Also qualified: ${s.secondaryCategories.join(", ")}`} style={{ flexShrink: 0 }}>🏷</span>}
                 {s.trainingPending && <span title={`Training pending${s.trainingPendingNote ? `: ${s.trainingPendingNote}` : ""}`} style={{ flexShrink: 0 }}>🎓</span>}
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: dotColor, flexShrink: 0 }} title={sum?.isBlocked ? "Blocked" : ""} />
               </button>
@@ -290,6 +311,32 @@ export default function QualificationsPage() {
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Beyond the primary category above — a staff member genuinely
+                qualified for another category too (e.g. a B1-licensed
+                Station I/C who's also CM-certified). Roster generation and
+                Coverage Analysis both then credit a shift this person works
+                toward that category too, not just their primary one. */}
+            {canEdit && (
+              <div className="card" style={{ marginBottom: 10 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>🏷 Secondary Category Qualification(s)</div>
+                <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>
+                  Also genuinely qualified for — a shift they work counts toward this category's Mandatory Minimum Coverage too, not just {selectedStaff.category || "their primary category"}.
+                </div>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                  {CATEGORIES.filter(c => c !== selectedStaff.category).map(cat => (
+                    <label key={cat} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, cursor: "pointer" }}>
+                      <input
+                        type="checkbox" disabled={secondaryCatBusy}
+                        checked={(selectedStaff.secondaryCategories || []).includes(cat)}
+                        onChange={e => handleToggleSecondaryCategory(cat, e.target.checked)}
+                      />
+                      {cat}
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
 

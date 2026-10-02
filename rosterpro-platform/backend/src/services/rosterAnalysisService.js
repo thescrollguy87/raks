@@ -61,14 +61,23 @@ async function getCoverageAnalysis(stationId, monthKey) {
   for (let d = 1; d <= nDays; d++) {
     const dateStr = dateAt(monthKey, d).toISOString().slice(0, 10);
     for (const s of staff) {
-      if (!CATEGORIES.includes(s.category)) continue; // STO and anyone uncategorized sit outside the mandatory-coverage system entirely
       const sa = s.shiftAssignments.find(a => new Date(a.shiftDate).toISOString().slice(0, 10) === dateStr);
       const code = sa?.shiftDef?.code;
       if (!code) continue;
       const fam = shiftFamily(code, shiftDefsByCode);
       if (!fam) continue;
-      const k = key(d, s.category, fam);
-      coverage[k] = (coverage[k] || 0) + 1;
+      // Credit this shift toward EVERY category the staff member is
+      // qualified for that this floor system tracks — their primary
+      // category, plus any secondaryCategories a station has flagged them
+      // for (e.g. a B1-licensed Station I/C who's also CM-certified,
+      // genuinely covering a CM gap). A real dual-qualified person on duty
+      // satisfies both floors at once; STO and anyone with no category sit
+      // outside the mandatory-coverage system entirely either way.
+      const creditedCategories = [s.category, ...(s.secondaryCategories || [])].filter(c => CATEGORIES.includes(c));
+      new Set(creditedCategories).forEach(c => {
+        const k = key(d, c, fam);
+        coverage[k] = (coverage[k] || 0) + 1;
+      });
     }
   }
 

@@ -18,7 +18,7 @@ async function listPaginated({ page = 1, pageSize = 20, stationId, airlineId }) 
         isActive: true, stationId: true, airlineId: true, lastLoginAt: true,
         reportsToId: true, reportsTo: { select: { id: true, fullName: true } },
         roles: { select: { role: { select: { name: true } } } },
-        trainingPending: true, trainingPendingNote: true,
+        trainingPending: true, trainingPendingNote: true, secondaryCategories: true,
       },
     }),
   ]);

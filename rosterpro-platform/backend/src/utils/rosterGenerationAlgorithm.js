@@ -150,6 +150,17 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 // `codes` at all — callers fall back to the day-anchor formula in that
 // case, so this is a pure improvement, never a regression, wherever it
 // can't confidently resync.
+// Whether `s` counts toward `category`'s Mandatory Minimum Coverage —
+// either it's their primary category, or `category` is one they hold a
+// genuine secondary qualification for (e.g. a B1-licensed Station I/C who's
+// also CM-certified). `s.secondaryCategories` defaults to an empty array for
+// anyone a station hasn't explicitly flagged as dual-qualified, so this is
+// identical to the old plain `===` check for everyone else — zero behavior
+// change unless a station opts a specific staff member in.
+function categoryEligible(s, category) {
+  return s.category === category || (s.secondaryCategories || []).includes(category);
+}
+
 function resyncCycleStart(codes, tail) {
   if (!codes?.length || tail?.[0] == null) return null;
   const len = codes.length;
@@ -330,7 +341,12 @@ function buildRosterAssignments({
     // here silently excluded every custom-coded staff member from both
     // sides of this calculation — undercounting real coverage and making
     // them permanently ineligible as donors.
-    shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
+    // categoryEligible (not plain ===) so a dual-qualified staff member
+    // already working a matching shift counts toward BOTH their primary
+    // and secondary category's coverage, and can redistribute into either
+    // one's gap — a real B1/CM dual license holder on duty genuinely
+    // satisfies "a CM is present" AND "a B1 is present" simultaneously.
+    shifts.forEach(sh => { bucket[sh] = staff.filter(s => categoryEligible(s, category) && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
 
     shifts.forEach(deficitShift => {
       const target = targets[deficitShift] || 0;
@@ -367,14 +383,21 @@ function buildRosterAssignments({
         // same eligibility/rest-gap/night-restriction checks a fresh
         // assignment would (eligibleBase, restGapOk) — "last resort" never
         // means "unsafe."
+        // categoryEligible here too — a secondary-qualified staff member's
+        // OFF day is a legitimate (if still last-resort) source for THIS
+        // category's gap, same as it already is for their primary one.
+        // `crossCategory` records when the candidate was pulled in on their
+        // secondary qualification rather than their primary, so this is
+        // never silently indistinguishable from an ordinary same-category
+        // fill — same transparency principle as the `mandatory` flag.
         if (mandatory || allowPatternOverrideForCoverage) {
           const flexiCandidate = staff.find(s => (
-            s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
+            categoryEligible(s, category) && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
             && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
           ));
           if (flexiCandidate) {
             grid[flexiCandidate.id][day - 1] = deficitShift;
-            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory });
+            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory, crossCategory: flexiCandidate.category !== category });
             bucket[deficitShift].push(flexiCandidate);
             continue;
           }

@@ -43,6 +43,11 @@ const updateUserSchema = z.object({
   password: z.string().min(1).optional(),
   trainingPending: z.boolean().optional(),
   trainingPendingNote: z.string().max(500).nullable().optional(),
+  // Categories, beyond `category` (primary), this staff member is ALSO
+  // genuinely qualified for — e.g. a B1-licensed Station I/C who's also
+  // CM-certified. Roster generation and Coverage Analysis both credit a
+  // shift they work toward any category listed here.
+  secondaryCategories: z.array(z.enum(STAFF_CATEGORIES)).optional(),
 });
 
 const assignRolesSchema = z.object({

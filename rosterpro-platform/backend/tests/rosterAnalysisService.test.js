@@ -112,4 +112,34 @@ describe("rosterAnalysisService.getCoverageAnalysis", () => {
     // Day 1 should count this N2-coded assignment toward Night coverage.
     expect(b1Night.gapDays.find(g => g.day === 1)).toBeUndefined();
   });
+
+  it("credits a dual-qualified staff member's shift toward their secondary category too, without inflating that category's active headcount", async () => {
+    // Reproduces the real reported gap: a B1 Station I/C, also CM-certified,
+    // manually scheduled onto Morning to cover a CM shortfall — the shift
+    // must close CM's gap, but "active CM headcount" stays based on
+    // primary-category CM staff only (otherwise the structural-shortage
+    // math would overstate true CM capacity).
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: false });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      {
+        id: "ic1", category: "B1", secondaryCategories: ["CM"], fullName: "Station I/C",
+        shiftAssignments: [1].map(d => shiftAssignment(d, "M", "duty")),
+      },
+    ]);
+    workloadConfigService.listMandatoryCoverageRules.mockResolvedValue([
+      ...DEFAULT_RULES, { category: "CM", shift: "M", enabled: true, minCount: 1 },
+    ]);
+    const result = await getCoverageAnalysis("station-1", "2026-09");
+    const cmMorning = result.rows.find(r => r.category === "CM" && r.shift === "M");
+    expect(cmMorning.gapDays.find(g => g.day === 1)).toBeUndefined(); // CM Morning floor of 1 is met by the dual-qualified B1
+    // The B1 Morning floor is ALSO still satisfied by the same person — one
+    // dual-qualified person genuinely covers both at once.
+    const b1Morning = result.rows.find(r => r.category === "B1" && r.shift === "M");
+    expect(b1Morning.gapDays.find(g => g.day === 1)).toBeUndefined();
+    // "Active CM" headcount is still 0 — this person's PRIMARY category is
+    // B1, so CM's own headcount/structural-shortage math isn't inflated by
+    // a secondary qualification.
+    expect(result.headcountByCategory.CM.total).toBe(0);
+    expect(result.headcountByCategory.CM.activeEffective).toBe(0);
+  });
 });
