@@ -198,26 +198,54 @@ describe("buildRosterAssignments — full rest-gap rule set (ported from referen
   });
 });
 
-describe("buildRosterAssignments — B1 license hierarchy (every B1 is also CM-qualified)", () => {
-  it("credits a plain B1 staff member's shift toward CM coverage with NO secondaryCategories flag at all", () => {
-    const staff = [{ id: "s0", category: "B1" }]; // no secondaryCategories field whatsoever
-    const mandatoryCoverageConfig = {
-      B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-    };
-    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
-    expect(result.violations).toHaveLength(0); // both B1 Morning and CM Morning floors are met by this one person
-  });
-
-  it("pulls a plain B1 staff member's own OFF day as a last resort to cover a CM-only gap, with no CM staff and no secondaryCategories flag", () => {
-    const staff = [{ id: "s0", category: "B1" }];
+describe("buildRosterAssignments — cross-category qualifications (B1 license hierarchy + secondaryCategories) never auto-move anyone during generation", () => {
+  // Confirmed directly with the user: nobody should ever be automatically
+  // pulled off their office/admin duty OR their day off to cover a
+  // DIFFERENT category's gap — not even a staff member genuinely qualified
+  // for it (every B1 for CM, or an explicitly flagged secondary category).
+  // That's a deliberate human call (bring in real extra headcount, or
+  // manually move someone's day off yourself), never something the
+  // generator decides silently. A cross-category gap is left as an
+  // honestly-reported violation/advisory gap — Coverage Analysis is where
+  // it then gets credited correctly if a human DOES manually place someone
+  // there (see rosterAnalysisService.test.js).
+  it("never pulls a plain B1 staff member's OFF day to cover a CM-only gap, even with no CM staff at all — reports the gap instead", () => {
+    const staff = [{ id: "s0", category: "B1" }]; // no secondaryCategories, just the B1 hierarchy
     const mandatoryCoverageConfig = {
       B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } },
       CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
     };
     const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 6 });
-    expect(result.violations).toHaveLength(0);
-    expect(result.flexiAssignments[0]).toMatchObject({ userId: "s0", category: "CM", crossCategory: true });
+    expect(result.assignments[0].code).toBe("O"); // left untouched on their own day off
+    expect(result.flexiAssignments).toHaveLength(0);
+    expect(result.violations.some(v => v.category === "CM" && v.day === 1 && v.shift === "M")).toBe(true);
+  });
+
+  it("never pulls an explicitly secondary-qualified staff member's OFF day either — same report-only behavior", () => {
+    const staff = [{ id: "s0", category: "NCS", secondaryCategories: ["CM"] }];
+    const mandatoryCoverageConfig = {
+      NCS: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } },
+      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
+    };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 6 });
+    expect(result.assignments[0].code).toBe("O");
+    expect(result.flexiAssignments).toHaveLength(0);
+    expect(result.violations.some(v => v.category === "CM" && v.day === 1 && v.shift === "M")).toBe(true);
+  });
+
+  it("never redistributes a dual-qualified staff member's ALREADY-WORKING shift into a different category's gap either — same-day redistribution also stays strictly same-category", () => {
+    // Two B1 on Morning (floor 1, so one is a genuine same-category surplus)
+    // — CM is short on Afternoon. Before this behavior was locked down, the
+    // surplus B1 could have been redistributed into CM's Afternoon gap;
+    // now they must stay exactly where the base rotation put them.
+    const staff = [{ id: "b1_0", category: "B1" }, { id: "b1_1", category: "B1" }];
+    const mandatoryCoverageConfig = {
+      B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
+      CM: { M: { enabled: false }, A: { enabled: true, min: 1 }, N: { enabled: false } },
+    };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
+    expect(result.violations.some(v => v.category === "CM" && v.shift === "A")).toBe(true);
+    expect(result.flexiAssignments).toHaveLength(0);
   });
 
   it("does NOT extend the hierarchy the other way — a plain CM staff member is never credited toward B1 coverage", () => {
@@ -226,60 +254,14 @@ describe("buildRosterAssignments — B1 license hierarchy (every B1 is also CM-q
     const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
     expect(result.violations.some(v => v.category === "B1")).toBe(true); // genuinely unmet, not silently satisfied by the CM person
   });
-});
 
-describe("buildRosterAssignments — secondary category qualifications (dual-licensed staff)", () => {
-  it("counts a dual-qualified staff member's existing shift toward BOTH their primary and secondary category's coverage at once", () => {
-    // A single B1 person who also holds a CM qualification, on Morning —
-    // genuinely satisfies "a B1 is present" AND "a CM is present"
-    // simultaneously, so neither category's floor should report a gap.
-    const staff = [{ id: "s0", category: "B1", secondaryCategories: ["CM"] }];
-    const mandatoryCoverageConfig = {
-      B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-    };
-    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
-    expect(result.assignments[0].code).toBe("M"); // idx 0 -> offset 0 -> ROTATION[0] = "M"
-    expect(result.violations).toHaveLength(0);
-  });
-
-  it("pulls a secondary-qualified staff member's OWN OFF day as a last-resort flexi fill for a category with no primary-category staff at all, flagged crossCategory", () => {
-    // No CM-category staff exist here whatsoever — only a B1 who also holds
-    // a secondary CM qualification, and absoluteDayAnchor:6 puts them on
-    // their OWN "O" day on day 1 (idx 0 -> offset 0 -> (6+0+0)%8 -> ROTATION[6] = "O").
-    const staff = [{ id: "s0", category: "B1", secondaryCategories: ["CM"] }];
-    const mandatoryCoverageConfig = {
-      B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } },
-      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-    };
+  it("still fills a same-category mandatory gap exactly as before — this change only removed the CROSS-category expansion, not the original behavior", () => {
+    const staff = [{ id: "cm_0", category: "CM" }];
+    const mandatoryCoverageConfig = { CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } } };
     const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 6 });
-    expect(result.assignments[0].code).toBe("M");
-    expect(result.violations).toHaveLength(0);
+    expect(result.assignments[0].code).toBe("M"); // own-category flexi pull off their day off still applies
     expect(result.flexiAssignments).toHaveLength(1);
-    expect(result.flexiAssignments[0]).toMatchObject({ userId: "s0", category: "CM", mandatory: true, crossCategory: true });
-  });
-
-  it("never credits or pulls in a staff member for a category that isn't their primary or listed as secondary", () => {
-    const staff = [{ id: "s0", category: "B1", secondaryCategories: ["CM"] }]; // NOT NCS
-    const mandatoryCoverageConfig = {
-      B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } },
-      NCS: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
-    };
-    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 6 });
-    // No NCS-eligible candidate exists at all (B1 primary, CM secondary only) -> honestly reported as unmet, never fabricated.
-    expect(result.violations.some(v => v.category === "NCS" && v.day === 1 && v.shift === "M")).toBe(true);
-    expect(result.flexiAssignments).toHaveLength(0);
-  });
-
-  it("behaves identically to a plain staff record when secondaryCategories is omitted or empty — no behavior change for anyone not opted in", () => {
-    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } } };
-    const withEmpty = buildRosterAssignments({
-      staff: [{ id: "s0", category: "B1", secondaryCategories: [] }], nDays: 3, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig,
-    });
-    const withOmitted = buildRosterAssignments({
-      staff: [{ id: "s0", category: "B1" }], nDays: 3, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig,
-    });
-    expect(withEmpty.assignments.map(a => a.code)).toEqual(withOmitted.assignments.map(a => a.code));
+    expect(result.violations).toHaveLength(0);
   });
 });
 
@@ -563,8 +545,8 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
     expect(result.violations.filter(v => (v.day === 3 || v.day === 6) && v.shift === "M")).toHaveLength(0);
     expect(result.flexiAssignments).toEqual([
-      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true, crossCategory: false },
-      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true, crossCategory: false },
+      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true },
+      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true },
     ]);
   });
 
@@ -592,7 +574,7 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     const day1 = result.assignments.filter(a => a.day === 1);
     expect(day1.find(a => a.userId === "free").code).toBe("M");
     expect(day1.find(a => a.userId === "locked").code).toBe("O");
-    expect(result.flexiAssignments).toEqual([{ userId: "free", day: 1, shift: "M", category: "B1", mandatory: false, crossCategory: false }]);
+    expect(result.flexiAssignments).toEqual([{ userId: "free", day: 1, shift: "M", category: "B1", mandatory: false }]);
   });
 
   it("still prefers same-day redistribution over the flexi fallback when both could resolve the gap", () => {
@@ -621,8 +603,8 @@ describe("buildRosterAssignments — flexi exigency fallback (allowPatternOverri
     });
     expect(result.assignments.map(a => a.code)).toEqual(["G", "G", "M", "G", "G", "M"]);
     expect(result.flexiAssignments).toEqual([
-      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true, crossCategory: false },
-      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true, crossCategory: false },
+      { userId: "b1_0", day: 3, shift: "M", category: "B1", mandatory: true },
+      { userId: "b1_0", day: 6, shift: "M", category: "B1", mandatory: true },
     ]);
     // The Morning floor this flexi fill targeted is resolved; a lone staff
     // member obviously still can't also cover Afternoon/Night/B2 the same
@@ -770,7 +752,7 @@ describe("buildRosterAssignments — trainingPendingUserIds (Section 4/4: mandat
     // training-pending one was never counted toward the M floor.
     expect(day1.find(a => a.userId === "pending").code).toBe("M");
     expect(day1.find(a => a.userId === "qualified").code).toBe("M");
-    expect(result.flexiAssignments).toEqual([{ userId: "qualified", day: 1, shift: "M", category: "B1", mandatory: true, crossCategory: false }]);
+    expect(result.flexiAssignments).toEqual([{ userId: "qualified", day: 1, shift: "M", category: "B1", mandatory: true }]);
   });
 
   it("defaults an UNPATTERNED training-pending staff member to OFF instead of the flat rotation's real M/A/N codes", () => {

@@ -160,24 +160,19 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 // flag per person. Keyed by primary category -> categories it also covers.
 const CATEGORY_HIERARCHY = { B1: ["CM"] };
 
-// Whether `s` counts toward `category`'s Mandatory Minimum Coverage —
-// their primary category, a category their license hierarchy implies
-// (CATEGORY_HIERARCHY), or one they hold a genuine secondary qualification
-// for via `secondaryCategories` (e.g. a CM-licensed Senior Tech who's also
-// separately NCS-qualified — a person-specific fact the hierarchy can't
-// express). `secondaryCategories` defaults to an empty array for anyone not
-// explicitly flagged, so this is identical to the old plain `===` check
-// (plus the hierarchy) for everyone else.
-function categoryEligible(s, category) {
-  return s.category === category
-    || (CATEGORY_HIERARCHY[s.category] || []).includes(category)
-    || (s.secondaryCategories || []).includes(category);
-}
-
-// Every category a staff member's shift should be credited toward —
-// primary, hierarchy-implied, and explicit secondary — deduped. Used where
-// a caller needs the full set (e.g. Coverage Analysis's per-day tally)
-// rather than testing one category at a time.
+// Every category a staff member's shift should be CREDITED toward for
+// reporting purposes — primary, hierarchy-implied, and explicit secondary —
+// deduped. Confirmed directly with the user that this is a READ-ONLY,
+// reporting-side fact only: Coverage Analysis uses it to correctly tally a
+// shift someone was deliberately, manually placed into (e.g. a B1 Station
+// I/C manually rostered onto a CM-short shift), but roster GENERATION
+// itself (rebalanceDay below) deliberately does NOT use this to
+// automatically move anyone across categories — same-day redistribution and
+// the off-day flexi fallback both stay strictly same-category. A
+// cross-category shortfall is left as an honestly-reported gap for a human
+// to resolve by hand, either by adding real headcount in that category or
+// by deliberately choosing to move someone's day off themselves — never a
+// decision the generator makes silently on its own.
 function creditedCategories(s) {
   return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
 }
@@ -362,12 +357,13 @@ function buildRosterAssignments({
     // here silently excluded every custom-coded staff member from both
     // sides of this calculation — undercounting real coverage and making
     // them permanently ineligible as donors.
-    // categoryEligible (not plain ===) so a dual-qualified staff member
-    // already working a matching shift counts toward BOTH their primary
-    // and secondary category's coverage, and can redistribute into either
-    // one's gap — a real B1/CM dual license holder on duty genuinely
-    // satisfies "a CM is present" AND "a B1 is present" simultaneously.
-    shifts.forEach(sh => { bucket[sh] = staff.filter(s => categoryEligible(s, category) && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
+    // Strictly same-category (s.category === category), deliberately NOT
+    // creditedCategories — generation never moves anyone across categories
+    // on its own, even a dual-qualified staff member genuinely eligible for
+    // this one too (see creditedCategories' own comment above). Coverage
+    // Analysis still credits a cross-category shift AFTER it happens, if a
+    // human deliberately places one; this pass just never creates one.
+    shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
 
     shifts.forEach(deficitShift => {
       const target = targets[deficitShift] || 0;
@@ -404,21 +400,22 @@ function buildRosterAssignments({
         // same eligibility/rest-gap/night-restriction checks a fresh
         // assignment would (eligibleBase, restGapOk) — "last resort" never
         // means "unsafe."
-        // categoryEligible here too — a secondary-qualified staff member's
-        // OFF day is a legitimate (if still last-resort) source for THIS
-        // category's gap, same as it already is for their primary one.
-        // `crossCategory` records when the candidate was pulled in on their
-        // secondary qualification rather than their primary, so this is
-        // never silently indistinguishable from an ordinary same-category
-        // fill — same transparency principle as the `mandatory` flag.
+        // Strictly same-category here too (never creditedCategories) — a
+        // dual-qualified staff member's day off is never auto-pulled for a
+        // DIFFERENT category's gap, confirmed directly with the user: that
+        // kind of cross-category pull is a deliberate human call (get real
+        // extra headcount, or manually move someone's day off yourself),
+        // never something the generator decides on its own. Only the
+        // ORIGINAL same-category case below still applies unconditionally
+        // for a mandatory floor.
         if (mandatory || allowPatternOverrideForCoverage) {
           const flexiCandidate = staff.find(s => (
-            categoryEligible(s, category) && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
+            s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
             && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
           ));
           if (flexiCandidate) {
             grid[flexiCandidate.id][day - 1] = deficitShift;
-            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory, crossCategory: flexiCandidate.category !== category });
+            flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory });
             bucket[deficitShift].push(flexiCandidate);
             continue;
           }
@@ -481,4 +478,4 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, categoryEligible, creditedCategories };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories };

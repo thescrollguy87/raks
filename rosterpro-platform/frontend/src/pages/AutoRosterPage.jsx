@@ -1162,15 +1162,6 @@ function countMandatoryFlexi(flexiAssignments) {
   return (flexiAssignments || []).filter(f => f.mandatory).length;
 }
 
-// How many flexi fills used a staff member's SECONDARY category
-// qualification rather than their primary one (e.g. a B1-licensed Station
-// I/C's own day off pulled to cover a CM gap they're also certified for) —
-// called out separately so this is never silently indistinguishable from an
-// ordinary same-category fill.
-function countCrossCategoryFlexi(flexiAssignments) {
-  return (flexiAssignments || []).filter(f => f.crossCategory).length;
-}
-
 const MANHOURS_CATEGORIES = ["B1", "B2", "CM", "NCS"];
 
 // Shared by the Generate preview and the post-Apply confirmation — both
@@ -1546,7 +1537,7 @@ function GenerateTab({ stationId }) {
               return (
                 <div className="card" style={{ borderColor: missing ? "var(--amber)" : "var(--rp-green)" }}>
                   <div className="card-title">{missing ? `⚠️ ${missing} Critical Coverage Gap(s) in Generated Roster (${preview.violations.length} shift/day combination(s))` : "✅ Generated Roster: Full Mandatory Coverage"}</div>
-                  <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{advisoryMissing ? ` · ${advisoryMissing} advisory gap(s) short (${preview.advisoryGaps.length} combination(s))` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(preview.flexiAssignments) ? ` (${countMandatoryFlexi(preview.flexiAssignments)} to meet a mandatory floor)` : ""}${countCrossCategoryFlexi(preview.flexiAssignments) ? ` incl. ${countCrossCategoryFlexi(preview.flexiAssignments)} via a secondary category qualification` : ""}` : ""}</div>
+                  <div style={{ fontSize: 11 }}>{preview.staffCount} staff · {preview.blockedCount} blocked · {preview.assignmentCount} shifts to assign{advisoryMissing ? ` · ${advisoryMissing} advisory gap(s) short (${preview.advisoryGaps.length} combination(s))` : ""}{preview.flexiAssignments?.length ? ` · ${preview.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(preview.flexiAssignments) ? ` (${countMandatoryFlexi(preview.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""}</div>
                 </div>
               );
             })()}
@@ -1574,7 +1565,7 @@ function GenerateTab({ stationId }) {
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
             <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}${countCrossCategoryFlexi(applied.flexiAssignments) ? ` incl. ${countCrossCategoryFlexi(applied.flexiAssignments)} via a secondary category qualification` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
         {applied && <ManhoursCard manhours={applied.manhours} title="Man-Hours — Available vs Expected (Saved Roster)" />}
