@@ -48,3 +48,8 @@ export function getManpowerPlan(stationId, monthKey, aogBuffer) {
 export function getCoverageAnalysis(stationId, monthKey) {
   return api.get("/api/roster/coverage-analysis", { stationId, monthKey });
 }
+
+// ─── Manhours Summary (Dashboard — expected vs. available man-hours) ────────
+export function getManhoursSummary(stationId, monthKey) {
+  return api.get("/api/roster/manhours-summary", { stationId, monthKey });
+}

@@ -9,7 +9,7 @@ const {
   upsertShiftSchema, bulkUpsertShiftSchema, publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
   createVersionSchema, compareVersionsQuerySchema,
   upsertShiftDefSchema, upsertShiftPatternSchema, patternQuerySchema, upsertAllocationSchema, upsertWorkloadItemSchema, manpowerPlanQuerySchema,
-  coverageAnalysisQuerySchema,
+  coverageAnalysisQuerySchema, manhoursSummaryQuerySchema,
 } = require("../validators/rosterValidators");
 
 // Memory storage — the file is parsed in-request (rosterImportService) and
@@ -49,6 +49,9 @@ router.get("/manpower-plan", requirePermission("roster", "read"), validateQuery(
 
 // ─── Coverage Analysis (Dashboard tab — already-generated roster vs. Mandatory Minimum Coverage) ─
 router.get("/coverage-analysis", requirePermission("roster", "read"), validateQuery(coverageAnalysisQuerySchema), requireOwnStation("query"), ctrl.coverageAnalysis);
+
+// ─── Manhours Summary (Auto Generate + Dashboard — expected vs. available man-hours) ─
+router.get("/manhours-summary", requirePermission("roster", "read"), validateQuery(manhoursSummaryQuerySchema), requireOwnStation("query"), ctrl.manhoursSummary);
 
 router.get("/", requirePermission("roster", "read"), validateQuery(rosterQuerySchema), requireOwnStation("query"), ctrl.getGrid);
 

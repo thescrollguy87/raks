@@ -193,6 +193,13 @@ const coverageAnalysis = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+// ─── Manhours Summary ─────────────────────────────────────────────────────────
+const manhoursSummary = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const result = await rosterAnalysisService.getManhoursSummary(stationId, monthKey);
+  res.json(result);
+});
+
 module.exports = {
   getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
   validateImport, downloadImportErrors, commitImport,
@@ -202,5 +209,5 @@ module.exports = {
   listPatterns, upsertPattern, deletePattern,
   listAllocations, upsertAllocation,
   listWorkloadItems, upsertWorkloadItem, deleteWorkloadItem,
-  manpowerPlan, coverageAnalysis,
+  manpowerPlan, coverageAnalysis, manhoursSummary,
 };

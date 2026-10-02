@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { getDashboardSummary, getStationsOverview } from "../api/dashboard.js";
+import { getManhoursSummary } from "../api/rosterPlanning.js";
 import { listActivity } from "../api/audit.js";
 import { listLeave } from "../api/leave.js";
 import { useStation } from "../store/StationContext.jsx";
@@ -9,6 +10,7 @@ import { useAuth } from "../store/AuthContext.jsx";
 
 const CAT_COLORS = { B1: "#3B82F6", B2: "#22D3EE", CM: "#A78BFA", NCS: "#34D399", STO: "#FBBF24" };
 const SHIFT_COLORS = { M: "#3B82F6", A: "#22C55E", N: "#8B5CF6", Others: "#94A3B8" };
+const MANHOURS_CATEGORIES = ["B1", "B2", "CM", "NCS"];
 
 function greeting() {
   const h = new Date().getHours();
@@ -25,6 +27,7 @@ export default function DashboardPage() {
   const [activity, setActivity] = useState(null);
   const [upcomingLeave, setUpcomingLeave] = useState(null);
   const [stationsOverview, setStationsOverview] = useState(null);
+  const [manhours, setManhours] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [detail, setDetail] = useState(null); // null | { title, rows: [{primary, secondary, tone}] }
@@ -60,17 +63,23 @@ export default function DashboardPage() {
     setLoading(true);
     const todayIso = new Date().toISOString().slice(0, 10);
     const weekAhead = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const currentMonthKey = new Date().toISOString().slice(0, 7);
     Promise.all([
       getDashboardSummary(stationId),
       listActivity({ pageSize: 8 }).catch(() => ({ items: [] })), // recent-changes feed is a nice-to-have; don't block the dashboard on it
       listLeave({ stationId, status: "APPROVED", from: todayIso, to: weekAhead, pageSize: 20 }).catch(() => null),
       getStationsOverview().catch(() => null), // airline-wide only; a station-scoped caller just gets their own one row
+      // Always recomputed fresh server-side off real ShiftAssignment rows, so
+      // a manual roster edit + republish is reflected on the very next load
+      // with no client-side caching to invalidate.
+      getManhoursSummary(stationId, currentMonthKey).catch(() => null),
     ])
-      .then(([d, a, leave, stationsOv]) => {
+      .then(([d, a, leave, stationsOv, mh]) => {
         if (cancelled) return;
         setData(d); setActivity(a.items || a);
         setUpcomingLeave(leave?.items || null);
         setStationsOverview(stationsOv?.stations || null);
+        setManhours(mh);
       })
       .catch(err => { if (!cancelled) setError(err.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -232,6 +241,13 @@ export default function DashboardPage() {
 
         <RosterStatusWidget rosterCoverage={rosterCoverage} station={currentStation} onOpenRoster={() => navigate("/roster")} onOpenAlerts={openAlerts} />
       </div>
+
+      {/* Man-Hours Available vs Expected (this month's roster) */}
+      {manhours && (
+        <div style={{ marginBottom: 14 }}>
+          <ManhoursWidget manhours={manhours} />
+        </div>
+      )}
 
       {/* Staff Workload trend + Quick Actions */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
@@ -534,4 +550,48 @@ function RosterStatusWidget({ rosterCoverage, station, onOpenRoster, onOpenAlert
 
 function fmtDateTime(iso) {
   return iso ? new Date(iso).toLocaleString(undefined, { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—";
+}
+
+// Expected demand always comes from the live workload config; "available"
+// only exists once a roster has been generated for the month, and is summed
+// fresh from the real ShiftAssignment rows every time this loads — so a
+// manual roster edit followed by republish shows up here with no extra step.
+function ManhoursWidget({ manhours }) {
+  if (!manhours.generated) {
+    return (
+      <div className="card">
+        <div className="card-title">⏱ Man-Hours — {manhours.monthKey}</div>
+        <div className="empty-note">{manhours.message}</div>
+      </div>
+    );
+  }
+  const { total, byCategory } = manhours;
+  const pct = total.expected > 0 ? Math.round((total.available / total.expected) * 100) : null;
+  return (
+    <div className="card">
+      <div className="card-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>⏱ Man-Hours — {manhours.monthKey}</span>
+        {!manhours.isPublished && <span className="metric-badge amber">Draft</span>}
+      </div>
+      <div style={{ fontSize: 11, margin: "4px 0 10px" }}>
+        Available: <strong>{total.available.toFixed(1)}h</strong> · Expected: <strong>{total.expected.toFixed(1)}h</strong>
+        {pct !== null && <> · <strong style={{ color: pct < 100 ? "var(--amber)" : "var(--rp-green)" }}>{pct}%</strong> of expected demand</>}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        {MANHOURS_CATEGORIES.map(cat => {
+          const c = byCategory[cat];
+          return (
+            <div key={cat} className="cov-row" style={{ flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+              <span className={`tag cat-${cat}`}>{cat}</span>
+              <div style={{ fontSize: 13, fontWeight: 800 }}>{c.available.toFixed(1)}h <span style={{ fontSize: 10, fontWeight: 500, color: "var(--text-dim)" }}>/ {c.expected.toFixed(1)}h</span></div>
+              <div className="cov-row-track" style={{ width: "100%" }}>
+                <div className="cov-row-fill" style={{ width: `${Math.min(100, c.utilizationPct ?? 0)}%`, background: c.utilizationPct !== null && c.utilizationPct < 100 ? "var(--amber)" : "var(--rp-green)" }} />
+              </div>
+              <span style={{ fontSize: 9, color: "var(--text-dim)" }}>{c.utilizationPct === null ? "No demand" : `${c.utilizationPct}% utilized`}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }

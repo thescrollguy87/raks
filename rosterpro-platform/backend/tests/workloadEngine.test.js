@@ -1,7 +1,7 @@
 const {
   findPeakConcurrency, computeDailyShiftDemand, computeTaskMasterDemand,
   computeExplainableManpower, computeUnplannedWorkload, computeAveragePeakByShift,
-  buildPDCWorkloadEvents, buildTransitWorkloadEvents, computeDailyPeaks,
+  buildPDCWorkloadEvents, buildTransitWorkloadEvents, computeDailyPeaks, computeExpectedManhours,
 } = require("../src/utils/workloadEngine");
 const { decodeDaysOfWeek } = require("../src/utils/flightScheduleParser");
 
@@ -496,5 +496,27 @@ describe("computeDailyPeaks — day bucketing stays correct regardless of server
     const peaks = computeDailyPeaks(events);
     expect(peaks.perDay.map(d => d.date)).toEqual(["2026-09-20"]);
     expect(peaks.monthPeakDay.date).toBe("2026-09-20");
+  });
+});
+
+describe("computeExpectedManhours — advisoryDemand headcount converted to real man-hours", () => {
+  it("multiplies each shift's headcount target by that shift's real duration and sums per category", () => {
+    const advisoryDemand = {
+      1: { M: { B1: 1, B2: 0, CM: 2, NCS: 3 }, A: { B1: 1, B2: 0, CM: 0, NCS: 1 }, N: { B1: 0, B2: 1, CM: 2, NCS: 4 } },
+      2: { M: { B1: 1, B2: 0, CM: 0, NCS: 3 }, A: { B1: 0, B2: 0, CM: 0, NCS: 0 }, N: { B1: 0, B2: 1, CM: 2, NCS: 4 } },
+    };
+    const shiftHoursByFamily = { M: 8, A: 8, N: 10 }; // Night deliberately longer, to prove it's not a flat 8h assumption
+    const result = computeExpectedManhours(advisoryDemand, 2, shiftHoursByFamily);
+    // CM: day1 (M:2*8=16, N:2*10=20) + day2 (N:2*10=20) = 56
+    expect(result.byCategory.CM).toBe(56);
+    // NCS: day1 (M:3*8=24, A:1*8=8, N:4*10=40) + day2 (M:3*8=24, N:4*10=40) = 136
+    expect(result.byCategory.NCS).toBe(136);
+    expect(result.total).toBe(result.byCategory.B1 + result.byCategory.B2 + result.byCategory.CM + result.byCategory.NCS);
+  });
+
+  it("returns all zeros for a month with no demand at all", () => {
+    const result = computeExpectedManhours({}, 5, { M: 8, A: 8, N: 10 });
+    expect(result.total).toBe(0);
+    expect(result.byCategory).toEqual({ B1: 0, B2: 0, CM: 0, NCS: 0 });
   });
 });

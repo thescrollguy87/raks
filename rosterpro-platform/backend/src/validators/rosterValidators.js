@@ -137,6 +137,11 @@ const coverageAnalysisQuerySchema = z.object({
   monthKey: monthKey,
 });
 
+const manhoursSummaryQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey: monthKey,
+});
+
 module.exports = {
   createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
   publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
@@ -144,5 +149,5 @@ module.exports = {
   upsertShiftDefSchema,
   upsertShiftPatternSchema, patternQuerySchema,
   upsertAllocationSchema,
-  upsertWorkloadItemSchema, manpowerPlanQuerySchema, coverageAnalysisQuerySchema,
+  upsertWorkloadItemSchema, manpowerPlanQuerySchema, coverageAnalysisQuerySchema, manhoursSummaryQuerySchema,
 };

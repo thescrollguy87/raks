@@ -1162,6 +1162,50 @@ function countMandatoryFlexi(flexiAssignments) {
   return (flexiAssignments || []).filter(f => f.mandatory).length;
 }
 
+const MANHOURS_CATEGORIES = ["B1", "B2", "CM", "NCS"];
+
+// Shared by the Generate preview and the post-Apply confirmation — both
+// return the same { expected, available } man-hours shape off the
+// generateRoster response, always freshly computed server-side so a later
+// manual edit + republish is reflected without any client-side caching.
+function ManhoursCard({ manhours, title }) {
+  if (!manhours) return null;
+  const { expected, available } = manhours;
+  const pct = expected.total > 0 ? Math.round((available.total / expected.total) * 100) : null;
+  return (
+    <div className="card">
+      <div className="card-title">⏱ {title}</div>
+      <div style={{ fontSize: 11, marginBottom: 6 }}>
+        Available: <strong>{available.total.toFixed(1)}h</strong> · Expected: <strong>{expected.total.toFixed(1)}h</strong>
+        {pct !== null && <> · <strong style={{ color: pct < 100 ? "var(--amber)" : "var(--rp-green)" }}>{pct}%</strong> of expected demand</>}
+      </div>
+      <table style={{ width: "100%", fontSize: 10 }}>
+        <thead><tr>
+          <th style={{ textAlign: "left", padding: "3px 5px", background: "var(--navy-lite)" }}>Cat</th>
+          <th style={{ padding: "3px 5px", background: "var(--navy-lite)" }}>Available</th>
+          <th style={{ padding: "3px 5px", background: "var(--navy-lite)" }}>Expected</th>
+          <th style={{ padding: "3px 5px", background: "var(--navy-lite)" }}>%</th>
+        </tr></thead>
+        <tbody>
+          {MANHOURS_CATEGORIES.map(cat => {
+            const a = available.byCategory[cat] ?? 0;
+            const e = expected.byCategory[cat] ?? 0;
+            const catPct = e > 0 ? Math.round((a / e) * 100) : null;
+            return (
+              <tr key={cat}>
+                <td style={{ padding: "3px 5px", fontWeight: 700 }}>{cat}</td>
+                <td style={{ textAlign: "center", padding: "3px 5px" }}>{a.toFixed(1)}h</td>
+                <td style={{ textAlign: "center", padding: "3px 5px" }}>{e.toFixed(1)}h</td>
+                <td style={{ textAlign: "center", padding: "3px 5px", color: catPct !== null && catPct < 100 ? "var(--amber)" : "var(--rp-green)" }}>{catPct === null ? "—" : `${catPct}%`}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function GenerateTab({ stationId }) {
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   // "off": flat auto-distributed rotation only. "strict": follow Staff
@@ -1498,6 +1542,8 @@ function GenerateTab({ stationId }) {
               );
             })()}
 
+            <ManhoursCard manhours={preview?.manhours} title="Man-Hours — Available vs Expected (Preview)" />
+
             {preview?.analysis?.softRuleScore?.overallScore !== null && preview?.analysis && (
               <div className="card">
                 <div className="card-title">⚖ Soft Rule Optimization Score</div>
@@ -1522,6 +1568,7 @@ function GenerateTab({ stationId }) {
             <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
+        {applied && <ManhoursCard manhours={applied.manhours} title="Man-Hours — Available vs Expected (Saved Roster)" />}
       </div>
       <div>
         <div className="card">

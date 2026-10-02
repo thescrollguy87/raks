@@ -15,10 +15,11 @@ const {
   computeDailyShiftDemand, computeTaskMasterDemand, computeUnplannedWorkload,
   computeExplainableManpower, getManualDemandByDayShift, computeAveragePeakByShift,
   buildTransitWorkloadEvents, buildPDCWorkloadEvents, buildClashEvents,
-  computeDailyPeaks, computeAutomaticClashes,
+  computeDailyPeaks, computeAutomaticClashes, computeExpectedManhours,
 } = require("../utils/workloadEngine");
 const { checkHardRuleCompliance, computeSoftRuleScore } = require("../utils/ruleEngine");
 const { resolveAirlineId } = require("../utils/stationScope");
+const { shiftNetHours } = require("../utils/shiftHours");
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -341,6 +342,20 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     manualAdditionalDemand.NCS += (+m.reqNCS || 0);
   });
 
+  // Expected man-hours — the same real demand (advisoryDemand) that drives
+  // generation, expressed in HOURS instead of headcount, so it's directly
+  // comparable to a real roster's actual scheduled duty hours. Duration per
+  // shift family comes straight from the station's own M/A/N Shift
+  // Definition rows (not a flat assumed 8h), including the real breakMin
+  // and the same midnight-wrap handling every other net-hours calculation
+  // in this app uses.
+  const shiftHoursByFamily = {};
+  ["M", "A", "N"].forEach(sh => {
+    const def = allShiftDefs.find(d => d.code === sh);
+    shiftHoursByFamily[sh] = def ? shiftNetHours(def) : 0;
+  });
+  const expectedManhours = computeExpectedManhours(advisoryDemand, nDays, shiftHoursByFamily);
+
   return {
     mandatoryCoverageConfig, nightRestrictionRules, allRules: rules,
     staffGroupMembersByGroupId, staffGroupNameById,
@@ -348,6 +363,7 @@ async function buildWorkloadContext(stationId, monthKey, mandatoryCoverageConfig
     explainableManpower, plannedDemand, unplannedDemand, flightSummary, averagePeakByShift,
     automaticClashes, transitOccurrences, pdcOccurrences, peakSimultaneousTransit, peakSimultaneousTransitDate,
     manualAdditionalDemand, config, ruleShiftDefsByCode, aogPerShift, flightScheduleFallback,
+    expectedManhours, shiftHoursByFamily,
   };
 }
 
@@ -449,6 +465,32 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     manpowerByShift[a.code][cat] = (manpowerByShift[a.code][cat] || 0) + 1;
   }
 
+  // Available man-hours — real duty hours this JUST-GENERATED schedule
+  // actually puts on the roster, per category, directly comparable to
+  // workloadContext.expectedManhours (the same month's real demand in
+  // hours). Only "duty"/"night" type codes count — an O/L/G-type code
+  // never contributes real coverage hours even if it happens to carry
+  // leftover start/end times on its own Shift Definition row. B1/B2/CM/NCS
+  // only, matching expectedManhours — STO sits outside this app's whole
+  // mandatory-coverage/workload-demand system, so there's no "expected"
+  // figure to compare an STO total against.
+  const shiftDefRowByCode = Object.fromEntries(shiftDefs.map(d => [d.code, d]));
+  const AVAILABLE_CATS = ["B1", "B2", "CM", "NCS"];
+  const availableManhours = { total: 0, byCategory: { B1: 0, B2: 0, CM: 0, NCS: 0 } };
+  for (const a of assignments) {
+    const def = shiftDefRowByCode[a.code];
+    if (!def || (def.type !== "duty" && def.type !== "night")) continue;
+    const cat = staff.find(s => s.id === a.userId)?.category;
+    if (!AVAILABLE_CATS.includes(cat)) continue;
+    const hrs = shiftNetHours(def);
+    availableManhours.byCategory[cat] += hrs;
+    availableManhours.total += hrs;
+  }
+  const round1 = n => Math.round(n * 10) / 10;
+  availableManhours.total = round1(availableManhours.total);
+  AVAILABLE_CATS.forEach(cat => { availableManhours.byCategory[cat] = round1(availableManhours.byCategory[cat]); });
+  const manhours = { expected: workloadContext.expectedManhours, available: availableManhours };
+
   // Explainable Workload Analysis + Soft Rule Optimization Score panels —
   // read-only analysis of the just-computed plan, shown on the Generate tab
   // whether or not it's actually persisted yet.
@@ -499,7 +541,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   if (preview) {
     return {
       preview: true, staffCount: staff.length, blockedCount: blockedUserIds.length,
-      assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis,
+      assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
       existingRosterExists: !!existingRoster,
     };
   }
@@ -533,7 +575,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
 
   return {
     roster, staffCount: staff.length, blockedCount: blockedUserIds.length,
-    assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis,
+    assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
   };
 }
 

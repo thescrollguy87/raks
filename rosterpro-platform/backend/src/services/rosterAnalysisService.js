@@ -8,8 +8,13 @@
 // structural headcount shortage no amount of rescheduling can fix.
 const rosterRepo = require("../repositories/rosterRepository");
 const leaveRepo = require("../repositories/leaveRepository");
+const stationRepo = require("../repositories/stationRepository");
 const workloadConfigService = require("./workloadConfigService");
+const ApiError = require("../utils/ApiError");
 const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
+const { shiftNetHours } = require("../utils/shiftHours");
+
+const MANHOURS_CATEGORIES = ["B1", "B2", "CM", "NCS"];
 
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
@@ -140,4 +145,70 @@ async function getCoverageAnalysis(stationId, monthKey) {
   };
 }
 
-module.exports = { getCoverageAnalysis };
+// Manhours Available vs Expected — shown on the Dashboard once a roster has
+// been generated/published, and during Auto Generate's preview step (that
+// path computes "available" from the in-memory just-generated assignments
+// directly, via generateRoster's own `manhours` field — see
+// rosterGenerationService.js). This function is the DASHBOARD side: it
+// recomputes BOTH sides fresh on every call, straight from whatever the
+// roster and workload config currently are, so a manual edit + republish
+// (or a Workload Config change) is reflected the moment this is read again
+// — nothing here is cached at generation time.
+//
+// "Expected" = the real demand (flight-schedule concurrency, Task Master,
+// Mandatory Minimum floor, manual demand, buffer — the same
+// computeDailyShiftDemand result generation itself uses) converted to
+// hours. "Available" = actual net duty hours from the roster's real
+// ShiftAssignment rows, including any per-day in1/out1/in2/out2 override a
+// manual edit may have set — unlike the Auto Generate preview path (which
+// has no such overrides to apply yet, since nothing's been hand-edited).
+async function getManhoursSummary(stationId, monthKey) {
+  const rosterGenerationService = require("./rosterGenerationService"); // lazy require — avoids a load-order cycle, same pattern rosterPlanningService.js already uses
+  const station = await stationRepo.findStationAirlineId(stationId);
+  if (!station) throw ApiError.notFound("Station not found");
+
+  const [roster, workloadContext] = await Promise.all([
+    rosterRepo.findRosterByStationAndMonth(stationId, monthKey),
+    rosterGenerationService.buildWorkloadContext(stationId, monthKey, undefined, 0, station.airlineId),
+  ]);
+  const expected = workloadContext.expectedManhours;
+
+  if (!roster) {
+    return {
+      stationId, monthKey, generated: false,
+      message: `No roster has been generated yet for ${monthKey} — expected man-hours are shown from the current workload configuration; available man-hours will appear once a roster exists.`,
+      expected, available: null,
+    };
+  }
+
+  const staff = await rosterRepo.getRosterGrid(stationId, roster.id);
+  const available = { total: 0, byCategory: { B1: 0, B2: 0, CM: 0, NCS: 0 } };
+  staff.forEach(s => {
+    if (!MANHOURS_CATEGORIES.includes(s.category)) return;
+    s.shiftAssignments.forEach(sa => {
+      const def = sa.shiftDef;
+      if (!def || (def.type !== "duty" && def.type !== "night")) return;
+      const hrs = shiftNetHours(def, sa);
+      available.byCategory[s.category] += hrs;
+      available.total += hrs;
+    });
+  });
+  const round1 = n => Math.round(n * 10) / 10;
+  available.total = round1(available.total);
+  MANHOURS_CATEGORIES.forEach(cat => { available.byCategory[cat] = round1(available.byCategory[cat]); });
+
+  const byCategory = {};
+  MANHOURS_CATEGORIES.forEach(cat => {
+    const exp = expected.byCategory[cat] || 0;
+    const avail = available.byCategory[cat] || 0;
+    byCategory[cat] = { expected: exp, available: avail, utilizationPct: exp > 0 ? Math.round((avail / exp) * 100) : null };
+  });
+
+  return {
+    stationId, monthKey, generated: true, isPublished: roster.isPublished,
+    total: { expected: expected.total, available: available.total },
+    byCategory,
+  };
+}
+
+module.exports = { getCoverageAnalysis, getManhoursSummary };

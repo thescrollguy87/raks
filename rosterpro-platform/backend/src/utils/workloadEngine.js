@@ -661,10 +661,44 @@ function computeAveragePeakByShift(demand, daysInMonth) {
   return result;
 }
 
+// Converts advisoryDemand's per-day/per-shift/per-category HEADCOUNT target
+// into total EXPECTED MAN-HOURS for the month — the real workload demand
+// (flight-schedule concurrency, Task Master, Mandatory Minimum floor,
+// manual demand, buffer — whichever already won inside computeDailyShiftDemand)
+// expressed in hours instead of headcount, so it's directly comparable to
+// actual scheduled duty hours from a real roster. shiftHoursByFamily is the
+// caller-computed duration (in hours) of a full M/A/N shift at this station
+// — e.g. {M: 7.5, A: 8, N: 9.5} — derived once from the real Shift
+// Definition rows, same wrap-at-midnight handling utils/shiftHours.js uses.
+function computeExpectedManhours(advisoryDemand, nDays, shiftHoursByFamily) {
+  const CATS = ["B1", "B2", "CM", "NCS"];
+  const byCategory = { B1: 0, B2: 0, CM: 0, NCS: 0 };
+  let total = 0;
+  for (let d = 1; d <= nDays; d++) {
+    const day = advisoryDemand[d];
+    if (!day) continue;
+    ["M", "A", "N"].forEach(sh => {
+      const hrs = shiftHoursByFamily[sh] || 0;
+      if (!hrs) return;
+      const shiftDemand = day[sh];
+      if (!shiftDemand) return;
+      CATS.forEach(cat => {
+        const manhours = (shiftDemand[cat] || 0) * hrs;
+        byCategory[cat] += manhours;
+        total += manhours;
+      });
+    });
+  }
+  const round1 = n => Math.round(n * 10) / 10;
+  Object.keys(byCategory).forEach(cat => { byCategory[cat] = round1(byCategory[cat]); });
+  return { total: round1(total), byCategory };
+}
+
 module.exports = {
   findPeakConcurrency, dateAndMinutesToAbsMin, getEffectiveGroundTime,
   buildTransitWorkloadEvents, buildPDCWorkloadEvents, buildClashEvents,
   computeDailyPeaks, computeAutomaticClashes, classifyTimeToShift,
   getManualDemandByDayShift, computeDailyShiftDemand, computeTaskMasterDemand,
   computeUnplannedWorkload, computeExplainableManpower, computeAveragePeakByShift,
+  computeExpectedManhours,
 };
