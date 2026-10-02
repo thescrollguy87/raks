@@ -43,6 +43,11 @@ const REPORT_TYPES = {
     fetch: (p) => reportData.getAttendanceRegisterData(p.stationId, p.monthKey),
     filename: (p) => `attendance_register_${p.monthKey}`,
   },
+  "coverage-analysis": {
+    title: (p) => `Coverage Analysis — ${p.monthKey}`,
+    fetch: (p) => reportData.getCoverageAnalysisReportData(p.stationId, p.monthKey),
+    filename: (p) => `coverage_analysis_${p.monthKey}`,
+  },
 };
 
 const CONTENT_TYPES = {

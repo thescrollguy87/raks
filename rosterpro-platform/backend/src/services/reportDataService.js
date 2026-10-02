@@ -324,7 +324,34 @@ async function getAttendanceRegisterData(stationId, monthKey) {
   return { header, rows, meta: { stationId, monthKey, staffCount: staffWithShifts.length, title: `ATTENDANCE REGISTER — ${monthKey}` } };
 }
 
+// Flattens rosterAnalysisService's per-category/shift coverage rows (plus
+// headcount and notes) into the generic {header, rows} table the Excel/CSV
+// renderers already know how to draw — same source of truth the Dashboard's
+// Coverage Analysis tab reads, so the download never disagrees with the
+// screen.
+async function getCoverageAnalysisReportData(stationId, monthKey) {
+  const { getCoverageAnalysis } = require("./rosterAnalysisService");
+  const analysis = await getCoverageAnalysis(stationId, monthKey);
+  if (!analysis.generated) throw ApiError.notFound(analysis.message);
+
+  const header = ["Category", "Shift", "Floor", "Min", "Max", "Avg", "Gap Days", "Suggestion"];
+  const rows = analysis.rows.map(r => [r.category, r.shift, r.floor, r.min, r.max, r.avg, r.gapDaysCount, r.suggestion || "—"]);
+
+  rows.push([]);
+  rows.push(["Headcount by category"]);
+  Object.entries(analysis.headcountByCategory).forEach(([cat, h]) => {
+    rows.push([cat, `Total ${h.total}`, `Active ${h.activeEffective}`, h.fullMonthLeave.length ? `On leave all month: ${h.fullMonthLeave.join(", ")}` : ""]);
+  });
+  if (analysis.notes.length) {
+    rows.push([]);
+    rows.push(["Notes"]);
+    analysis.notes.forEach(n => rows.push([n]));
+  }
+
+  return { header, rows, meta: { stationId, monthKey, title: `Coverage Analysis — ${monthKey}` } };
+}
+
 module.exports = {
   daysInMonth, dateLabel, getRosterReportData, getRosterTemplateData, getRosterPdfData, getComplianceReportData, getLeaveReportData,
-  getAttendanceRegisterData,
+  getAttendanceRegisterData, getCoverageAnalysisReportData,
 };

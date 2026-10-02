@@ -43,3 +43,8 @@ export function deleteWorkloadItem(id) {
 export function getManpowerPlan(stationId, monthKey, aogBuffer) {
   return api.get("/api/roster/manpower-plan", { stationId, monthKey, aogBuffer });
 }
+
+// ─── Coverage Analysis (Dashboard tab — already-generated roster vs. floors) ─
+export function getCoverageAnalysis(stationId, monthKey) {
+  return api.get("/api/roster/coverage-analysis", { stationId, monthKey });
+}

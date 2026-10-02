@@ -132,6 +132,11 @@ const manpowerPlanQuerySchema = z.object({
   aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
 });
 
+const coverageAnalysisQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey: monthKey,
+});
+
 module.exports = {
   createRosterSchema, upsertShiftSchema, bulkUpsertShiftSchema,
   publishRosterSchema, unpublishRosterSchema, rosterQuerySchema, generateRosterSchema, archiveQuerySchema,
@@ -139,5 +144,5 @@ module.exports = {
   upsertShiftDefSchema,
   upsertShiftPatternSchema, patternQuerySchema,
   upsertAllocationSchema,
-  upsertWorkloadItemSchema, manpowerPlanQuerySchema,
+  upsertWorkloadItemSchema, manpowerPlanQuerySchema, coverageAnalysisQuerySchema,
 };

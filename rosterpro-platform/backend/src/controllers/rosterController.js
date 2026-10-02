@@ -5,6 +5,7 @@ const rosterImportValidationService = require("../services/rosterImportValidatio
 const rosterVersionService = require("../services/rosterVersionService");
 const shiftDefinitionService = require("../services/shiftDefinitionService");
 const rosterPlanningService = require("../services/rosterPlanningService");
+const rosterAnalysisService = require("../services/rosterAnalysisService");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
 
@@ -185,6 +186,13 @@ const manpowerPlan = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+// ─── Coverage Analysis ────────────────────────────────────────────────────────
+const coverageAnalysis = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const result = await rosterAnalysisService.getCoverageAnalysis(stationId, monthKey);
+  res.json(result);
+});
+
 module.exports = {
   getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
   validateImport, downloadImportErrors, commitImport,
@@ -194,5 +202,5 @@ module.exports = {
   listPatterns, upsertPattern, deletePattern,
   listAllocations, upsertAllocation,
   listWorkloadItems, upsertWorkloadItem, deleteWorkloadItem,
-  manpowerPlan,
+  manpowerPlan, coverageAnalysis,
 };

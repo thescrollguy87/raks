@@ -15,6 +15,7 @@ import ChangeHistoryPage from "./pages/ChangeHistoryPage.jsx";
 import FlightsPage from "./pages/FlightsPage.jsx";
 import FlightSchedulePage from "./pages/FlightSchedulePage.jsx";
 import CoveragePage from "./pages/CoveragePage.jsx";
+import CoverageAnalysisPage from "./pages/CoverageAnalysisPage.jsx";
 import PastRostersPage from "./pages/PastRostersPage.jsx";
 import ComplianceRulesPage from "./pages/ComplianceRulesPage.jsx";
 import ImportExportPage from "./pages/ImportExportPage.jsx";
@@ -75,6 +76,10 @@ export default function App() {
         <Route
           path="/coverage"
           element={<ProtectedRoute permission={["roster", "read"]}><CoveragePage /></ProtectedRoute>}
+        />
+        <Route
+          path="/coverage-analysis"
+          element={<ProtectedRoute permission={["roster", "read"]}><CoverageAnalysisPage /></ProtectedRoute>}
         />
         <Route
           path="/past-rosters"

@@ -14,6 +14,7 @@ const NAV_SECTIONS = [
     { to: "/roster", icon: "📅", label: "Shift Roster" },
     { to: "/auto-roster", icon: "🤖", label: "Auto Generator", permission: ["roster", "update"] },
     { to: "/coverage", icon: "📈", label: "Daily Coverage", permission: ["roster", "read"] },
+    { to: "/coverage-analysis", icon: "🧮", label: "Coverage Analysis", permission: ["roster", "read"] },
   ]},
   { label: "Operations", items: [
     { to: "/flight-schedule", icon: "🛫", label: "Flight Schedule", permission: ["roster", "update"] },
