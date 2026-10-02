@@ -11,7 +11,7 @@ const leaveRepo = require("../repositories/leaveRepository");
 const stationRepo = require("../repositories/stationRepository");
 const workloadConfigService = require("./workloadConfigService");
 const ApiError = require("../utils/ApiError");
-const { shiftFamily } = require("../utils/rosterGenerationAlgorithm");
+const { shiftFamily, creditedCategories } = require("../utils/rosterGenerationAlgorithm");
 const { shiftNetHours } = require("../utils/shiftHours");
 
 const MANHOURS_CATEGORIES = ["B1", "B2", "CM", "NCS"];
@@ -68,13 +68,12 @@ async function getCoverageAnalysis(stationId, monthKey) {
       if (!fam) continue;
       // Credit this shift toward EVERY category the staff member is
       // qualified for that this floor system tracks — their primary
-      // category, plus any secondaryCategories a station has flagged them
-      // for (e.g. a B1-licensed Station I/C who's also CM-certified,
-      // genuinely covering a CM gap). A real dual-qualified person on duty
-      // satisfies both floors at once; STO and anyone with no category sit
-      // outside the mandatory-coverage system entirely either way.
-      const creditedCategories = [s.category, ...(s.secondaryCategories || [])].filter(c => CATEGORIES.includes(c));
-      new Set(creditedCategories).forEach(c => {
+      // category, any license-hierarchy-implied category (every B1 also
+      // covers CM), plus any secondaryCategories a station has flagged them
+      // for individually. A real dual-qualified person on duty satisfies
+      // both floors at once; STO and anyone with no category sit outside
+      // the mandatory-coverage system entirely either way.
+      creditedCategories(s).filter(c => CATEGORIES.includes(c)).forEach(c => {
         const k = key(d, c, fam);
         coverage[k] = (coverage[k] || 0) + 1;
       });

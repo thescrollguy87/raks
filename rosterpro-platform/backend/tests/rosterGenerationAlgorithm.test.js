@@ -198,6 +198,36 @@ describe("buildRosterAssignments — full rest-gap rule set (ported from referen
   });
 });
 
+describe("buildRosterAssignments — B1 license hierarchy (every B1 is also CM-qualified)", () => {
+  it("credits a plain B1 staff member's shift toward CM coverage with NO secondaryCategories flag at all", () => {
+    const staff = [{ id: "s0", category: "B1" }]; // no secondaryCategories field whatsoever
+    const mandatoryCoverageConfig = {
+      B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
+      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
+    };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
+    expect(result.violations).toHaveLength(0); // both B1 Morning and CM Morning floors are met by this one person
+  });
+
+  it("pulls a plain B1 staff member's own OFF day as a last resort to cover a CM-only gap, with no CM staff and no secondaryCategories flag", () => {
+    const staff = [{ id: "s0", category: "B1" }];
+    const mandatoryCoverageConfig = {
+      B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } },
+      CM: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } },
+    };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 6 });
+    expect(result.violations).toHaveLength(0);
+    expect(result.flexiAssignments[0]).toMatchObject({ userId: "s0", category: "CM", crossCategory: true });
+  });
+
+  it("does NOT extend the hierarchy the other way — a plain CM staff member is never credited toward B1 coverage", () => {
+    const staff = [{ id: "s0", category: "CM" }];
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({ staff, nDays: 1, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig, absoluteDayAnchor: 0 });
+    expect(result.violations.some(v => v.category === "B1")).toBe(true); // genuinely unmet, not silently satisfied by the CM person
+  });
+});
+
 describe("buildRosterAssignments — secondary category qualifications (dual-licensed staff)", () => {
   it("counts a dual-qualified staff member's existing shift toward BOTH their primary and secondary category's coverage at once", () => {
     // A single B1 person who also holds a CM qualification, on Morning —

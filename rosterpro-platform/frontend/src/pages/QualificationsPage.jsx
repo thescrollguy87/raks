@@ -16,6 +16,11 @@ const STATUS_STYLE = {
 };
 const STATUS_DOT = { VALID: "var(--rp-green)", EXPIRING: "var(--amber)", EXPIRED: "var(--rp-red)" };
 const CATEGORIES = ["B1", "B2", "CM", "NCS"];
+// A real licensing hierarchy, not a per-station flag — every B1 is also
+// CM-qualified by the nature of the B1 license itself, so there's nothing
+// to check for that pairing (mirrors CATEGORY_HIERARCHY in
+// rosterGenerationAlgorithm.js on the backend).
+const CATEGORY_HIERARCHY = { B1: ["CM"] };
 
 // Which permission (resource, action) gates editing/deleting each record
 // type — authorizations reuse the "qualification" permission namespace,
@@ -324,9 +329,12 @@ export default function QualificationsPage() {
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>🏷 Secondary Category Qualification(s)</div>
                 <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>
                   Also genuinely qualified for — a shift they work counts toward this category's Mandatory Minimum Coverage too, not just {selectedStaff.category || "their primary category"}.
+                  {CATEGORY_HIERARCHY[selectedStaff.category]?.length > 0 && (
+                    <> Every {selectedStaff.category} is automatically {CATEGORY_HIERARCHY[selectedStaff.category].join("/")}-qualified by license — nothing to check for that.</>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  {CATEGORIES.filter(c => c !== selectedStaff.category).map(cat => (
+                  {CATEGORIES.filter(c => c !== selectedStaff.category && !CATEGORY_HIERARCHY[selectedStaff.category]?.includes(c)).map(cat => (
                     <label key={cat} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, cursor: "pointer" }}>
                       <input
                         type="checkbox" disabled={secondaryCatBusy}

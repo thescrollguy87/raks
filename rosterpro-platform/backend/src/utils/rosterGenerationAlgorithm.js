@@ -150,15 +150,36 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 // `codes` at all — callers fall back to the day-anchor formula in that
 // case, so this is a pure improvement, never a regression, wherever it
 // can't confidently resync.
+// A real licensing hierarchy, not a per-station opt-in: every B1 engineer
+// is, by the nature of the B1 license itself, also qualified to perform CM
+// (Certifying Mechanic) work — confirmed directly with the user. Unlike
+// `secondaryCategories` (a per-staff-member flag for a qualification that
+// varies person to person, e.g. a specific Station I/C also holding CM
+// certification on top of some OTHER primary category), this applies to
+// every B1 staff member automatically, present and future, with nothing to
+// flag per person. Keyed by primary category -> categories it also covers.
+const CATEGORY_HIERARCHY = { B1: ["CM"] };
+
 // Whether `s` counts toward `category`'s Mandatory Minimum Coverage —
-// either it's their primary category, or `category` is one they hold a
-// genuine secondary qualification for (e.g. a B1-licensed Station I/C who's
-// also CM-certified). `s.secondaryCategories` defaults to an empty array for
-// anyone a station hasn't explicitly flagged as dual-qualified, so this is
-// identical to the old plain `===` check for everyone else — zero behavior
-// change unless a station opts a specific staff member in.
+// their primary category, a category their license hierarchy implies
+// (CATEGORY_HIERARCHY), or one they hold a genuine secondary qualification
+// for via `secondaryCategories` (e.g. a CM-licensed Senior Tech who's also
+// separately NCS-qualified — a person-specific fact the hierarchy can't
+// express). `secondaryCategories` defaults to an empty array for anyone not
+// explicitly flagged, so this is identical to the old plain `===` check
+// (plus the hierarchy) for everyone else.
 function categoryEligible(s, category) {
-  return s.category === category || (s.secondaryCategories || []).includes(category);
+  return s.category === category
+    || (CATEGORY_HIERARCHY[s.category] || []).includes(category)
+    || (s.secondaryCategories || []).includes(category);
+}
+
+// Every category a staff member's shift should be credited toward —
+// primary, hierarchy-implied, and explicit secondary — deduped. Used where
+// a caller needs the full set (e.g. Coverage Analysis's per-day tally)
+// rather than testing one category at a time.
+function creditedCategories(s) {
+  return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
 }
 
 function resyncCycleStart(codes, tail) {
@@ -460,4 +481,4 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, categoryEligible, creditedCategories };
