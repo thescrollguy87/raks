@@ -127,6 +127,40 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
   return false;
 }
 
+// "Continue from Previous Roster" promises (per its own UI tooltip) that a
+// staff member's rotation picks up from how their previous month REALLY
+// ended, not a fresh start. Before this, that promise only covered the
+// rest-gap look-back (suppressing an immediately-illegal sequence) — the
+// day-1 PROPOSED code itself still came purely from absoluteDayAnchor's
+// days-since-epoch arithmetic, which assumes an unbroken mathematical cycle
+// since a fixed reference point. Real operational adjustments mid-month
+// (leave, a mandatory-coverage flexi pull, same-day redistribution, a hand
+// edit) can leave a staff member's TRUE position in their own cycle out of
+// step with that pure formula by month-end — the new month would then
+// silently snap back to the "theoretical" phase instead of genuinely
+// continuing, e.g. reopening with an extra OFF day for someone who had
+// already served it last month. This finds the index in `codes` (the flat
+// ROTATION or a named pattern's own cycle) that day 1 of the new month
+// should use by locating the staff member's actual last known code within
+// it — preferring a position whose predecessor also matches their 2nd-last
+// code, to disambiguate a cycle where that code repeats (e.g. "O" appearing
+// twice in ROTATION). Returns null (no resync) when there's nothing to
+// anchor to: brand-new tail data, or a last code (e.g. "L", or a flexi/
+// redistribution code not native to this cycle) that doesn't appear in
+// `codes` at all — callers fall back to the day-anchor formula in that
+// case, so this is a pure improvement, never a regression, wherever it
+// can't confidently resync.
+function resyncCycleStart(codes, tail) {
+  if (!codes?.length || tail?.[0] == null) return null;
+  const len = codes.length;
+  const candidates = [];
+  for (let i = 0; i < len; i++) if (codes[i] === tail[0]) candidates.push(i);
+  if (!candidates.length) return null;
+  const refined = candidates.length > 1 ? candidates.filter(i => codes[(i - 1 + len) % len] === tail[1]) : candidates;
+  const picked = refined.length === 1 ? refined[0] : candidates[0];
+  return (picked + 1) % len;
+}
+
 function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
@@ -177,15 +211,24 @@ function buildRosterAssignments({
     const pattern = patternByUser?.[s.id];
     const codes = new Array(nDays);
     const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
+    const cycle = pattern?.codes?.length ? pattern.codes : ROTATION;
+    // Only attempted when the caller actually requested continuity
+    // (tailByUser present at all — buildContinuationTails is only built
+    // when "Continue from Previous Roster" is on) AND this staff member has
+    // a real previous-month record to resync from (see resyncCycleStart);
+    // null falls straight through to the existing day-anchor formula below.
+    const resyncStart = tailByUser ? resyncCycleStart(cycle, tail) : null;
 
     for (let day = 1; day <= nDays; day++) {
       if (blocked.has(s.id) || unpatternedTrainingPending) { codes[day - 1] = "O"; continue; }
       const onLeave = leaveByUserDay?.[s.id]?.has(day);
       if (onLeave) { codes[day - 1] = "L"; continue; }
 
-      let proposed = pattern?.codes?.length
-        ? (pattern.codes[(dayAnchor + day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
-        : ROTATION[(dayAnchor + day - 1 + offset) % ROTATION.length];
+      let proposed = resyncStart !== null
+        ? (cycle[(resyncStart + day - 1) % cycle.length] || "O")
+        : pattern?.codes?.length
+          ? (pattern.codes[(dayAnchor + day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
+          : ROTATION[(dayAnchor + day - 1 + offset) % ROTATION.length];
 
       const prev = day > 1 ? codes[day - 2] : tail[0];
       const prev2 = day > 2 ? codes[day - 3] : (day === 2 ? tail[0] : tail[1]);

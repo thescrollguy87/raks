@@ -131,6 +131,71 @@ describe("buildRosterAssignments — full rest-gap rule set (ported from referen
     // suppressed to OFF rather than defaulting to a fresh-start Morning.
     expect(day1).not.toBe("M");
   });
+
+  it("resyncs the default ROTATION's actual phase from a real previous-month tail, not just the day-anchor formula — a staff member who finished a 2-day OFF block last month continues straight into duty on day 1, not another OFF day", () => {
+    // Reproduces a real dispatcher-reported gap: the pure day-anchor formula
+    // (absoluteDayAnchor, with nothing passed here so it's 0) would put
+    // idx=0 at ROTATION[(0+0+0)%8]="M" for day 1 regardless of tailByUser —
+    // but a staff member's REAL last 2 real days were "O","O" (the tail end
+    // of their own OFF block), i.e. ROTATION index 7, so day 1 should
+    // continue the SAME cycle at index 0 ("M") in this particular case. Use
+    // a tail that actually disagrees with the day-anchor formula to prove
+    // the resync, not the anchor, is driving it: finished on "N","N" (ROTATION
+    // index 5), so day 1 must continue at index 6 = "O", not the day-anchor
+    // formula's "M".
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const tailByUser = { b1_0: ["N", "N", "O"] };
+    const noMandatory = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({ staff, nDays: 3, leaveByUserDay: {}, blockedUserIds: [], tailByUser, mandatoryCoverageConfig: noMandatory });
+    const codes = result.assignments.filter(a => a.userId === "b1_0").sort((a, b) => a.day - b.day).map(a => a.code);
+    // Continuing ROTATION = [M,M,A,A,N,N,O,O] from the index right after the
+    // matched "N","N" (index 5) gives O (idx6), O (idx7), M (idx0) — the
+    // staff member's SECOND rest day, then straight back into duty.
+    expect(codes).toEqual(["O", "O", "M"]);
+  });
+
+  it("resyncs a named Staff Allocation pattern's phase (e.g. NCS 2-Night/2-Off) from the real previous-month tail", () => {
+    // The exact NCS scenario reported: three staff finished their 2 OFF days
+    // on the last day of the previous month, so day 1 of the new month
+    // should resume the pattern on Night — not restart with another OFF day
+    // the way the pure day-anchor/offset formula alone would if the pattern
+    // was assigned (or last edited) at a different phase.
+    const staff = [{ id: "ncs0", category: "NCS" }];
+    const patternByUser = { ncs0: { codes: ["N", "N", "O", "O"], offset: 0 } };
+    const tailByUser = { ncs0: ["O", "O", "N"] }; // finished last month: ...N, O, O
+    const noMandatory = { NCS: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], patternByUser, tailByUser, mandatoryCoverageConfig: noMandatory,
+    });
+    const codes = result.assignments.sort((a, b) => a.day - b.day).map(a => a.code);
+    expect(codes).toEqual(["N", "N", "O", "O"]);
+  });
+
+  it("falls back to the day-anchor formula (no resync) for a staff member with no real previous-month record at all", () => {
+    // tailByUser[s.id] is entirely absent (e.g. a brand-new hire with
+    // nothing to resync from) — must behave exactly as if continueFromPrevious
+    // had never been turned on for this one staff member, not crash or
+    // silently pick an arbitrary phase.
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const tailByUser = {}; // no entry at all for b1_0
+    const noMandatory = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const withResyncAttempted = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], tailByUser, mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    const withoutContinuity = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    expect(withResyncAttempted.assignments.map(a => a.code)).toEqual(withoutContinuity.assignments.map(a => a.code));
+  });
+
+  it("falls back to the day-anchor formula when the real last code doesn't appear in this cycle at all (e.g. a one-off flexi code, or 'L')", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const tailByUser = { b1_0: ["L", "N", "N"] }; // "L" isn't a ROTATION code
+    const noMandatory = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const withTail = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], tailByUser, mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    const withoutTail = buildRosterAssignments({ staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig: noMandatory, absoluteDayAnchor: 0 });
+    // Day 1 isn't suppressed by the "L" tail the way an "N" tail would
+    // suppress a Morning start (isLeaveType plays no part in the rest-gap
+    // checks), so with no resync possible, this must match the plain
+    // day-anchor run exactly.
+    expect(withTail.assignments.map(a => a.code)).toEqual(withoutTail.assignments.map(a => a.code));
+  });
 });
 
 describe("buildRosterAssignments — pattern-based mode (Staff Allocation tab)", () => {

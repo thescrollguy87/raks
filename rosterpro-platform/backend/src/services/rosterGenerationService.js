@@ -78,7 +78,16 @@ async function buildContinuationTails(stationId, monthKey, staff) {
   const byUserId = new Map(grid.map(u => [u.id, u.shiftAssignments]));
   return Object.fromEntries(staff.map(s => {
     const assignments = [...(byUserId.get(s.id) || [])].sort((a, b) => b.shiftDate - a.shiftDate);
-    const tail = [0, 1, 2].map(i => assignments[i]?.shiftDef?.code || "O");
+    // A staff member with no record at all in last month's roster (just
+    // joined) gets null throughout, not "O" — resyncCycleStart in the
+    // algorithm reads a null tail[0] as "nothing real to resync the
+    // rotation/pattern phase from" and leaves them on the normal day-anchor
+    // formula, same as before this file started tracking per-user cycle
+    // continuity. Someone who DOES have a record just missing a day or two
+    // of the 3-day tail (e.g. joined mid previous-month) still defaults
+    // those gaps to "O", exactly as before.
+    const hasRecord = assignments.length > 0;
+    const tail = [0, 1, 2].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
     return [s.id, tail];
   }));
 }
