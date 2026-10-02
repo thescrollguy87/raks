@@ -36,6 +36,7 @@ const flightInstanceBulkSchema = z.object({
   flightDate: isoDate,
   rows: z.array(flightInstanceSchema.omit({ id: true, stationId: true, flightDate: true })).min(1).max(500),
 });
+const flightInstanceSyncSchema = z.object({ stationId: z.string().uuid(), flightDate: isoDate });
 
 // ─── Allocation Rules ─────────────────────────────────────────────────────────
 const allocationRuleSchema = z.object({
@@ -144,7 +145,7 @@ const historyQuerySchema = z.object({
 
 module.exports = {
   stationQuerySchema, dateRangeQuerySchema,
-  flightInstanceSchema, flightInstanceBulkSchema,
+  flightInstanceSchema, flightInstanceBulkSchema, flightInstanceSyncSchema,
   allocationRuleSchema, allocationSettingsSchema, travelTimeSchema,
   taskQuerySchema, generateTasksSchema, createTaskSchema, cancelTaskSchema, detectConflictsSchema,
   autoAllocateSchema, manualAssignSchema, reallocateSchema, whatIfSchema, commitWhatIfSchema,

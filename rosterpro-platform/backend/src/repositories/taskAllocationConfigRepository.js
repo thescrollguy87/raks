@@ -45,6 +45,42 @@ async function replaceFlightInstancesForDate(stationId, flightDate, rows, actorI
   ]);
 }
 
+// Auto-syncs one date's Flight Instances from the Flights module (rows
+// shaped by readOnlyFlightScheduleAdapter) — matched to what's already here
+// by flightNumber so a re-sync (the frontend re-runs this on every date
+// view) never duplicates a row. Only touches core schedule fields
+// (registration/type/std/sta/etd/eta), and only on a row this sync itself
+// created (source "AUTO_GENERATED"): stand/terminal/isTransit/remark are
+// never set here, they're always a human's own input (Section 6). A row
+// someone has since edited flips to "MANUAL" (taskAllocationService
+// .upsertFlightInstance) and is then left completely alone, even if its
+// flightNumber keeps matching — their correction wins, permanently, over
+// whatever the Flights module says next. Nothing already here is ever
+// deleted: a flight the Flights module stops listing (cancelled, or a
+// MANUAL-only row like a charter it never carried) just stays as it is.
+async function syncFlightInstancesForDate(stationId, flightDate, flightRows, actorId) {
+  const existing = await prisma.taskAllocationFlightInstance.findMany({ where: { stationId, flightDate, deletedAt: null } });
+  const existingByFlightNumber = new Map(existing.map(r => [r.flightNumber, r]));
+  const ops = [];
+  for (const row of flightRows) {
+    const match = existingByFlightNumber.get(row.flightNumber);
+    if (match && match.source !== "AUTO_GENERATED") continue; // a human already owns this flight number for this date
+    const coreFields = {
+      aircraftRegistration: row.aircraftRegistration, aircraftType: row.aircraftType,
+      std: row.std, sta: row.sta, etd: row.etd, eta: row.eta,
+    };
+    if (match) {
+      ops.push(prisma.taskAllocationFlightInstance.update({ where: { id: match.id }, data: { ...coreFields, updatedById: actorId } }));
+    } else {
+      ops.push(prisma.taskAllocationFlightInstance.create({
+        data: { stationId, flightDate, flightNumber: row.flightNumber, ...coreFields, source: "AUTO_GENERATED", createdById: actorId, updatedById: actorId },
+      }));
+    }
+  }
+  if (ops.length) await prisma.$transaction(ops);
+  return listFlightInstances(stationId, flightDate, flightDate);
+}
+
 // ─── Allocation Rules (Section 7/8 — Task Generator config) ─────────────────
 function listRules(stationId, { includeDisabled = false } = {}) {
   return prisma.allocationRule.findMany({
@@ -98,6 +134,7 @@ function deleteTravelTime(id) {
 
 module.exports = {
   listFlightInstances, findFlightInstanceById, createFlightInstance, updateFlightInstance, deleteFlightInstance, replaceFlightInstancesForDate,
+  syncFlightInstancesForDate,
   listRules, findRuleById, createRule, updateRule, deleteRule,
   getSettings, upsertSettings,
   listTravelTimes, upsertTravelTime, deleteTravelTime,

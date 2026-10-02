@@ -179,34 +179,64 @@ function TravelTab({ stationId }) {
   );
 }
 
+const EMPTY_DRAFT = { id: undefined, flightNumber: "", aircraftRegistration: "", aircraftType: "", std: "", sta: "", stand: "", terminal: "", isTransit: true };
+
 function FlightsTab({ stationId }) {
   const [date, setDate] = useState(todayIso());
   const [rows, setRows] = useState([]);
-  const [draft, setDraft] = useState({ flightNumber: "", aircraftRegistration: "", aircraftType: "", std: "", sta: "", stand: "", terminal: "", isTransit: true });
-  const load = useCallback(() => { if (stationId) taApi.listFlightInstances(stationId, date, date).then(setRows); }, [stationId, date]);
-  useEffect(() => { load(); }, [load]);
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const [syncing, setSyncing] = useState(false);
+  const [syncNote, setSyncNote] = useState("");
 
-  async function add() {
+  // Auto-fetches this date's flights from the Flights module (registration,
+  // type, STD/STA) every time the date changes — the Add form below stays
+  // only for anything that needs filling in by hand: stand, terminal, or a
+  // flight the Flights module doesn't carry at all (e.g. a charter).
+  const sync = useCallback(() => {
+    if (!stationId) return;
+    setSyncing(true);
+    taApi.syncFlightInstances(stationId, date)
+      .then(r => {
+        setRows(r.flightInstances);
+        setSyncNote(r.skippedNoAircraft > 0 ? `Synced ${r.syncedCount} from Flight Schedule — ${r.skippedNoAircraft} skipped (no aircraft registration set yet).` : `Synced ${r.syncedCount} from Flight Schedule.`);
+      })
+      .catch(err => setSyncNote(`Couldn't sync: ${err.message}`))
+      .finally(() => setSyncing(false));
+  }, [stationId, date]);
+  useEffect(() => { sync(); }, [sync]);
+
+  async function save() {
     if (!draft.flightNumber || !draft.aircraftRegistration) return;
     await taApi.upsertFlightInstance({
-      stationId, flightDate: date, flightNumber: draft.flightNumber, aircraftRegistration: draft.aircraftRegistration,
+      id: draft.id, stationId, flightDate: date, flightNumber: draft.flightNumber, aircraftRegistration: draft.aircraftRegistration,
       aircraftType: draft.aircraftType || undefined, stand: draft.stand || undefined, terminal: draft.terminal || undefined,
       isTransit: draft.isTransit,
       std: draft.std ? `${date}T${draft.std}:00.000Z` : undefined,
       sta: draft.sta ? `${date}T${draft.sta}:00.000Z` : undefined,
     });
-    setDraft({ flightNumber: "", aircraftRegistration: "", aircraftType: "", std: "", sta: "", stand: "", terminal: "", isTransit: true });
-    load();
+    setDraft(EMPTY_DRAFT);
+    taApi.listFlightInstances(stationId, date, date).then(setRows);
   }
-  async function remove(id) { await taApi.deleteFlightInstance(id); load(); }
+  function edit(r) {
+    setDraft({
+      id: r.id, flightNumber: r.flightNumber, aircraftRegistration: r.aircraftRegistration, aircraftType: r.aircraftType || "",
+      std: r.std ? new Date(r.std).toISOString().slice(11, 16) : "", sta: r.sta ? new Date(r.sta).toISOString().slice(11, 16) : "",
+      stand: r.stand || "", terminal: r.terminal || "", isTransit: r.isTransit,
+    });
+  }
+  async function remove(id) { await taApi.deleteFlightInstance(id); taApi.listFlightInstances(stationId, date, date).then(setRows); }
 
   return (
     <div className="card">
       <div className="card-title">Today's Real Flight Instances — the Task Generator's daily input</div>
       <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-        Entered/imported independently of Rostering's own Flight Schedule, which has no tail number or stand to work from.
+        Flight number, registration, type and STD/STA are fetched automatically from the Flights module for the date below. Fill in stand, terminal, or anything it doesn't carry (e.g. a charter) by clicking a row or using Add.
       </div>
-      <input type="date" className="fi" value={date} onChange={e => setDate(e.target.value)} style={{ width: 160, marginBottom: 10 }} />
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+        <input type="date" className="fi" value={date} onChange={e => setDate(e.target.value)} style={{ width: 160 }} />
+        <button className="btn btn-ghost btn-sm" onClick={sync} disabled={syncing}>{syncing ? "Syncing…" : "🔄 Sync now"}</button>
+        {syncNote && <span style={{ fontSize: 10, color: "var(--text-dim)" }}>{syncNote}</span>}
+      </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8, marginBottom: 10 }}>
         <input className="fi" placeholder="Flight No." value={draft.flightNumber} onChange={e => setDraft(d => ({ ...d, flightNumber: e.target.value }))} />
         <input className="fi" placeholder="Registration (VT-XAA)" value={draft.aircraftRegistration} onChange={e => setDraft(d => ({ ...d, aircraftRegistration: e.target.value }))} />
@@ -215,19 +245,26 @@ function FlightsTab({ stationId }) {
         <input className="fi" type="time" placeholder="STA" value={draft.sta} onChange={e => setDraft(d => ({ ...d, sta: e.target.value }))} />
         <input className="fi" placeholder="Stand" value={draft.stand} onChange={e => setDraft(d => ({ ...d, stand: e.target.value }))} />
         <input className="fi" placeholder="Terminal" value={draft.terminal} onChange={e => setDraft(d => ({ ...d, terminal: e.target.value }))} />
-        <button className="btn btn-primary btn-sm" onClick={add}>Add</button>
+        <div style={{ display: "flex", gap: 7 }}>
+          <button className="btn btn-primary btn-sm" onClick={save}>{draft.id ? "Save" : "Add"}</button>
+          {draft.id && <button className="btn btn-ghost btn-sm" onClick={() => setDraft(EMPTY_DRAFT)}>Cancel</button>}
+        </div>
       </div>
       <table className="dc-table">
-        <thead><tr><th>Flight</th><th>Reg</th><th>Type</th><th>STD</th><th>STA</th><th>Stand</th><th></th></tr></thead>
+        <thead><tr><th>Flight</th><th>Reg</th><th>Type</th><th>STD</th><th>STA</th><th>Stand</th><th>Terminal</th><th>Source</th><th></th></tr></thead>
         <tbody>
           {rows.map(r => (
-            <tr key={r.id}>
+            <tr key={r.id} onClick={() => edit(r)} style={{ cursor: "pointer" }}>
               <td>{r.flightNumber}</td><td>{r.aircraftRegistration}</td><td>{r.aircraftType || "—"}</td>
               <td>{r.std ? new Date(r.std).toLocaleTimeString() : "—"}</td><td>{r.sta ? new Date(r.sta).toLocaleTimeString() : "—"}</td>
-              <td>{r.stand || "—"}</td>
-              <td><button className="btn btn-ghost btn-sm" onClick={() => remove(r.id)}>🗑</button></td>
+              <td>{r.stand || "—"}</td><td>{r.terminal || "—"}</td>
+              <td style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.source === "AUTO_GENERATED" ? "Synced" : "Manual"}</td>
+              <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); remove(r.id); }}>🗑</button></td>
             </tr>
           ))}
+          {rows.length === 0 && (
+            <tr><td colSpan={9} style={{ padding: 12, fontSize: 11, color: "var(--text-dim)" }}>No flights for this date yet.</td></tr>
+          )}
         </tbody>
       </table>
     </div>

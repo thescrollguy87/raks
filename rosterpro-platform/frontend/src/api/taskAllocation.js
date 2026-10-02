@@ -20,6 +20,9 @@ export function deleteFlightInstance(id) { return api.delete(`${BASE}/flight-ins
 export function replaceFlightInstancesForDay(stationId, flightDate, rows) {
   return api.post(`${BASE}/flight-instances/replace-day`, { stationId, flightDate, rows });
 }
+export function syncFlightInstances(stationId, flightDate) {
+  return api.post(`${BASE}/flight-instances/sync`, { stationId, flightDate });
+}
 
 // ─── Allocation Rules / Settings / Travel Time ───────────────────────────────
 export function listRules(stationId) { return api.get(`${BASE}/rules`, { stationId }); }

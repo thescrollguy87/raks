@@ -23,6 +23,25 @@ function listFlightsForStation(stationId, from, to) {
   });
 }
 
+// Every flight touching one calendar date at a station — arriving,
+// departing, or both. Unlike listFlightsForStation (which filters on
+// scheduledIn alone, fine for "today's flights" display purposes),
+// scheduledIn and scheduledOut can each independently be null (an import
+// row needs only one of Arrival/Departure), so an outbound-only flight from
+// the home base would be silently missed by a scheduledIn-only filter —
+// this ORs both legs instead. Used by the Task Allocation module's
+// read-only Flight Instance sync.
+function listFlightsForStationByDate(stationId, dayStart, dayEnd) {
+  return prisma.flight.findMany({
+    where: {
+      stationId, deletedAt: null,
+      OR: [{ scheduledIn: { gte: dayStart, lte: dayEnd } }, { scheduledOut: { gte: dayStart, lte: dayEnd } }],
+    },
+    orderBy: [{ scheduledOut: "asc" }, { scheduledIn: "asc" }],
+    include: { aircraft: { select: { registration: true, type: true } } },
+  });
+}
+
 // Existing flights for one flight number at one station within a date
 // range — used by the schedule importer to decide create-vs-update per
 // date instead of blindly inserting a duplicate on every re-run.
@@ -58,6 +77,6 @@ function listDelaysForStation(stationId, from, to) {
 }
 
 module.exports = {
-  createFlight, findFlightById, updateFlightStatus, listFlightsForStation, createDelay, listDelaysForStation,
+  createFlight, findFlightById, updateFlightStatus, listFlightsForStation, listFlightsForStationByDate, createDelay, listDelaysForStation,
   findFlightsByNumberInRange, updateFlightSchedule,
 };

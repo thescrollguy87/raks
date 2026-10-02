@@ -18,7 +18,7 @@ const { requirePermission } = require("../middleware/rbac");
 const { validate, validateQuery } = require("../middleware/validate");
 const { requireOwnStation } = require("../utils/stationScope");
 const {
-  flightInstanceSchema, flightInstanceBulkSchema,
+  flightInstanceSchema, flightInstanceBulkSchema, flightInstanceSyncSchema,
   allocationRuleSchema, allocationSettingsSchema, travelTimeSchema,
   taskQuerySchema, generateTasksSchema, createTaskSchema, cancelTaskSchema,
   autoAllocateSchema, manualAssignSchema, reallocateSchema, whatIfSchema, commitWhatIfSchema,
@@ -54,6 +54,7 @@ router.get("/flight-instances", view, validateQuery(dateRangeQuerySchema), requi
 router.put("/flight-instances", create, validate(flightInstanceSchema), requireOwnStation("body"), ctrl.upsertFlightInstance);
 router.delete("/flight-instances/:id", create, ctrl.deleteFlightInstance);
 router.post("/flight-instances/replace-day", create, validate(flightInstanceBulkSchema), requireOwnStation("body"), ctrl.replaceFlightInstances);
+router.post("/flight-instances/sync", create, validate(flightInstanceSyncSchema), requireOwnStation("body"), ctrl.syncFlightInstances);
 
 // ─── Allocation Rules (Task Generator config) ────────────────────────────────
 router.get("/rules", settingsPerm, validateQuery(stationQuerySchema), requireOwnStation("query"), ctrl.listRules);

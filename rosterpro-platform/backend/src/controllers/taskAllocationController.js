@@ -34,6 +34,10 @@ const replaceFlightInstances = asyncHandler(async (req, res) => {
   const { stationId, flightDate, rows } = req.body;
   res.json(await taskAllocationService.replaceFlightInstancesForDate(stationId, flightDate, rows, req.user));
 });
+const syncFlightInstances = asyncHandler(async (req, res) => {
+  const { stationId, flightDate } = req.body;
+  res.json(await taskAllocationService.syncFlightInstancesFromFlightSchedule(stationId, flightDate, req.user));
+});
 
 // ─── Rules / Settings / Travel Time ───────────────────────────────────────────
 const listRules = asyncHandler(async (req, res) => res.json(await taskAllocationService.listRules(req.query.stationId)));
@@ -86,7 +90,7 @@ const getRun = asyncHandler(async (req, res) => res.json(await taskAllocationSer
 
 module.exports = {
   enabled, rosterSyncStatus, availabilitySummary,
-  listFlightInstances, upsertFlightInstance, deleteFlightInstance, replaceFlightInstances,
+  listFlightInstances, upsertFlightInstance, deleteFlightInstance, replaceFlightInstances, syncFlightInstances,
   listRules, upsertRule, deleteRule,
   getSettings, updateSettings,
   listTravelTimes, upsertTravelTime, deleteTravelTime,

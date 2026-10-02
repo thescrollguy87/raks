@@ -4,6 +4,7 @@
 const taskAllocationConfigRepo = require("../repositories/taskAllocationConfigRepository");
 const maintenanceTaskRepo = require("../repositories/maintenanceTaskRepository");
 const readOnlyRosterAdapter = require("../services/readOnlyRosterAdapter");
+const readOnlyFlightScheduleAdapter = require("../services/readOnlyFlightScheduleAdapter");
 const taskGeneratorService = require("./taskGeneratorService");
 const eligibilityEngineService = require("./eligibilityEngineService");
 const allocationEngineService = require("./allocationEngineService");
@@ -44,8 +45,18 @@ function listFlightInstances(stationId, dateFrom, dateTo) {
   return taskAllocationConfigRepo.listFlightInstances(stationId, dateOnly(dateFrom), endOfDay(dateTo));
 }
 function upsertFlightInstance(stationId, body, actor) {
-  if (body.id) return taskAllocationConfigRepo.updateFlightInstance(body.id, { ...body, updatedById: actor.sub });
+  // Editing an existing row — including one the Flight Schedule sync
+  // created — is the person taking ownership of it: flip it to "MANUAL" so
+  // a later sync (syncFlightInstancesFromFlightSchedule) never overwrites
+  // their correction.
+  if (body.id) return taskAllocationConfigRepo.updateFlightInstance(body.id, { ...body, source: "MANUAL", updatedById: actor.sub });
   return taskAllocationConfigRepo.createFlightInstance({ ...body, stationId, createdById: actor.sub, updatedById: actor.sub });
+}
+// ─── Flight Instances: auto-sync from the Flights module (Section 6) ────────
+async function syncFlightInstancesFromFlightSchedule(stationId, date, actor) {
+  const { rows, skippedNoAircraft } = await readOnlyFlightScheduleAdapter.getFlightsForStationDate(stationId, date);
+  const flightInstances = await taskAllocationConfigRepo.syncFlightInstancesForDate(stationId, dateOnly(date), rows, actor.sub);
+  return { flightInstances, syncedCount: rows.length, skippedNoAircraft };
 }
 function deleteFlightInstance(id, actor) {
   return taskAllocationConfigRepo.deleteFlightInstance(id, actor.sub);
@@ -176,7 +187,7 @@ async function getRun(stationId, runId) {
 
 module.exports = {
   getRosterSyncStatus, getAvailabilitySummary,
-  listFlightInstances, upsertFlightInstance, deleteFlightInstance, replaceFlightInstancesForDate,
+  listFlightInstances, upsertFlightInstance, deleteFlightInstance, replaceFlightInstancesForDate, syncFlightInstancesFromFlightSchedule,
   listRules, upsertRule, deleteRule,
   getSettings, updateSettings,
   listTravelTimes, upsertTravelTime, deleteTravelTime,
