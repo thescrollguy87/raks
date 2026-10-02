@@ -1629,3 +1629,452 @@ model RegularizationRequest {
   @@index([userId])
   @@map("regularization_requests")
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// EXISTING CODE ABOVE THIS LINE — ROSTER / STAFF / LEAVE / COMPLIANCE / FLIGHT
+// SCHEDULE ENGINE. DO NOT MODIFY.
+//
+// NEW CODE BELOW — TASK ALLOCATION MODULE. BUILT ARCHITECTURALLY ISOLATED:
+// answers "which task should each already-rostered, available person
+// perform during their shift" — never "who is working and which shift",
+// which stays the Roster's question alone. Every reference below to an
+// existing entity (User, Roster, ShiftAssignment, Leave, Qualification,
+// License, StaffAuthorization, Station) is a PLAIN STRING ID WITH NO PRISMA
+// @relation — same loose-coupling pattern DepartureManpowerAssignment
+// already uses above for TurnRecord/CharterRecord ("not a hard FK — losing
+// an assignment's history to a wholesale re-import would be worse than a
+// dangling reference"). That keeps this entire section additive: zero
+// fields, zero lines, zero relations added to any existing model. All real
+// reads of existing data go through backend/src/services/taskAllocation/
+// readOnlyRosterAdapter.js, which calls the SAME existing repository/service
+// functions the Roster module itself uses (e.g.
+// complianceService.getComplianceSummary) — never a reimplementation of
+// their logic. Nothing here ever writes to a Roster/ShiftAssignment/Leave/
+// Qualification/License/StaffAuthorization row.
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum TaskAllocationStatus {
+  DRAFT
+  READY
+  UNASSIGNED
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  BLOCKED
+}
+
+enum TaskAllocationConflictType {
+  EMPLOYEE_OVERLAP
+  QUALIFICATION
+  LOCATION_TRAVEL
+  DEADLINE
+  RESOURCE_SHORTAGE
+}
+
+enum TaskAllocationConflictSeverity {
+  WARNING
+  BLOCKING
+}
+
+// What caused an allocation run or a single reassignment — Section 19's
+// trigger list, stored so Allocation History reads like "14:32 Reallocation
+// — Trigger: Aircraft delay" rather than a bare timestamp.
+enum TaskAllocationTrigger {
+  MANUAL
+  INITIAL_AUTO_ALLOCATION
+  FLIGHT_DELAY
+  FLIGHT_CANCELLATION
+  AIRCRAFT_SWAP
+  NEW_DEFECT
+  TASK_OVERRUN
+  STAFF_ABSENCE
+  STAFF_UNAVAILABLE
+  NEW_TASK
+  TASK_CANCELLATION
+  STAND_CHANGE
+  OPERATIONAL_DISRUPTION
+}
+
+// A single real flight occurrence (one tail number, one stand, one actual
+// day) — deliberately Task-Allocation-owned, NOT a duplicate of the
+// existing TurnRecord/CharterRecord pattern data. Those model a RECURRING
+// WEEKLY SCHEDULE PATTERN (time-of-day + days-of-week + effective date
+// range) used only to compute aggregate daily headcount demand, and have no
+// registration/stand/terminal field at all — there is currently no
+// RosterPro data source that can answer "which tail is on Stand 12 at
+// 20:00 today," which the Task Generator genuinely needs. Confirmed
+// directly with the user: this is entered/imported daily, independent of
+// the Rostering module's own Flight Schedule import.
+model TaskAllocationFlightInstance {
+  id                   String   @id @default(uuid())
+  stationId            String // loose ref to Station.id — see file-header comment
+  flightDate           DateTime @db.Date
+  flightNumber         String
+  aircraftRegistration String
+  aircraftType         String?
+  std                  DateTime? // scheduled departure, this calendar day
+  sta                  DateTime? // scheduled arrival, this calendar day
+  etd                  DateTime?
+  eta                  DateTime?
+  stand                String?
+  terminal             String?
+  isTransit            Boolean  @default(false)
+  remark               String?
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  tasks MaintenanceTask[]
+
+  @@index([stationId, flightDate])
+  @@map("task_allocation_flight_instances")
+}
+
+// The Task Generator's configuration (Section 7/8) — converts a flight
+// instance into one or more MaintenanceTask rows. Deliberately
+// data-driven/configurable per station rather than hard-coded airline
+// assumptions: a station defines its own rules (e.g. "Transit Check starts
+// 20 min before STD, deadline 10 min after STD, needs 1 B1, 45 min") from
+// the Task Allocation Settings page.
+model AllocationRule {
+  id                    String   @id @default(uuid())
+  stationId             String // loose ref to Station.id
+  ruleName              String
+  taskType              String // "TRANSIT" | "PDC" | "DEFECT" | a station's own custom type
+  appliesTo             String   @default("BOTH") // ARRIVAL | DEPARTURE | BOTH — which flight event anchors the offsets below
+  onlyTransit           Boolean  @default(false) // only generate for flight instances flagged isTransit
+
+  // All offsets are minutes relative to the anchor event (STA for ARRIVAL,
+  // STD for DEPARTURE) — negative = before the event, positive = after.
+  startOffsetMin        Int
+  latestStartOffsetMin  Int
+  deadlineOffsetMin     Int
+  durationMin           Int
+
+  requiredRole          String? // free-text authorization/type-rating style requirement, e.g. "B737 B1"
+  requiredCategory      StaffCategory? // B1 | B2 | CM | NCS | STO — references the EXISTING enum by type only, no field added to it
+  requiredAircraftType  String?
+  requiredAuthorization String?
+  teamSize              Int      @default(1)
+  priority              Int      @default(3) // 1 = highest
+  taskDescription       String?
+
+  isEnabled   Boolean  @default(true)
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  @@index([stationId, isEnabled])
+  @@map("allocation_rules")
+}
+
+// Section 10's optimizer weights + Section 27's refresh cadence — one row
+// per station, editable from Task Allocation Settings. Weights are
+// percentages that should sum to ~100 but aren't DB-enforced to; the
+// scoring engine normalizes at read time.
+model AllocationSettings {
+  id        String @id @default(uuid())
+  stationId String @unique // loose ref to Station.id
+
+  weightDeadline           Float @default(30)
+  weightWorkloadBalance    Float @default(20)
+  weightTravelTime         Float @default(15)
+  weightTaskContinuity     Float @default(10)
+  weightResourceUtilization Float @default(10)
+  weightIdleTimeReduction  Float @default(10)
+  weightFairness           Float @default(5)
+
+  autoRefreshSeconds Int @default(60)
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("allocation_settings")
+}
+
+// Station-configurable minutes between two named locations (stand/hangar/
+// stores/...) — Section 11. Symmetric pairs are stored as two rows
+// deliberately (A->B need not equal B->A in a real apron), not inferred.
+model TravelTimeMatrix {
+  id           String @id @default(uuid())
+  stationId    String // loose ref to Station.id
+  fromLocation String
+  toLocation   String
+  minutes      Int
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([stationId, fromLocation, toLocation])
+  @@map("travel_time_matrix")
+}
+
+// Task Master (Section 8) — one real unit of maintenance/operational work.
+model MaintenanceTask {
+  id              String   @id @default(uuid())
+  stationId       String // loose ref to Station.id
+  taskNumber      String // station-scoped human-readable id, e.g. "T-20261002-001"
+
+  flightInstanceId String?
+  flightInstance   TaskAllocationFlightInstance? @relation(fields: [flightInstanceId], references: [id])
+  flightNumber     String?
+  aircraftRegistration String?
+  aircraftType     String?
+
+  taskType        String // TRANSIT | PDC | DEFECT | ... (AllocationRule.taskType, or CUSTOM for a manually created task)
+  taskCategory    String?
+  taskDescription String?
+
+  plannedStart DateTime
+  latestStart  DateTime
+  deadline     DateTime
+  estimatedDurationMin Int
+
+  requiredRole          String?
+  requiredCategory      StaffCategory? // references the EXISTING enum by type only
+  requiredAircraftType  String?
+  requiredAuthorization String?
+
+  location  String?
+  terminal  String?
+  stand     String?
+
+  priority Int @default(3) // 1 = highest
+  teamSize Int @default(1)
+
+  source String  @default("MANUAL") // "AUTO_GENERATED" | "MANUAL"
+  ruleId String? // loose ref to AllocationRule.id that generated this, when source = AUTO_GENERATED
+
+  status TaskAllocationStatus @default(UNASSIGNED)
+
+  createdById String?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+  version     Int      @default(1)
+
+  assignments     TaskAssignment[]
+  conflicts       TaskConflict[]
+  statusHistory   TaskStatusHistory[]
+  dependsOn       TaskDependency[] @relation("DependentTask")
+  dependedOnBy    TaskDependency[] @relation("PrerequisiteTask")
+
+  @@unique([stationId, taskNumber])
+  @@index([stationId, plannedStart])
+  @@index([status])
+  @@map("maintenance_tasks")
+}
+
+model TaskDependency {
+  id              String @id @default(uuid())
+  taskId          String
+  task            MaintenanceTask @relation("DependentTask", fields: [taskId], references: [id], onDelete: Cascade)
+  dependsOnTaskId String
+  dependsOnTask   MaintenanceTask @relation("PrerequisiteTask", fields: [dependsOnTaskId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, dependsOnTaskId])
+  @@map("task_dependencies")
+}
+
+// Who is (or was) assigned to a task. A reassignment does not delete the
+// old row — it's marked REASSIGNED and a new ACTIVE row is created — so
+// Allocation History (Section 22) can show the full chain without a
+// separate audit copy of this exact data.
+model TaskAssignment {
+  id     String @id @default(uuid())
+  taskId String
+  task   MaintenanceTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  userId String // loose ref to User.id
+
+  status String @default("ACTIVE") // ACTIVE | REASSIGNED | CANCELLED
+
+  isManual   Boolean @default(false) // true = supervisor picked this candidate via Manual Allocation
+  isOverride Boolean @default(false) // true = a hard-constraint violation was knowingly accepted (Section 18)
+
+  travelTimeMinutes  Int?
+  workloadBeforePct  Float?
+  workloadAfterPct   Float?
+
+  runId String? // loose ref to AllocationRun.id that produced this, null for a manual assignment
+
+  assignedById String? // loose ref to User.id — null when the system (auto allocation) made the call
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  explanation AllocationExplanation?
+
+  @@index([taskId])
+  @@index([userId])
+  @@map("task_assignments")
+}
+
+// The "Why was this person assigned?" record (Section 16) — one per
+// TaskAssignment, stored at assignment time so it reads back identically
+// later rather than being recomputed (and potentially drifting) after the
+// fact.
+model AllocationExplanation {
+  id           String @id @default(uuid())
+  assignmentId String @unique
+  assignment   TaskAssignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  checklist       Json // [{ label: "B1 qualified", passed: true }, ...]
+  travelTimeMinutes Int?
+  workloadBeforePct Float?
+  workloadAfterPct  Float?
+  score             Float?
+  scoreBreakdown    Json? // { deadline: 28, workloadBalance: 17, ... } — the weighted component scores that produced `score`
+
+  createdAt DateTime @default(now())
+
+  @@map("allocation_explanations")
+}
+
+// Every eligible-or-not candidate the Auto Allocation Engine considered for
+// a task during one run — not just the winner — so a supervisor can see
+// "why not AME-004" as well as "why AME-023". ineligibleReasons is null
+// when eligible is true.
+model AllocationCandidate {
+  id    String @id @default(uuid())
+  runId String
+  run   AllocationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  taskId String
+  userId String // loose ref to User.id
+
+  eligible          Boolean
+  ineligibleReasons Json? // array of strings, e.g. ["Not qualified for B737 MAX", "Travel time infeasible (needs 12 min, has 6)"]
+  score             Float?
+  scoreBreakdown    Json?
+  rank              Int?
+
+  createdAt DateTime @default(now())
+
+  @@index([runId, taskId])
+  @@map("allocation_candidates")
+}
+
+// One execution of Auto Allocation, Reallocation, or What-If (Sections 13,
+// 19, 21) — the parent record Allocation History (Section 22) lists.
+// isCommitted = false for a What-If run: candidates/explanations are still
+// stored for review, but no TaskAssignment rows are created or changed.
+model AllocationRun {
+  id        String @id @default(uuid())
+  stationId String // loose ref to Station.id
+
+  runType String @default("AUTO_ALLOCATION") // AUTO_ALLOCATION | REALLOCATION | WHAT_IF
+  trigger TaskAllocationTrigger @default(MANUAL)
+  triggerDetail String? // free text, e.g. "AME-001 marked unavailable"
+
+  dateFrom DateTime @db.Date
+  dateTo   DateTime @db.Date
+  shiftFilter String?
+  taskSourceFilter String?
+
+  tasksProcessed  Int @default(0)
+  tasksAssigned   Int @default(0)
+  tasksUnassigned Int @default(0)
+  conflictsCount  Int @default(0)
+  warningsCount   Int @default(0)
+
+  isCommitted Boolean @default(true)
+
+  startedById String? // loose ref to User.id — null for a system-triggered run
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+
+  candidates AllocationCandidate[]
+  events     AllocationEvent[]
+
+  @@index([stationId, startedAt])
+  @@map("allocation_runs")
+}
+
+// Allocation History's actual audit log (Section 22) — one row per real
+// decision (an assignment, a reassignment, an override, a cancellation),
+// independent of AllocationCandidate (which records every candidate
+// CONSIDERED, not just decisions made).
+model AllocationEvent {
+  id        String @id @default(uuid())
+  stationId String // loose ref to Station.id
+  runId     String?
+  run       AllocationRun? @relation(fields: [runId], references: [id])
+  taskId    String?
+
+  eventType String // ASSIGNED | REASSIGNED | UNASSIGNED | OVERRIDE | CANCELLED | STATUS_CHANGED
+
+  previousUserId String? // loose ref to User.id
+  newUserId      String? // loose ref to User.id
+
+  reason  String?
+  trigger TaskAllocationTrigger?
+
+  actorId   String? // loose ref to User.id — null when actorType = SYSTEM
+  actorType String  @default("SYSTEM") // SYSTEM | USER
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([stationId, createdAt])
+  @@index([taskId])
+  @@map("allocation_events")
+}
+
+// Section 12's conflict list — persisted (not just computed on the fly for
+// one screen) so Conflicts and the Task Board badge stay consistent and a
+// resolved conflict keeps its own history.
+model TaskConflict {
+  id        String @id @default(uuid())
+  stationId String // loose ref to Station.id
+  taskId    String
+  task      MaintenanceTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  conflictType TaskAllocationConflictType
+  severity     TaskAllocationConflictSeverity @default(BLOCKING)
+
+  userId        String? // loose ref to User.id — the person involved, when applicable
+  relatedTaskId String? // the OTHER task in an EMPLOYEE_OVERLAP conflict
+  details       Json?
+  message       String
+
+  isResolved Boolean   @default(false)
+  resolvedAt DateTime?
+
+  detectedAt DateTime @default(now())
+
+  @@index([stationId, taskId])
+  @@index([isResolved])
+  @@map("task_conflicts")
+}
+
+// Every status transition a task goes through — DRAFT -> READY ->
+// UNASSIGNED -> ASSIGNED -> IN_PROGRESS -> COMPLETED, or a jump to
+// CANCELLED/BLOCKED — kept as its own append-only log rather than inferred
+// from updatedAt, so "when did this become BLOCKED" is answerable later.
+model TaskStatusHistory {
+  id     String @id @default(uuid())
+  taskId String
+  task   MaintenanceTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  fromStatus TaskAllocationStatus?
+  toStatus   TaskAllocationStatus
+  reason     String?
+
+  changedById String? // loose ref to User.id — null for a system transition
+  changedAt   DateTime @default(now())
+
+  @@index([taskId])
+  @@map("task_status_history")
+}

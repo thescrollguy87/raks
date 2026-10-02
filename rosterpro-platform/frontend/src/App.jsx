@@ -22,6 +22,12 @@ import ImportExportPage from "./pages/ImportExportPage.jsx";
 import TenantsPage from "./pages/TenantsPage.jsx";
 import BillingPage from "./pages/BillingPage.jsx";
 import MyAccountPage from "./pages/MyAccountPage.jsx";
+import TaskAllocationGate from "./components/common/TaskAllocationGate.jsx";
+import TaskBoardPage from "./pages/taskAllocation/TaskBoardPage.jsx";
+import UnassignedTasksPage from "./pages/taskAllocation/UnassignedTasksPage.jsx";
+import ConflictsPage from "./pages/taskAllocation/ConflictsPage.jsx";
+import AllocationHistoryPage from "./pages/taskAllocation/AllocationHistoryPage.jsx";
+import TaskAllocationSettingsPage from "./pages/taskAllocation/TaskAllocationSettingsPage.jsx";
 
 export default function App() {
   return (
@@ -96,6 +102,34 @@ export default function App() {
         <Route
           path="/billing"
           element={<ProtectedRoute permission={["billing", "read"]}><BillingPage /></ProtectedRoute>}
+        />
+
+        {/* Task Allocation module — isolated from Rostering, gated by both
+            a permission AND the TASK_ALLOCATION_ENABLED feature flag
+            (TaskAllocationGate). See taskAllocationRoutes.js on the backend. */}
+        <Route
+          path="/task-allocation"
+          element={<ProtectedRoute permission={["task_allocation", "view"]}><TaskAllocationGate><TaskBoardPage /></TaskAllocationGate></ProtectedRoute>}
+        />
+        <Route
+          path="/task-allocation/board"
+          element={<ProtectedRoute permission={["task_allocation", "view"]}><TaskAllocationGate><TaskBoardPage /></TaskAllocationGate></ProtectedRoute>}
+        />
+        <Route
+          path="/task-allocation/unassigned"
+          element={<ProtectedRoute permission={["task_allocation", "view"]}><TaskAllocationGate><UnassignedTasksPage /></TaskAllocationGate></ProtectedRoute>}
+        />
+        <Route
+          path="/task-allocation/conflicts"
+          element={<ProtectedRoute permission={["task_allocation", "view"]}><TaskAllocationGate><ConflictsPage /></TaskAllocationGate></ProtectedRoute>}
+        />
+        <Route
+          path="/task-allocation/history"
+          element={<ProtectedRoute permission={["task_allocation", "view"]}><TaskAllocationGate><AllocationHistoryPage /></TaskAllocationGate></ProtectedRoute>}
+        />
+        <Route
+          path="/task-allocation/settings"
+          element={<ProtectedRoute permission={["task_allocation", "settings"]}><TaskAllocationGate><TaskAllocationSettingsPage /></TaskAllocationGate></ProtectedRoute>}
         />
       </Route>
     </Routes>

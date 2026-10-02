@@ -44,6 +44,12 @@ const PERMISSIONS = [
   ["airline", "read"], ["airline", "update"],
   ["billing", "read"], ["billing", "manage"],
   ["audit_trail", "read"],
+  // Task Allocation module (independent of Rostering — see
+  // src/routes/taskAllocationRoutes.js). Section 26's own rule: a role that
+  // can view the Roster does NOT automatically get these — see the
+  // deliberately separate grants below, not folded into roster:* anywhere.
+  ["task_allocation", "view"], ["task_allocation", "create"], ["task_allocation", "assign"],
+  ["task_allocation", "reallocate"], ["task_allocation", "override"], ["task_allocation", "settings"], ["task_allocation", "admin"],
 ];
 
 // Shared by every operational designation role (Duty Engineer, Sr. AME, AME,
@@ -66,6 +72,16 @@ const ROLE_MATRIX = {
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
     "billing:*", // the Billing page is Airline Admin only — no other role gets this
     "attendance:*", "regularization:*",
+    // Task Allocation: the day-to-day operational set only (view, create
+    // tasks, assign, reallocate) — deliberately NOT override/settings/admin
+    // even for this role. Section 26's own example is exactly this: holding
+    // broad roster/staff admin rights must not silently imply the power to
+    // knowingly bypass a hard eligibility constraint (override) or
+    // reconfigure the optimizer/task-generation rules (settings/admin). An
+    // operator who needs those grants them explicitly — see
+    // taskAllocationRoutes.js's own comment on why this module's
+    // permissions were kept out of every role:* wildcard.
+    "task_allocation:view", "task_allocation:create", "task_allocation:assign", "task_allocation:reallocate",
   ],
   // Full parity with Airline Admin's permission set (everything except
   // billing:*, which stays Airline Admin/Super Admin only) — Station
@@ -77,6 +93,7 @@ const ROLE_MATRIX = {
     "training:*", "store:*", "audit_finding:*", "capa:*", "flight:read",
     "engineering_delay:*", "reports:*", "users:*", "station:*", "audit_trail:read",
     "attendance:*", "regularization:*",
+    "task_allocation:view", "task_allocation:create", "task_allocation:assign", "task_allocation:reallocate",
   ],
   LMM: [ // Line Maintenance Manager
     "roster:read", "roster:update", "roster:publish", "shift:*", "staff:read",
@@ -89,6 +106,7 @@ const ROLE_MATRIX = {
     // operational gets, plus station-wide regularization approval to match
     // their station-wide leave:approve above.
     "attendance:punch", "attendance:read", "regularization:request", "regularization:approve",
+    "task_allocation:view", "task_allocation:create", "task_allocation:assign", "task_allocation:reallocate",
   ],
   // Can approve leave for their own direct reports (see the "reportsToId"
   // field on User / "L1 Manager" in the UI) and is otherwise view-only
@@ -103,6 +121,11 @@ const ROLE_MATRIX = {
     "audit_finding:read", "capa:read", "flight:read", "engineering_delay:read",
     "reports:read", "users:read", "station:read", "audit_trail:read",
     "attendance:punch", "attendance:read", "regularization:request", "regularization:approve_reports",
+    // The on-shift supervisor role is the realistic day-to-day user of the
+    // Task Board — can see it and manually assign, same as they already
+    // approve their own reports' leave, but doesn't create tasks/rules or
+    // run a full reallocation (that stays with LMM/Station Manager above).
+    "task_allocation:view", "task_allocation:assign",
   ],
   // Every operational designation below gets the exact same view-only
   // permission set — read everything relevant to their own work, request

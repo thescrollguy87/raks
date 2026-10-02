@@ -93,5 +93,14 @@ module.exports = {
 
   appUrl: process.env.APP_URL || "http://localhost:5173",
 
+  // TASK ALLOCATION MODULE feature flag — see
+  // src/routes/taskAllocationRoutes.js. Reading this is the ONLY place the
+  // module touches app-wide config; it adds a key here and nowhere else
+  // changes about this file's existing behavior. When false, the module's
+  // own GET /api/task-allocation/enabled reports it disabled and the
+  // frontend hides the whole nav section — every other route in this app
+  // is completely unaffected either way.
+  taskAllocationEnabled: process.env.TASK_ALLOCATION_ENABLED === "true",
+
   isProd,
 };

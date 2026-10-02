@@ -22,6 +22,7 @@ const departureAllocationRoutes = require("./departureAllocationRoutes");
 const airlineRoutes = require("./airlineRoutes");
 const billingRoutes = require("./billingRoutes");
 const chatRoutes = require("./chatRoutes");
+const taskAllocationRoutes = require("./taskAllocationRoutes"); // independent module, feature-flagged — see its own file header
 
 const router = express.Router();
 
@@ -49,5 +50,6 @@ router.use("/departure-allocation", departureAllocationRoutes); // Flight Schedu
 router.use("/airlines", airlineRoutes); // SUPER_ADMIN-only: every tenant on the platform, with station/staff counts
 router.use("/billing", billingRoutes); // per-seat Razorpay subscription: status, payment method, charge history
 router.use("/chat", chatRoutes); // Roster Assistant: natural-language Q&A backed by real tool calls (Gemini)
+router.use("/task-allocation", taskAllocationRoutes); // Task Allocation module — isolated, feature-flagged (TASK_ALLOCATION_ENABLED)
 
 module.exports = router;

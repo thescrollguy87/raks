@@ -2,6 +2,7 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../store/AuthContext.jsx";
 import { useStation } from "../../store/StationContext.jsx";
+import { useTaskAllocationEnabled } from "../../store/TaskAllocationContext.jsx";
 import AirlineSwitcher from "./AirlineSwitcher.jsx";
 
 // Same structure/classes as the prototype's <aside class="sidebar">: s-logo,
@@ -33,9 +34,26 @@ const NAV_SECTIONS = [
   ]},
 ];
 
+// Its own NAV_SECTIONS entry, deliberately not merged into "Roster" or
+// "Operations" above — Section 1's own instruction: separate from
+// Rostering/Staff/Leave/Training/Flight Schedule, never inside an existing
+// roster screen. Rendered conditionally in the component body below (not
+// filtered the same generic way as NAV_SECTIONS) because it ALSO depends on
+// the TASK_ALLOCATION_ENABLED feature flag, not just a permission.
+const TASK_ALLOCATION_SECTION = {
+  label: "Task Allocation", items: [
+    { to: "/task-allocation/board", icon: "🗂️", label: "Task Board", permission: ["task_allocation", "view"] },
+    { to: "/task-allocation/unassigned", icon: "🔴", label: "Unassigned Tasks", permission: ["task_allocation", "view"] },
+    { to: "/task-allocation/conflicts", icon: "⚠️", label: "Conflicts", permission: ["task_allocation", "view"] },
+    { to: "/task-allocation/history", icon: "🕘", label: "Allocation History", permission: ["task_allocation", "view"] },
+    { to: "/task-allocation/settings", icon: "⚙️", label: "Settings", permission: ["task_allocation", "settings"] },
+  ],
+};
+
 export default function Sidebar() {
   const { user, hasPermission, hasRole, logout } = useAuth();
   const { needsSwitcher, currentStation } = useStation();
+  const { enabled: taskAllocationEnabled } = useTaskAllocationEnabled();
   const [collapsed, setCollapsed] = useState(() => {
     try {
       const saved = localStorage.getItem("rp-sidebar-collapsed");
@@ -93,6 +111,18 @@ export default function Sidebar() {
               ))}
           </div>
         ))}
+        {taskAllocationEnabled && TASK_ALLOCATION_SECTION.items.some(item => hasPermission(item.permission[0], item.permission[1])) && (
+          <div>
+            <div className="nav-sl">{TASK_ALLOCATION_SECTION.label}</div>
+            {TASK_ALLOCATION_SECTION.items
+              .filter(item => hasPermission(item.permission[0], item.permission[1]))
+              .map(item => (
+                <NavLink key={item.to} to={item.to} className={({ isActive }) => `ni${isActive ? " active" : ""}`} title={collapsed ? item.label : undefined}>
+                  <span className="ni-icon">{item.icon}</span><span>{item.label}</span>
+                </NavLink>
+              ))}
+          </div>
+        )}
         <div className="nav-sl">Admin</div>
         {hasRole("SUPER_ADMIN") && (
           <NavLink to="/tenants" className={({ isActive }) => `ni${isActive ? " active" : ""}`} title={collapsed ? "Tenants" : undefined}>

@@ -193,6 +193,10 @@ table{border-collapse:collapse}
 .alert-card{display:flex;align-items:flex-start;gap:8px;padding:7px 10px;border-radius:8px;font-size:11px;line-height:1.35}
 .alert-card.red{background:rgba(229,57,53,.1);color:#FCA5A5;border:1px solid rgba(229,57,53,.2)}
 .alert-card.amber{background:rgba(245,166,35,.1);color:#FCD34D;border:1px solid rgba(245,166,35,.2)}
+/* Added for the Task Allocation module's eligible-candidate rows (an
+   "eligible" result needed a positive tone alongside the existing red/amber
+   ones) — same construction as those two, just the green token. */
+.alert-card.green{background:rgba(0,200,83,.1);color:#6EE7A8;border:1px solid rgba(0,200,83,.2)}
 .alert-card-title{font-weight:700;color:inherit}
 .alert-card-sub{color:var(--text-dim);font-size:10px;margin-top:1px}
 

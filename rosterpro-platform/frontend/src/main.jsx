@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App.jsx";
 import { AuthProvider } from "./store/AuthContext.jsx";
 import { StationProvider } from "./store/StationContext.jsx";
+import { TaskAllocationProvider } from "./store/TaskAllocationContext.jsx";
 import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
@@ -11,7 +12,9 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <BrowserRouter>
       <AuthProvider>
         <StationProvider>
-          <App />
+          <TaskAllocationProvider>
+            <App />
+          </TaskAllocationProvider>
         </StationProvider>
       </AuthProvider>
     </BrowserRouter>
