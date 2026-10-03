@@ -45,19 +45,21 @@ async function replaceFlightInstancesForDate(stationId, flightDate, rows, actorI
   ]);
 }
 
-// Auto-syncs one date's Flight Instances from the Flights module (rows
-// shaped by readOnlyFlightScheduleAdapter) — matched to what's already here
-// by flightNumber so a re-sync (the frontend re-runs this on every date
-// view) never duplicates a row. Only touches core schedule fields
-// (registration/type/std/sta/etd/eta), and only on a row this sync itself
-// created (source "AUTO_GENERATED"): stand/terminal/isTransit/remark are
-// never set here, they're always a human's own input (Section 6). A row
-// someone has since edited flips to "MANUAL" (taskAllocationService
-// .upsertFlightInstance) and is then left completely alone, even if its
-// flightNumber keeps matching — their correction wins, permanently, over
-// whatever the Flights module says next. Nothing already here is ever
-// deleted: a flight the Flights module stops listing (cancelled, or a
-// MANUAL-only row like a charter it never carried) just stays as it is.
+// Auto-syncs one date's Flight Instances from the Flight Schedule module
+// (rows shaped by readOnlyFlightScheduleAdapter, from the Turn Report/
+// Charter import) — matched to what's already here by flightNumber so a
+// re-sync (the frontend re-runs this on every date view) never duplicates
+// a row. Only touches schedule-derived fields (registration/type/std/sta/
+// etd/eta/isTransit — the Turn Report has no registration so that one
+// always lands null from a fresh sync), and only on a row this sync itself
+// created (source "AUTO_GENERATED"): stand/terminal/remark are never set
+// here, they're always a human's own input (Section 6), same as
+// registration once someone fills it in. A row someone has since edited
+// flips to "MANUAL" (taskAllocationService.upsertFlightInstance) and is
+// then left completely alone, even if its flightNumber keeps matching —
+// their correction wins, permanently, over whatever the schedule says
+// next. Nothing already here is ever deleted: a flight the schedule stops
+// listing (cancelled, or a MANUAL-only row it never carried) just stays.
 async function syncFlightInstancesForDate(stationId, flightDate, flightRows, actorId) {
   const existing = await prisma.taskAllocationFlightInstance.findMany({ where: { stationId, flightDate, deletedAt: null } });
   const existingByFlightNumber = new Map(existing.map(r => [r.flightNumber, r]));
@@ -67,7 +69,7 @@ async function syncFlightInstancesForDate(stationId, flightDate, flightRows, act
     if (match && match.source !== "AUTO_GENERATED") continue; // a human already owns this flight number for this date
     const coreFields = {
       aircraftRegistration: row.aircraftRegistration, aircraftType: row.aircraftType,
-      std: row.std, sta: row.sta, etd: row.etd, eta: row.eta,
+      std: row.std, sta: row.sta, etd: row.etd, eta: row.eta, isTransit: row.isTransit,
     };
     if (match) {
       ops.push(prisma.taskAllocationFlightInstance.update({ where: { id: match.id }, data: { ...coreFields, updatedById: actorId } }));

@@ -1700,22 +1700,22 @@ enum TaskAllocationTrigger {
 // day) — deliberately Task-Allocation-owned, NOT a duplicate of the
 // existing TurnRecord/CharterRecord pattern data. Those model a RECURRING
 // WEEKLY SCHEDULE PATTERN (time-of-day + days-of-week + effective date
-// range) used only to compute aggregate daily headcount demand, and have no
-// registration/stand/terminal field at all. The separately-existing Flight
-// model (Rostering's day-by-day "Flights" list, expanded at import time
-// from its own recurring pattern) DOES carry a registration via Aircraft,
-// so rows here are now auto-synced from it per date (taskAllocationService
-// .syncFlightInstancesFromFlightSchedule, via readOnlyFlightScheduleAdapter)
-// rather than hand-typed every day — but it still has no stand/terminal, so
-// those (and anything Flight doesn't cover, e.g. a charter) stay
-// entered/edited here directly. `source` tracks which a row is so a re-sync
-// never clobbers a stand/terminal someone already filled in.
+// range), used for aggregate daily headcount demand and, as of
+// taskAllocationService.syncFlightInstancesFromFlightSchedule (via
+// readOnlyFlightScheduleAdapter), auto-synced here too — this station's
+// actually-populated flight data, confirmed with the user. It has no
+// registration/stand/terminal field at all though (nor does the separate
+// Flight model — nothing in this app's UI ever sets Flight.aircraftId
+// either), so a synced row still needs those three filled in by hand
+// (Section 6), same as a flight the sync doesn't cover at all (e.g. a
+// charter arm with no matching leg here). `source` tracks which a row is
+// so a re-sync never clobbers what someone already filled in.
 model TaskAllocationFlightInstance {
   id                   String   @id @default(uuid())
   stationId            String // loose ref to Station.id — see file-header comment
   flightDate           DateTime @db.Date
   flightNumber         String
-  aircraftRegistration String
+  aircraftRegistration String? // not in the Turn Report — filled in by hand once known
   aircraftType         String?
   std                  DateTime? // scheduled departure, this calendar day
   sta                  DateTime? // scheduled arrival, this calendar day

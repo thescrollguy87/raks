@@ -188,6 +188,17 @@ describe("taskAllocationEngine.scoreCandidate — deterministic, reproducible", 
     expect(sameTail.score).toBeGreaterThan(differentTail.score);
   });
 
+  it("never scores task continuity as a match when the task has no registration set (synced from Flight Schedule, pre-edit)", () => {
+    // A Flight Instance synced from the Turn Report carries no registration
+    // until someone fills it in by hand — task.aircraftRegistration and an
+    // existing assignment's aircraftRegistration can both legitimately be
+    // null at once, and `null === null` must never read as "same tail."
+    const noTailTask = { ...baseTask, aircraftRegistration: null };
+    const withNullAssignment = scoreCandidate(noTailTask, { existingAssignments: [{ aircraftRegistration: null, taskEnd: "2026-10-02T19:00:00.000Z" }] });
+    const withNoAssignments = scoreCandidate(noTailTask, { existingAssignments: [] });
+    expect(withNullAssignment.breakdown.taskContinuity).toBe(withNoAssignments.breakdown.taskContinuity);
+  });
+
   it("weighted components sum to the overall score", () => {
     const { score, breakdown } = scoreCandidate(baseTask, { currentWorkloadMinutes: 50, existingAssignments: [] });
     const sum = Object.values(breakdown).reduce((a, b) => a + b, 0);

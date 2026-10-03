@@ -42,7 +42,7 @@ function generateTasksFromFlightInstance(flightInstance, rules) {
         aircraftType: flightInstance.aircraftType || null,
         taskType: rule.taskType,
         taskCategory: rule.taskType,
-        taskDescription: rule.taskDescription || `${rule.taskType} — ${flightInstance.flightNumber} (${flightInstance.aircraftRegistration})`,
+        taskDescription: rule.taskDescription || `${rule.taskType} — ${flightInstance.flightNumber} (${flightInstance.aircraftRegistration || "tail not yet set"})`,
         plannedStart, latestStart, deadline,
         estimatedDurationMin: rule.durationMin,
         requiredRole: rule.requiredRole || null,
@@ -214,8 +214,12 @@ function scoreCandidate(task, candidate, weights = DEFAULT_WEIGHTS) {
     // no previous task or no configured distance scores neutrally (0.5).
     travelTime: travelTimeScore(task, candidate),
     // Already working the SAME aircraft/location today scores higher —
-    // keeps one person on one tail/stand rather than shuttling everyone.
-    taskContinuity: (candidate.existingAssignments || []).some(a => a.aircraftRegistration === task.aircraftRegistration) ? 1 : 0.3,
+    // keeps one person on one tail/stand rather than shuttling everyone. A
+    // task with no registration set yet (the flight instance sync from the
+    // Flight Schedule module never carries one — Section 6) must never
+    // "match" another equally tail-less task: both sides are required so
+    // null-vs-null can't silently score as continuity.
+    taskContinuity: !!task.aircraftRegistration && (candidate.existingAssignments || []).some(a => a.aircraftRegistration === task.aircraftRegistration) ? 1 : 0.3,
     // Prefers a candidate who is currently LESS utilized relative to their
     // shift length — same spirit as workloadBalance but normalized to
     // their own actual shift duration rather than a flat 8h assumption.

@@ -20,7 +20,7 @@ const flightInstanceSchema = z.object({
   stationId: z.string().uuid(),
   flightDate: isoDate,
   flightNumber: z.string().min(1).max(20),
-  aircraftRegistration: z.string().min(1).max(20),
+  aircraftRegistration: z.string().max(20).optional().nullable(),
   aircraftType: z.string().max(40).optional(),
   std: isoDate.optional().nullable(),
   sta: isoDate.optional().nullable(),

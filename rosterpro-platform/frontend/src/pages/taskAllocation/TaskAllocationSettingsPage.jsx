@@ -188,27 +188,27 @@ function FlightsTab({ stationId }) {
   const [syncing, setSyncing] = useState(false);
   const [syncNote, setSyncNote] = useState("");
 
-  // Auto-fetches this date's flights from the Flights module (registration,
-  // type, STD/STA) every time the date changes — the Add form below stays
-  // only for anything that needs filling in by hand: stand, terminal, or a
-  // flight the Flights module doesn't carry at all (e.g. a charter).
+  // Auto-fetches this date's flights (flight number, STD/STA, and a
+  // Transit/PDC guess from ground time) from the Flight Schedule module
+  // (the Turn Report/Charter import) every time the date changes. That
+  // module has no registration, stand or terminal at all, so those three —
+  // and anything it doesn't carry at all (e.g. a charter) — always stay
+  // filled in by hand: click a synced row to add them, or use Add for a
+  // flight the schedule doesn't have.
   const sync = useCallback(() => {
     if (!stationId) return;
     setSyncing(true);
     taApi.syncFlightInstances(stationId, date)
-      .then(r => {
-        setRows(r.flightInstances);
-        setSyncNote(r.skippedNoAircraft > 0 ? `Synced ${r.syncedCount} from Flight Schedule — ${r.skippedNoAircraft} skipped (no aircraft registration set yet).` : `Synced ${r.syncedCount} from Flight Schedule.`);
-      })
+      .then(r => { setRows(r.flightInstances); setSyncNote(`Synced ${r.syncedCount} from Flight Schedule.`); })
       .catch(err => setSyncNote(`Couldn't sync: ${err.message}`))
       .finally(() => setSyncing(false));
   }, [stationId, date]);
   useEffect(() => { sync(); }, [sync]);
 
   async function save() {
-    if (!draft.flightNumber || !draft.aircraftRegistration) return;
+    if (!draft.flightNumber) return;
     await taApi.upsertFlightInstance({
-      id: draft.id, stationId, flightDate: date, flightNumber: draft.flightNumber, aircraftRegistration: draft.aircraftRegistration,
+      id: draft.id, stationId, flightDate: date, flightNumber: draft.flightNumber, aircraftRegistration: draft.aircraftRegistration || null,
       aircraftType: draft.aircraftType || undefined, stand: draft.stand || undefined, terminal: draft.terminal || undefined,
       isTransit: draft.isTransit,
       std: draft.std ? `${date}T${draft.std}:00.000Z` : undefined,
@@ -219,7 +219,7 @@ function FlightsTab({ stationId }) {
   }
   function edit(r) {
     setDraft({
-      id: r.id, flightNumber: r.flightNumber, aircraftRegistration: r.aircraftRegistration, aircraftType: r.aircraftType || "",
+      id: r.id, flightNumber: r.flightNumber, aircraftRegistration: r.aircraftRegistration || "", aircraftType: r.aircraftType || "",
       std: r.std ? new Date(r.std).toISOString().slice(11, 16) : "", sta: r.sta ? new Date(r.sta).toISOString().slice(11, 16) : "",
       stand: r.stand || "", terminal: r.terminal || "", isTransit: r.isTransit,
     });
@@ -230,7 +230,7 @@ function FlightsTab({ stationId }) {
     <div className="card">
       <div className="card-title">Today's Real Flight Instances — the Task Generator's daily input</div>
       <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-        Flight number, registration, type and STD/STA are fetched automatically from the Flights module for the date below. Fill in stand, terminal, or anything it doesn't carry (e.g. a charter) by clicking a row or using Add.
+        Flight number, STD/STA and a Transit/PDC guess are fetched automatically from the Flight Schedule module for the date below. Registration, stand and terminal aren't in that schedule — fill them in by clicking a row, or use Add for a flight it doesn't carry (e.g. a charter).
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
         <input type="date" className="fi" value={date} onChange={e => setDate(e.target.value)} style={{ width: 160 }} />
@@ -255,7 +255,7 @@ function FlightsTab({ stationId }) {
         <tbody>
           {rows.map(r => (
             <tr key={r.id} onClick={() => edit(r)} style={{ cursor: "pointer" }}>
-              <td>{r.flightNumber}</td><td>{r.aircraftRegistration}</td><td>{r.aircraftType || "—"}</td>
+              <td>{r.flightNumber}</td><td>{r.aircraftRegistration || "—"}</td><td>{r.aircraftType || "—"}</td>
               <td>{r.std ? new Date(r.std).toLocaleTimeString() : "—"}</td><td>{r.sta ? new Date(r.sta).toLocaleTimeString() : "—"}</td>
               <td>{r.stand || "—"}</td><td>{r.terminal || "—"}</td>
               <td style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.source === "AUTO_GENERATED" ? "Synced" : "Manual"}</td>

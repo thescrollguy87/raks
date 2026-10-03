@@ -52,11 +52,11 @@ function upsertFlightInstance(stationId, body, actor) {
   if (body.id) return taskAllocationConfigRepo.updateFlightInstance(body.id, { ...body, source: "MANUAL", updatedById: actor.sub });
   return taskAllocationConfigRepo.createFlightInstance({ ...body, stationId, createdById: actor.sub, updatedById: actor.sub });
 }
-// ─── Flight Instances: auto-sync from the Flights module (Section 6) ────────
+// ─── Flight Instances: auto-sync from the Flight Schedule module (Section 6) ─
 async function syncFlightInstancesFromFlightSchedule(stationId, date, actor) {
-  const { rows, skippedNoAircraft } = await readOnlyFlightScheduleAdapter.getFlightsForStationDate(stationId, date);
+  const { rows } = await readOnlyFlightScheduleAdapter.getFlightsForStationDate(stationId, date);
   const flightInstances = await taskAllocationConfigRepo.syncFlightInstancesForDate(stationId, dateOnly(date), rows, actor.sub);
-  return { flightInstances, syncedCount: rows.length, skippedNoAircraft };
+  return { flightInstances, syncedCount: rows.length };
 }
 function deleteFlightInstance(id, actor) {
   return taskAllocationConfigRepo.deleteFlightInstance(id, actor.sub);
