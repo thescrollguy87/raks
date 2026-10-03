@@ -67,7 +67,8 @@ export default function TaskDetailModal({ stationId, taskId, onClose, onChanged 
         <div className="card-title" style={{ marginBottom: 4 }}>{task.taskNumber} — {task.taskType}</div>
         <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 10 }}>
           {task.aircraftRegistration || "—"} {task.flightNumber ? `(${task.flightNumber})` : ""} · {task.stand ? `Stand ${task.stand}` : "No stand"} ·{" "}
-          {new Date(task.plannedStart).toLocaleString()} → deadline {new Date(task.deadline).toLocaleTimeString()} · Required: {task.requiredCategory || task.requiredRole || "—"}
+          {/* plannedStart/deadline are station wall-clock time stamped as UTC (same convention as Flight Instance std/sta) — timeZone:"UTC" reads it back literally instead of shifting into the viewer's own timezone */}
+          {new Date(task.plannedStart).toLocaleString(undefined, { timeZone: "UTC" })} → deadline {new Date(task.deadline).toLocaleTimeString(undefined, { timeZone: "UTC" })} · Required: {task.requiredCategory || task.requiredRole || "—"}
         </div>
 
         {active ? (

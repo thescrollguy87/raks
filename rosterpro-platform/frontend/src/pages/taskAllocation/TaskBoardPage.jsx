@@ -13,7 +13,13 @@ const STATUS_DOT = {
   UNASSIGNED: "🔴", CANCELLED: "⚪",
 };
 function todayIso() { return new Date().toISOString().slice(0, 10); }
-function fmtTime(d) { return d ? new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "—"; }
+// A task's own plannedStart is station wall-clock time stamped as UTC (same
+// convention as Flight Instance std/sta) — timeZone:"UTC" reads it back
+// literally instead of shifting it into the viewer's own timezone.
+function fmtTaskTime(d) { return d ? new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) : "—"; }
+// lastUpdated is a genuine `new Date()` capture of when this page last
+// fetched — a real instant, correctly shown in the viewer's own timezone.
+function fmtLocalTime(d) { return d ? new Date(d).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "—"; }
 
 export default function TaskBoardPage() {
   const { stationId } = useStation();
@@ -77,7 +83,7 @@ export default function TaskBoardPage() {
       {syncStatus && (
         <div className={`ab ${syncStatus.isPublished ? "green" : "amber"}`} style={{ marginBottom: 10 }}>
           Roster Date: <strong>{date}</strong> · Roster Status: <strong>{syncStatus.isPublished ? "Published" : "Draft"}</strong>
-          {lastUpdated && <> · Last Sync: <strong>{fmtTime(lastUpdated)}</strong></>}
+          {lastUpdated && <> · Last Sync: <strong>{fmtLocalTime(lastUpdated)}</strong></>}
         </div>
       )}
       {!syncStatus && !loading && (
@@ -134,7 +140,7 @@ export default function TaskBoardPage() {
                   const active = (t.assignments || []).find(a => a.status === "ACTIVE");
                   return (
                     <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => setSelectedTaskId(t.id)}>
-                      <td>{fmtTime(t.plannedStart)}</td>
+                      <td>{fmtTaskTime(t.plannedStart)}</td>
                       <td>{t.aircraftRegistration || "—"}{t.flightNumber ? ` (${t.flightNumber})` : ""}</td>
                       <td>{t.taskType}{t.stand ? ` · Stand ${t.stand}` : ""}</td>
                       <td>{t.requiredCategory || t.requiredRole || "—"}</td>

@@ -55,7 +55,8 @@ export default function UnassignedTasksPage() {
                   <div style={{ fontWeight: 700, fontSize: 12 }}>🔴 TASK UNASSIGNED — {t.taskNumber}</div>
                   <div style={{ fontSize: 11, color: "var(--text-dim)" }}>
                     Aircraft: {t.aircraftRegistration || "—"} · Task: {t.taskType} · Required: {t.requiredCategory || t.requiredRole || "—"}<br />
-                    Start: {new Date(t.plannedStart).toLocaleString()} · Deadline: {new Date(t.deadline).toLocaleTimeString()}
+                    {/* station wall-clock stamped as UTC — timeZone:"UTC" reads it back literally, not shifted to the viewer's own timezone */}
+                    Start: {new Date(t.plannedStart).toLocaleString(undefined, { timeZone: "UTC" })} · Deadline: {new Date(t.deadline).toLocaleTimeString(undefined, { timeZone: "UTC" })}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>

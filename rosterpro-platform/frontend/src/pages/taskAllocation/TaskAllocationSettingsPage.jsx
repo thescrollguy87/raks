@@ -7,6 +7,18 @@ import { useStation } from "../../store/StationContext.jsx";
 import * as taApi from "../../api/taskAllocation.js";
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
+// Flight Instance std/sta are "wall-clock stamped as UTC" (same convention
+// as the Flight Schedule module's own HH:MM figures, and as this page's own
+// manual-entry `${date}T${hh}:00.000Z` below) — a flight at 22:35 station
+// time is stored as 22:35Z, literally. Reading it back with
+// toLocaleTimeString() converts to the BROWSER's timezone and silently
+// shows the wrong clock time (and sometimes the wrong day) for anyone not
+// viewing from UTC+0; UTC getters read the stamped value back as typed.
+function hhmm(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const WEIGHT_FIELDS = [
   ["weightDeadline", "Deadline / task criticality"], ["weightWorkloadBalance", "Current workload balance"],
@@ -256,7 +268,7 @@ function FlightsTab({ stationId }) {
           {rows.map(r => (
             <tr key={r.id} onClick={() => edit(r)} style={{ cursor: "pointer" }}>
               <td>{r.flightNumber}</td><td>{r.aircraftRegistration || "—"}</td><td>{r.aircraftType || "—"}</td>
-              <td>{r.std ? new Date(r.std).toLocaleTimeString() : "—"}</td><td>{r.sta ? new Date(r.sta).toLocaleTimeString() : "—"}</td>
+              <td>{hhmm(r.std)}</td><td>{hhmm(r.sta)}</td>
               <td>{r.stand || "—"}</td><td>{r.terminal || "—"}</td>
               <td style={{ fontSize: 9, color: "var(--text-dim)" }}>{r.source === "AUTO_GENERATED" ? "Synced" : "Manual"}</td>
               <td><button className="btn btn-ghost btn-sm" onClick={e => { e.stopPropagation(); remove(r.id); }}>🗑</button></td>
