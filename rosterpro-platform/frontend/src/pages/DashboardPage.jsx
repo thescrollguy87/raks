@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
-import { getDashboardSummary, getStationsOverview } from "../api/dashboard.js";
+import { getDashboardSummary } from "../api/dashboard.js";
 import { getManhoursSummary } from "../api/rosterPlanning.js";
 import { listActivity } from "../api/audit.js";
 import { listLeave } from "../api/leave.js";
@@ -26,7 +26,6 @@ export default function DashboardPage() {
   const [data, setData] = useState(null);
   const [activity, setActivity] = useState(null);
   const [upcomingLeave, setUpcomingLeave] = useState(null);
-  const [stationsOverview, setStationsOverview] = useState(null);
   const [manhours, setManhours] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -68,17 +67,15 @@ export default function DashboardPage() {
       getDashboardSummary(stationId),
       listActivity({ pageSize: 8 }).catch(() => ({ items: [] })), // recent-changes feed is a nice-to-have; don't block the dashboard on it
       listLeave({ stationId, status: "APPROVED", from: todayIso, to: weekAhead, pageSize: 20 }).catch(() => null),
-      getStationsOverview().catch(() => null), // airline-wide only; a station-scoped caller just gets their own one row
       // Always recomputed fresh server-side off real ShiftAssignment rows, so
       // a manual roster edit + republish is reflected on the very next load
       // with no client-side caching to invalidate.
       getManhoursSummary(stationId, currentMonthKey).catch(() => null),
     ])
-      .then(([d, a, leave, stationsOv, mh]) => {
+      .then(([d, a, leave, mh]) => {
         if (cancelled) return;
         setData(d); setActivity(a.items || a);
         setUpcomingLeave(leave?.items || null);
-        setStationsOverview(stationsOv?.stations || null);
         setManhours(mh);
       })
       .catch(err => { if (!cancelled) setError(err.message); })
@@ -207,7 +204,7 @@ export default function DashboardPage() {
         </Widget>
       </div>
 
-      {/* Leave Balance / Flight Coverage / Roster Status */}
+      {/* Leave Balance / Roster Status */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>
         <Widget title="🏖 Leave Balance">
           <div className="gauge-row">
@@ -225,18 +222,6 @@ export default function DashboardPage() {
               empty: "No staff.",
             }) : undefined}
           />
-        </Widget>
-
-        <Widget title="✈️ Flight Coverage">
-          <div className="gauge-row">
-            <Gauge value={flightCoverage.onTimeRate} tone={flightCoverage.onTimeRate < 90 ? "amber" : "green"} size={64} strokeWidth={7} />
-            <div className="gauge-label">
-              <div className="gauge-label-title">On-Time Coverage</div>
-              <div className="gauge-label-sub">{flightCoverage.onTimeRate}% of flights on time</div>
-            </div>
-          </div>
-          <StatRow label="Total Flights" value={flightCoverage.totalFlights} onClick={() => navigate("/flights")} />
-          <StatRow label="Engineering Delay (min)" value={flightCoverage.totalEngineeringDelayMinutes} onClick={() => navigate("/flights")} />
         </Widget>
 
         <RosterStatusWidget rosterCoverage={rosterCoverage} station={currentStation} onOpenRoster={() => navigate("/roster")} onOpenAlerts={openAlerts} />
@@ -265,7 +250,7 @@ export default function DashboardPage() {
         </Widget>
       </div>
 
-      {/* Recent Changes / Upcoming Leave / Station Overview */}
+      {/* Recent Changes / Upcoming Leave */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14 }}>
         <Widget title="🕐 Recent Changes">
           {!activity || activity.length === 0 ? (
@@ -307,30 +292,6 @@ export default function DashboardPage() {
             </div>
           )}
         </Widget>
-
-        {stationsOverview && stationsOverview.length > 1 && (
-          <Widget title="🗺️ Station Overview">
-            <div style={{ overflowX: "auto" }}>
-              <table className="dc-table">
-                <thead>
-                  <tr><th style={{ textAlign: "left" }}>Station</th><th>Staff</th><th>Flights</th><th>Coverage</th></tr>
-                </thead>
-                <tbody>
-                  {stationsOverview.slice(0, 8).map(s => (
-                    <tr key={s.stationId} style={{ cursor: "pointer" }} title={`${s.name} — on duty today`}>
-                      <td style={{ textAlign: "left", fontWeight: 700 }}>{s.iataCode}</td>
-                      <td>{s.staffCount}</td>
-                      <td>{s.flightsThisMonth}</td>
-                      <td>
-                        <span className={`metric-badge ${s.coveragePct >= 90 ? "green" : s.coveragePct >= 70 ? "amber" : "red"}`}>{s.coveragePct}%</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Widget>
-        )}
       </div>
 
       {detail && (
