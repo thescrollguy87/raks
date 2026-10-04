@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo, Fragment } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAuth } from "../store/AuthContext.jsx";
@@ -1254,6 +1254,7 @@ function CoverageRows({ staff, dayRange, monthKey, todayDayNum, showTotals, nDay
 // staff on that shift that day, same computation the in-grid coverage rows
 // above use.
 function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandatoryRules, todayDayNum }) {
+  const [byCategory, setByCategory] = useState(false);
   // {shift: [{category, minCount}, ...]} — enabled rules only, per category
   // (NOT summed into a single combined number — a shift can look "fully
   // staffed" on a combined total while actually missing a required category,
@@ -1282,10 +1283,23 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
 
   const hasRules = mandatoryRules.some(r => r.enabled);
   const totalAssigned = counts => Object.values(counts).reduce((sum, n) => sum + n, 0);
+  // Only categories this station actually has staff in — never an always-
+  // zero row for a category (e.g. STO) nobody here is ever assigned to.
+  const categoriesPresent = useMemo(() => {
+    const seen = new Set(staff.map(s => s.category || "NCS"));
+    return CATEGORIES.filter(c => seen.has(c));
+  }, [staff]);
 
   return (
     <div className="card">
-      <div className="card-title">📅 Daily Coverage <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— Required vs Assigned Staff</span></div>
+      <div className="card-title" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span>📅 Daily Coverage <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>— Required vs Assigned Staff</span></span>
+        {categoriesPresent.length > 1 && (
+          <button className="btn btn-ghost btn-sm" style={{ textTransform: "none", fontWeight: 400 }} onClick={() => setByCategory(v => !v)}>
+            {byCategory ? "Hide category breakdown" : "Show by category"}
+          </button>
+        )}
+      </div>
       {!hasRules && (
         <div className="empty-note">No mandatory coverage rules are enabled yet (Auto Generator → Rule Builder) — showing assigned counts only.</div>
       )}
@@ -1302,19 +1316,40 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
               const reqs = requiredByShift[sh.key];
               const totalReq = reqs.reduce((sum, r) => sum + r.minCount, 0);
               return (
-                <tr key={sh.key}>
-                  <td>{sh.label}{hasRules && totalReq > 0 ? ` (Req ${totalReq})` : ""}</td>
-                  {assignedByDayShift.map(({ day, counts }) => {
-                    const dayCounts = counts[sh.key];
-                    const assigned = totalAssigned(dayCounts);
-                    const shortCategories = reqs.filter(r => (dayCounts[r.category] || 0) < r.minCount);
-                    const short = hasRules && shortCategories.length > 0;
-                    const title = shortCategories.length > 0
-                      ? `Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount}, have ${dayCounts[c.category] || 0})`).join(", ")}`
-                      : undefined;
-                    return <td key={day} title={title} className={short ? "dc-short" : hasRules && reqs.length > 0 ? "dc-ok" : undefined}>{assigned}</td>;
+                <Fragment key={sh.key}>
+                  <tr>
+                    <td>{sh.label}{hasRules && totalReq > 0 ? ` (Req ${totalReq})` : ""}</td>
+                    {assignedByDayShift.map(({ day, counts }) => {
+                      const dayCounts = counts[sh.key];
+                      const assigned = totalAssigned(dayCounts);
+                      const shortCategories = reqs.filter(r => (dayCounts[r.category] || 0) < r.minCount);
+                      const short = hasRules && shortCategories.length > 0;
+                      const title = shortCategories.length > 0
+                        ? `Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount}, have ${dayCounts[c.category] || 0})`).join(", ")}`
+                        : undefined;
+                      return <td key={day} title={title} className={short ? "dc-short" : hasRules && reqs.length > 0 ? "dc-ok" : undefined}>{assigned}</td>;
+                    })}
+                  </tr>
+                  {byCategory && categoriesPresent.map(cat => {
+                    const req = reqs.find(r => r.category === cat);
+                    return (
+                      <tr key={`${sh.key}-${cat}`}>
+                        <td style={{ paddingLeft: 20, fontSize: 10, fontWeight: 400, color: "var(--text-dim)" }}>
+                          {cat}{hasRules && req ? ` (Req ${req.minCount})` : ""}
+                        </td>
+                        {assignedByDayShift.map(({ day, counts }) => {
+                          const have = counts[sh.key][cat] || 0;
+                          const short = hasRules && req && have < req.minCount;
+                          return (
+                            <td key={day} style={{ fontSize: 10, color: "var(--text-dim)" }} className={short ? "dc-short" : undefined}>
+                              {have}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
                   })}
-                </tr>
+                </Fragment>
               );
             })}
             <tr>
