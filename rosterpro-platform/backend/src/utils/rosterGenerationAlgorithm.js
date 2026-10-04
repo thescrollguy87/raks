@@ -449,6 +449,31 @@ function buildRosterAssignments({
   const violations = [];
   const advisoryGaps = [];
   const flexiAssignments = []; // last-resort off-day fills, kept separate from ordinary assignments for transparency
+  // How many times each staff member has already been pulled as a
+  // same-day redistribution donor or a flexi off-day fill THIS
+  // generation run — shared across every day/category/pass below.
+  // rebalanceDay's own candidate search used to take the FIRST eligible
+  // match in array order every time, with nothing stopping the exact
+  // same person from being the "first eligible" pick day after day
+  // whenever a shortfall keeps recurring (confirmed directly: a forced
+  // persistent Morning/Afternoon shortfall on a reduced Standard-rotation
+  // pool — e.g. after moving several of a category's staff onto
+  // NIGHT_ONLY_CYCLE — produced the same few people repeatedly flexi-
+  // pulled, landing them on unnatural-looking strings like 5
+  // Mornings or Afternoons in a row that don't match either real
+  // pattern). Preferring whichever eligible candidate has been pulled
+  // the FEWEST times so far spreads these pulls across everyone equally
+  // eligible, instead of always reaching for the same person.
+  const pullCount = {};
+  function pickFairest(list, predicate) {
+    let best = null, bestCount = Infinity;
+    for (const item of list) {
+      if (!predicate(item)) continue;
+      const count = pullCount[item.id] || 0;
+      if (count < bestCount) { bestCount = count; best = item; }
+    }
+    return best;
+  }
 
   function eligibleBase(s, day) {
     if (blocked.has(s.id)) return false;
@@ -543,9 +568,10 @@ function buildRosterAssignments({
           if (sourceShift === deficitShift) continue;
           const floor = mandatoryFloors?.[sourceShift] || 0;
           if (bucket[sourceShift].length <= floor) continue; // no real surplus there
-          const donorIdx = bucket[sourceShift].findIndex(s => restGapOk(s, day, deficitShift));
-          if (donorIdx === -1) continue;
-          const [donor] = bucket[sourceShift].splice(donorIdx, 1);
+          const donor = pickFairest(bucket[sourceShift], s => restGapOk(s, day, deficitShift));
+          if (!donor) continue;
+          bucket[sourceShift].splice(bucket[sourceShift].indexOf(donor), 1);
+          pullCount[donor.id] = (pullCount[donor.id] || 0) + 1;
           grid[donor.id][day - 1] = deficitShift;
           bucket[deficitShift].push(donor);
           moved = true;
@@ -576,11 +602,12 @@ function buildRosterAssignments({
         // ORIGINAL same-category case below still applies unconditionally
         // for a mandatory floor.
         if (mandatory || allowPatternOverrideForCoverage) {
-          const flexiCandidate = staff.find(s => (
+          const flexiCandidate = pickFairest(staff, s => (
             s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
             && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
           ));
           if (flexiCandidate) {
+            pullCount[flexiCandidate.id] = (pullCount[flexiCandidate.id] || 0) + 1;
             grid[flexiCandidate.id][day - 1] = deficitShift;
             flexiAssignments.push({ userId: flexiCandidate.id, day, shift: deficitShift, category, mandatory });
             bucket[deficitShift].push(flexiCandidate);

@@ -978,3 +978,31 @@ describe("buildRosterAssignments — continuity into an ambiguous custom pattern
     expect(codesFor("x0")).not.toEqual(codesFor("x1"));
   });
 });
+
+describe("buildRosterAssignments — flexi/redistribution pulls spread fairly instead of always hitting the same person", () => {
+  // Real example this guards against: splitting a category's staff
+  // between NIGHT_ONLY_CYCLE and ROTATION shrinks the Standard-rotation
+  // pool available to cover Morning/Afternoon, making a recurring
+  // Mandatory shortfall there (and the flexi pulls needed to patch it)
+  // more likely than before this feature existed — and the pre-existing
+  // candidate search (`staff.find`/`.findIndex`, always the first
+  // eligible match in array order) had no fairness built in, so a
+  // recurring shortfall kept reaching for the SAME person, producing
+  // unnatural strings like 5 Mornings in a row that don't match any real
+  // pattern. A persistent Mandatory floor the staff pool can't fully
+  // cover on its own forces repeated flexi pulls here, same mechanism.
+  it("spreads repeated flexi pulls across multiple staff members rather than concentrating on one or two", () => {
+    const staff = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, category: "NCS" }));
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 4 }, A: { enabled: true, min: 2 }, N: { enabled: true, min: 1 } } };
+    const result = buildRosterAssignments({ staff, nDays: 24, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    const pullsByUser = {};
+    result.flexiAssignments.forEach(f => { pullsByUser[f.userId] = (pullsByUser[f.userId] || 0) + 1; });
+    const counts = Object.values(pullsByUser);
+    expect(result.flexiAssignments.length).toBeGreaterThan(5); // the scenario genuinely needs repeated flexi pulls
+    // At least half the staff pool shares the load — never all concentrated
+    // on one or two people the way the first-match-wins selection did.
+    expect(Object.keys(pullsByUser).length).toBeGreaterThanOrEqual(staff.length / 2);
+    // No single person absorbs more than half of all the pulls.
+    expect(Math.max(...counts)).toBeLessThanOrEqual(Math.ceil(result.flexiAssignments.length / 2));
+  });
+});
