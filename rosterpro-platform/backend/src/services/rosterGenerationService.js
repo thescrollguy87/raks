@@ -433,7 +433,17 @@ function buildStaffWithShifts(staff, assignments, nDays) {
 // "apply this exact previewed plan" path to keep in sync — a second call is
 // the apply.
 async function generateRoster(stationId, monthKey, actor, req, options = {}) {
-  const { preview = false, continueFromPrevious = false, usePatterns = false, allowPatternOverride = false, applyLeave = true, aogBuffer = 0 } = options;
+  const {
+    preview = false, continueFromPrevious = false, usePatterns = false, allowPatternOverride = false, applyLeave = true, aogBuffer = 0,
+    // Station-level choice between buildRosterAssignments's two no-pattern
+    // modes: true (default) is the demand-weighted mix of ROTATION and
+    // NIGHT_ONLY_CYCLE sized per category by real workload; false keeps
+    // every unpatterned staff member on the plain flat ROTATION uniformly,
+    // the pre-NIGHT_ONLY_CYCLE behavior, for a manager who'd rather have
+    // one simple, predictable pattern for everyone than the better-
+    // matched-to-demand but less uniform mix.
+    splitNightOnly = true,
+  } = options;
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
@@ -489,6 +499,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     nightRestrictionRules: workloadContext.nightRestrictionRules,
     staffGroupMembersByGroupId: workloadContext.staffGroupMembersByGroupId,
     advisoryDemand: workloadContext.advisoryDemand,
+    splitNightOnly,
     // A rotation is a PERPETUAL cycle — it should never reset to the same
     // phase just because a new month started. Anchoring the flat ROTATION
     // and every named Staff Allocation pattern to real days-since-epoch (of

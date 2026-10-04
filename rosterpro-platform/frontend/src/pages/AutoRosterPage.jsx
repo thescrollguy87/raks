@@ -1254,6 +1254,7 @@ function GenerateTab({ stationId }) {
   const allowPatternOverride = patternMode === "hybrid";
   const [applyLeave, setApplyLeave] = useState(true);
   const [continueFromPrevious, setContinueFromPrevious] = useState(true);
+  const [splitNightOnly, setSplitNightOnly] = useState(true);
   const [aogBuffer, setAogBuffer] = useState(2);
   const [plan, setPlan] = useState(null);
   const [preview, setPreview] = useState(null);
@@ -1284,7 +1285,7 @@ function GenerateTab({ stationId }) {
     setAnalysisBusy(true);
     setError("");
     try {
-      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
+      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, splitNightOnly });
       setPreview(previewResult);
     } catch (err) { setError(err.message); } finally { setAnalysisBusy(false); }
   }
@@ -1296,7 +1297,7 @@ function GenerateTab({ stationId }) {
     try {
       const [planResult, previewResult] = await Promise.all([
         planningApi.getManpowerPlan(stationId, monthKey, aogBuffer),
-        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer }),
+        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, splitNightOnly }),
       ]);
       setPlan(planResult);
       setPreview(previewResult);
@@ -1310,7 +1311,7 @@ function GenerateTab({ stationId }) {
     setBusy(true);
     setError("");
     try {
-      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
+      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, splitNightOnly });
       setApplied(result);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
@@ -1517,6 +1518,12 @@ function GenerateTab({ stationId }) {
                 <option value="strict">Yes — follow staff pattern assignments (strict)</option>
                 <option value="hybrid">Yes — patterns + automatic override for gaps</option>
                 <option value="off">No — auto-distribute by workload only</option>
+              </select>
+            </div>
+            <div className="fg"><label className="fl">Shift pattern mix (unpatterned staff)? <span className="help-tip" tabIndex={0} title="Applies to staff with no explicit Staff Allocation pattern assigned. Hybrid: splits each category between the standard M,M,A,A,N,N,O,O rotation and a dedicated Night-only N,N,O,O pattern, sized to that category's real average workload — e.g. a Night-heavy category like NCS gets more staff on the Night pattern. Uniform: keeps everyone on the standard M,M,A,A,N,N,O,O rotation regardless of real demand — simpler and fully predictable, at the cost of not matching workload as closely.">ⓘ</span></label>
+              <select className="fi" value={splitNightOnly ? "1" : "0"} onChange={e => setSplitNightOnly(e.target.value === "1")}>
+                <option value="1">Hybrid — mix of standard rotation + Night-only, by workload (recommended)</option>
+                <option value="0">Uniform — everyone on the standard M,M,A,A,N,N,O,O rotation</option>
               </select>
             </div>
             <div className="fg"><label className="fl">Apply leave entries?</label>

@@ -1006,3 +1006,41 @@ describe("buildRosterAssignments — flexi/redistribution pulls spread fairly in
     expect(Math.max(...counts)).toBeLessThanOrEqual(Math.ceil(result.flexiAssignments.length / 2));
   });
 });
+
+describe("buildRosterAssignments — splitNightOnly: the station-level choice between the two no-pattern modes", () => {
+  const staff = Array.from({ length: 17 }, (_, i) => ({ id: `n${i}`, category: "NCS" }));
+  const advisoryDemand = {};
+  for (let d = 1; d <= 8; d++) advisoryDemand[d] = { M: { NCS: 2.1 }, A: { NCS: 2.0 }, N: { NCS: 4.0 } };
+
+  it("defaults to true (today's demand-weighted hybrid mix) when omitted, same as every earlier test in this file", () => {
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], advisoryDemand });
+    const codes = result.assignments.map(a => a.code);
+    expect(codes.filter(c => c === "N").length).toBeGreaterThan(0);
+    // Confirms at least one person is on the dedicated Night-only pattern
+    // (only reachable via the hybrid mix) rather than everyone uniformly
+    // on the flat rotation.
+    const byUser = {};
+    result.assignments.forEach(a => { (byUser[a.userId] ??= []).push(a.code); });
+    const nightOnlyUsers = Object.values(byUser).filter(c => !c.includes("A") && !c.includes("M"));
+    expect(nightOnlyUsers.length).toBeGreaterThan(0);
+  });
+
+  it("splitNightOnly: false keeps every unpatterned staff member uniformly on the plain flat ROTATION, regardless of real demand", () => {
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], advisoryDemand, splitNightOnly: false });
+    const byUser = {};
+    result.assignments.forEach(a => { (byUser[a.userId] ??= []).push(a.code); });
+    // Nobody should be on a pure-Night (no M, no A) pattern when the
+    // uniform mode is selected, however Night-heavy the real demand is.
+    const nightOnlyUsers = Object.values(byUser).filter(c => !c.includes("A") && !c.includes("M"));
+    expect(nightOnlyUsers.length).toBe(0);
+  });
+
+  it("an explicit Staff Allocation pattern always wins regardless of splitNightOnly", () => {
+    const patternByUser = { n0: { codes: ["G"], offset: 0 } };
+    const resultHybrid = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], advisoryDemand, patternByUser, splitNightOnly: true });
+    const resultUniform = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], advisoryDemand, patternByUser, splitNightOnly: false });
+    const codesFor = (result) => result.assignments.filter(a => a.userId === "n0").map(a => a.code);
+    expect(codesFor(resultHybrid).every(c => c === "G")).toBe(true);
+    expect(codesFor(resultUniform).every(c => c === "G")).toBe(true);
+  });
+});

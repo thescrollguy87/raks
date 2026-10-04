@@ -55,6 +55,7 @@ const generateRosterSchema = z.object({
   allowPatternOverride: z.boolean().optional(),
   applyLeave: z.boolean().optional(),
   aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
+  splitNightOnly: z.boolean().optional(),
 });
 
 const archiveQuerySchema = z.object({
