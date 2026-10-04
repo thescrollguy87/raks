@@ -1,4 +1,4 @@
-const { buildRosterAssignments, buildCategoryCycle, resyncCycleStart, ROTATION } = require("../src/utils/rosterGenerationAlgorithm");
+const { buildRosterAssignments, computeNightOnlyCount, resyncCycleStart, ROTATION } = require("../src/utils/rosterGenerationAlgorithm");
 
 function makeStaff(n, category) {
   return Array.from({ length: n }, (_, i) => ({ id: `${category}${i}`, category }));
@@ -710,15 +710,11 @@ describe("buildRosterAssignments — Mandatory vs Advisory two-tier coverage con
 
   it("advisory demand tops up coverage beyond the mandatory minimum, non-critically", () => {
     const staff = Array.from({ length: 6 }, (_, i) => ({ id: `b1${i}`, category: "B1" }));
-    // N left unmandated — this test is about Morning's advisory top-up, not
-    // Night coverage, and advisoryDemand here is a deliberately sparse
-    // (Morning-day-1-only) fixture: buildCategoryCycle now also reads this
-    // same advisoryDemand to shape B1's base rotation (see
-    // rosterGenerationAlgorithm.js), and a fixture this sparse happens to
-    // produce a Night-free base cycle — true to a real month's fully
-    // populated advisoryDemand, but not what this fixture represents.
-    // Requiring Night coverage here would be testing an artifact of the
-    // fixture's sparseness, not the advisory-topup behavior itself.
+    // N left unmandated — this test is about Morning's advisory top-up,
+    // not Night coverage, and keeping it out of scope avoids this test
+    // depending on exactly how many B1 staff computeNightOnlyCount (see
+    // rosterGenerationAlgorithm.js, which also reads this same sparse
+    // advisoryDemand) decides to move onto NIGHT_ONLY_CYCLE.
     const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: false } } };
     const advisoryDemand = { 1: { M: { B1: 3 } } };
     const result = buildRosterAssignments({
@@ -824,55 +820,47 @@ describe("buildRosterAssignments — trainingPendingUserIds (Section 4/4: mandat
   });
 });
 
-describe("buildCategoryCycle — demand-weighted base rotation per category", () => {
+describe("computeNightOnlyCount — how many of a category's unpatterned staff go on NIGHT_ONLY_CYCLE", () => {
   function flatDemand(byShift, nDays) {
     const d = {};
     for (let day = 1; day <= nDays; day++) d[day] = { M: { X: byShift.M }, A: { X: byShift.A }, N: { X: byShift.N } };
     return d;
   }
 
-  it("reproduces the exact original flat ROTATION for a perfectly even 1:1:1 M:A:N category", () => {
-    const cycle = buildCategoryCycle("X", flatDemand({ M: 1, A: 1, N: 1 }, 10), 10);
-    expect(cycle).toEqual(ROTATION);
+  it("keeps everyone on the plain ROTATION (k=0) for a perfectly even 1:1:1 M:A:N category", () => {
+    expect(computeNightOnlyCount("X", flatDemand({ M: 1, A: 1, N: 1 }, 10), 10, 9)).toBe(0);
   });
 
-  it("falls back to the flat ROTATION when there's no computed demand at all for this category (e.g. STO)", () => {
-    expect(buildCategoryCycle("STO", {}, 10)).toEqual(ROTATION);
-    expect(buildCategoryCycle("STO", undefined, 10)).toEqual(ROTATION);
+  it("keeps everyone on the plain ROTATION when there's no computed demand at all for this category (e.g. STO)", () => {
+    expect(computeNightOnlyCount("STO", {}, 10, 4)).toBe(0);
+    expect(computeNightOnlyCount("STO", undefined, 10, 4)).toBe(0);
   });
 
-  it("weights toward Night for a Night-dominant category (B2-like), at the cost of overall on-duty cadence", () => {
+  it("moves everyone to NIGHT_ONLY_CYCLE for an all-Night category (B2-like)", () => {
     // Real demand ~0 Morning/Afternoon, 1 Night — matches a station's B2
     // Mandatory Coverage commonly being Night-only.
-    const cycle = buildCategoryCycle("X", flatDemand({ M: 0, A: 0, N: 1 }, 10), 10);
-    expect(cycle).toEqual(["N", "N", "O", "O"]);
-    // 50% on-duty — below the original rotation's 75% — is the direct,
-    // intended consequence of the hard "2 nights -> 2 forced rest days"
-    // rule: an all-Night cycle can never clear 50% no matter how it's
-    // shaped, confirmed directly with the user as the right tradeoff.
-    const onDays = cycle.filter(c => c !== "O").length;
-    expect(onDays / cycle.length).toBeCloseTo(0.5, 5);
+    expect(computeNightOnlyCount("X", flatDemand({ M: 0, A: 0, N: 1 }, 10), 10, 6)).toBe(6);
   });
 
-  it("weights toward Morning/Afternoon, proportionally to their own demand, for a Night-light category", () => {
-    const cycle = buildCategoryCycle("X", flatDemand({ M: 3, A: 1, N: 0 }, 10), 10);
-    // No Night demand at all -> no forced-rest overhead; Morning gets
-    // roughly 3x Afternoon's slots, matching the 3:1 real demand ratio.
-    expect(cycle.filter(c => c === "M").length).toBeGreaterThan(cycle.filter(c => c === "A").length);
-    expect(cycle).not.toContain("N");
+  it("moves nobody to NIGHT_ONLY_CYCLE for a category with no real Night demand at all", () => {
+    expect(computeNightOnlyCount("X", flatDemand({ M: 3, A: 1, N: 0 }, 10), 10, 8)).toBe(0);
   });
 
-  it("shifts the Night share of on-duty days up for a category between the two extremes (NCS-like), still never exceeding a legal 2-consecutive-night run", () => {
-    // Roughly this session's real NCS numbers: M 2.1, A 2.0, N 4.0.
-    const cycle = buildCategoryCycle("X", flatDemand({ M: 2.1, A: 2.0, N: 4.0 }, 10), 10);
-    const nightShareOfOnDays = cycle.filter(c => c === "N").length / cycle.filter(c => c !== "O").length;
-    const originalNightShare = ROTATION.filter(c => c === "N").length / ROTATION.filter(c => c !== "O").length; // 2/6
-    expect(nightShareOfOnDays).toBeGreaterThan(originalNightShare);
-    // Never more than 2 N's in a row anywhere the cycle repeats (checked
-    // across two concatenated copies, so the wrap-around join is covered
-    // too).
-    const doubled = [...cycle, ...cycle].join(",");
-    expect(doubled).not.toMatch(/N,N,N/);
+  it("moves a genuine fraction (strictly between 0 and the full headcount) for a category between the two extremes (NCS-like)", () => {
+    // This session's real NCS numbers: M 2.1, A 2.0, N 4.0, 17 staff ->
+    // works out to k=5 (verified: pushes the category's overall Night
+    // share of on-duty days up from the plain rotation's 1-in-3 toward
+    // the ~0.49 real target, without moving everyone).
+    const k = computeNightOnlyCount("X", flatDemand({ M: 2.1, A: 2.0, N: 4.0 }, 10), 10, 17);
+    expect(k).toBeGreaterThan(0);
+    expect(k).toBeLessThan(17);
+    expect(k).toBe(5);
+  });
+
+  it("never returns more than the category's real headcount or less than zero", () => {
+    const extreme = computeNightOnlyCount("X", flatDemand({ M: 0, A: 0, N: 100 }, 5), 5, 3);
+    expect(extreme).toBeLessThanOrEqual(3);
+    expect(extreme).toBeGreaterThanOrEqual(0);
   });
 });
 
@@ -910,16 +898,15 @@ describe("buildRosterAssignments — demand-weighted base rotation, end to end",
     for (let d = 1; d <= 24; d++) expect(nightByDay[d] || 0).toBeGreaterThan(0);
   });
 
-  it("spreads NCS-sized headcount (17 staff) evenly across a demand-weighted cycle shorter than the old 8-day rotation, on every single day — not just on average", () => {
-    // This session's real NCS numbers: M 2.1, A 2.0, N 4.0 -> builds the
-    // M,A,N,N,O,O (6-long) cycle covered by the buildCategoryCycle tests
-    // above. The bug this guards against only showed up per-DAY (a step
-    // size that clumped 17 people onto just 3 of the cycle's 6 positions,
-    // e.g. day 1 showing 5 Morning / 2 Afternoon / 2 Night against a
-    // ~17*1/6≈2.8/2.8/5.7 target) — a test that only checked the MONTHLY
-    // AVERAGE wouldn't have caught it, since the average across a full
-    // repeating cycle is identical regardless of how badly any single day
-    // clumps.
+  it("spreads NCS-sized headcount (17 staff) evenly across the NIGHT_ONLY_CYCLE/ROTATION split, on every single day — not just on average", () => {
+    // This session's real NCS numbers: M 2.1, A 2.0, N 4.0 -> computeNightOnlyCount
+    // works out to 5 of 17 staff on NIGHT_ONLY_CYCLE, the rest on ROTATION
+    // (covered directly by the computeNightOnlyCount tests above). The bug
+    // this guards against only showed up per-DAY (an offset scheme that
+    // clumped many staff onto the same phase of their sub-group's cycle) —
+    // a test that only checked the MONTHLY AVERAGE wouldn't have caught
+    // it, since the average across a full repeating cycle is identical
+    // regardless of how badly any single day clumps.
     const staff = makeStaff(17, "NCS");
     const advisoryDemand = {};
     for (let d = 1; d <= 30; d++) advisoryDemand[d] = { M: { NCS: 2.1 }, A: { NCS: 2.0 }, N: { NCS: 4.0 } };
@@ -928,8 +915,8 @@ describe("buildRosterAssignments — demand-weighted base rotation, end to end",
     result.assignments.forEach(a => { (byDayCode[a.day] ??= {})[a.code] = (byDayCode[a.day]?.[a.code] || 0) + 1; });
     for (let d = 1; d <= 30; d++) {
       const counts = byDayCode[d] || {};
-      // Every one of the 6 cycle positions should be occupied by at least
-      // one of the 17 staff every day — nothing left at literally zero.
+      // Morning, Afternoon and Night should all be covered by at least one
+      // of the 17 staff every day — nothing left at literally zero.
       expect(counts.M || 0).toBeGreaterThan(0);
       expect(counts.A || 0).toBeGreaterThan(0);
       expect(counts.N || 0).toBeGreaterThan(0);
@@ -938,10 +925,11 @@ describe("buildRosterAssignments — demand-weighted base rotation, end to end",
 });
 
 describe("resyncCycleStart — preferred-offset tiebreaker for ambiguous continuity matches", () => {
-  // The flat 8-day ROTATION's consecutive-code pairs (MM/MA/AA/AN/NN/NO/
-  // OO/OM) are all distinct, so this ambiguity case never came up before
-  // buildCategoryCycle started producing cycles with repeated codes back
-  // to back (e.g. a Morning-heavy category's M,M,M,A,N,N,O,O).
+  // Neither built-in no-pattern cycle (ROTATION or NIGHT_ONLY_CYCLE — see
+  // computeNightOnlyCount) has a repeated consecutive-code pair, so this
+  // ambiguity case doesn't come up for them. It's a real possibility for a
+  // hand-defined Staff Allocation pattern though — an admin is free to
+  // define a pattern with 3 Mornings in a row, e.g. M,M,M,A,N,N,O,O.
   const cycle = ["M", "M", "M", "A", "N", "N", "O", "O"];
 
   it("without a usable preferred offset, falls back to the first matching position (old behavior)", () => {
@@ -969,18 +957,23 @@ describe("resyncCycleStart — preferred-offset tiebreaker for ambiguous continu
   });
 });
 
-describe("buildRosterAssignments — continuity into a reshaped cycle doesn't re-clump staff", () => {
-  it("two staff members continuing identical recent history into a Morning-heavy category cycle land on different phases, not the same one", () => {
+describe("buildRosterAssignments — continuity into an ambiguous custom pattern doesn't re-clump staff", () => {
+  it("two staff members on the same hand-defined pattern, continuing identical recent history, land on different phases, not the same one", () => {
     const staff = [{ id: "x0", category: "X" }, { id: "x1", category: "X" }];
-    // Both staff ended last month on the same 2 days: Afternoon then
-    // Morning — a real, plausible coincidence for two different people.
-    const tailByUser = { x0: ["M", "A", "O"], x1: ["M", "A", "O"] };
-    const advisoryDemand = {};
-    // Strongly Morning-dominant, negligible Night -> buildCategoryCycle
-    // produces a cycle with 3 consecutive M's (duplicate M,M pairs),
-    // exactly the shape that exposed the clumping bug.
-    for (let d = 1; d <= 8; d++) advisoryDemand[d] = { M: { X: 8 }, A: { X: 1 }, N: { X: 1 } };
-    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, advisoryDemand });
+    // Both staff ended last month on the same 2 days: Morning then Morning
+    // again — a real, plausible coincidence for two different people on
+    // the same named Staff Allocation pattern.
+    const tailByUser = { x0: ["M", "M", "O"], x1: ["M", "M", "O"] };
+    // A hand-defined pattern with 3 consecutive Mornings (duplicate M,M
+    // pairs) — the kind of shape an admin, not computeNightOnlyCount, is
+    // responsible for now; x0 and x1 are on the SAME named pattern but
+    // started it on different weeks (different `offset`), same as two
+    // real staff members would be.
+    const patternByUser = {
+      x0: { codes: ["M", "M", "M", "A", "N", "N", "O", "O"], offset: 0 },
+      x1: { codes: ["M", "M", "M", "A", "N", "N", "O", "O"], offset: 4 },
+    };
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, patternByUser });
     const codesFor = (id) => result.assignments.filter(a => a.userId === id).sort((a, b) => a.day - b.day).map(a => a.code);
     expect(codesFor("x0")).not.toEqual(codesFor("x1"));
   });

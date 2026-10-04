@@ -6,13 +6,14 @@
 //
 // Ported from reference-ui/index.html's applyAutoRoster()/fillMinCat(), which
 // is the source of truth for this algorithm. Steps, in order:
-//   1. Each unpatterned staff member gets their CATEGORY's own demand-
-//      weighted cycle (see buildCategoryCycle — a perfectly even category
-//      reproduces the original flat 8-day M,M,A,A,N,N,O,O), offset by
-//      their position among same-category staff so the whole category
-//      isn't on the same phase of the cycle at once — same spreading goal
-//      as the reference's "auto-distribute" default, generalized to work
-//      for a cycle of any shape, not just the original uniformly-paired one.
+//   1. Each unpatterned staff member gets either the flat 8-day ROTATION
+//      or the dedicated NIGHT_ONLY_CYCLE, in a mix sized per category by
+//      computeNightOnlyCount from that category's real demand (a
+//      perfectly even category keeps everyone on ROTATION, same as
+//      before this feature existed) — offset by their position within
+//      their own sub-group so the whole sub-group isn't on the same
+//      phase of its cycle at once, same spreading goal as the reference's
+//      "auto-distribute" default.
 //   2. Blocked staff (expired quals/license) get all-OFF — never scheduled.
 //   3. Approved leave overrides the rotation for those specific days.
 //   4. A rest-gap pass, applied inline day-by-day (not as a separate sweep,
@@ -70,34 +71,51 @@
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
+// The other half of the no-pattern "which cycle does an unpatterned
+// category get" story below — a plain, dedicated Night pattern. Never
+// mixed INTO a single person's own cycle (an earlier version of this file
+// tried blending M/A/N proportions into one hybrid per-person cycle per
+// category, e.g. NCS getting M,A,N,N,O,O for literally everyone in it —
+// confirmed directly against a live station that this doesn't actually
+// read as "weighted by workload" so much as "everyone now runs a strange
+// unfamiliar pattern nobody asked for," and its repeated/adjacent codes
+// reintroduced real ambiguity into month-to-month continuity resync,
+// undoing some of the very clumping fix this was meant to deliver).
+const NIGHT_ONLY_CYCLE = ["N", "N", "O", "O"];
 
-// When nobody's picked a Staff Allocation pattern, every unpatterned staff
-// member in a category used to get this exact same flat ROTATION
-// regardless of how that category's REAL workload actually splits across
-// shifts — an even 2:2:2:2 M:A:N:O cycle whether the category's real work
-// is mostly Night (weekly/service checks, wheel/brake changes — typical
-// heavy-maintenance NCS/CM/B2 demand) or mostly Morning/Afternoon
-// (transit/PDC-driven B1 demand). buildCategoryCycle instead derives each
-// category's OWN cycle from its real average per-shift demand (the same
-// advisoryDemand workloadEngine.computeDailyShiftDemand produces, already
-// the source the coverage pass below compares against) — proportionally
-// more Night slots for a Night-heavy category, proportionally more
-// Morning/Afternoon for one that isn't.
+// When nobody's picked a Staff Allocation pattern, a category used to put
+// EVERY unpatterned staff member on this exact same flat ROTATION
+// regardless of how that category's real workload actually splits across
+// shifts. Rather than blend each individual person's OWN cycle toward the
+// category's average (see NIGHT_ONLY_CYCLE's comment above for why that
+// approach was dropped), computeNightOnlyCount decides how many of a
+// category's unpatterned staff should run the plain NIGHT_ONLY_CYCLE
+// instead of the plain ROTATION — i.e. picks a MIX of the two existing,
+// already-understood patterns, the same way an admin manually building a
+// Staff Allocation mix would ("put some of my NCS techs on a dedicated
+// night pattern, leave the rest on the standard rotation") — rather than
+// inventing one unfamiliar blended cycle. Both constituent patterns are
+// exactly as before: nobody who was on the plain ROTATION pre-change
+// suddenly finds an unrecognizable cycle; some of them just now join a
+// genuinely-named "Night" pattern instead.
 //
-// The one non-negotiable physical constraint this has to respect is the
-// hardcoded "2 consecutive nights -> 2 forced rest days" safety rule a few
-// dozen lines below (isNight(prev2)&&isNight(prev) -> OFF): every 2 Night
-// slots a cycle contains cost exactly 2 OFF slots, non-negotiably. That
-// means a category whose real demand is mostly Night necessarily ends up
-// with a LOWER overall on-duty cadence than the original flat rotation's
-// 75% (6-of-8) — confirmed directly with the user as the intended
-// tradeoff (closing the real "not enough night coverage, too much
-// morning/afternoon" gap matters more than preserving a uniform 75%
-// cadence for every category regardless of what it actually needs), not
-// an artifact to engineer back down. A perfectly even 1:1:1 M:A:N category
-// reproduces the exact original M,M,A,A,N,N,O,O (verified: maWorkSlots
-// below works out to 4, split 2/2).
-function buildCategoryCycle(category, advisoryDemand, nDays) {
+// The math: with k staff on NIGHT_ONLY_CYCLE (2 work + 2 forced rest per
+// 4 days = 50% on-duty, all of it Night) and (N-k) on ROTATION (6 work
+// per 8 days = 75% on-duty, split evenly M:A:N), the category's overall
+// Night share of on-duty days is (0.25N+0.25k)/(0.75N-0.25k). Solving
+// that for k against the real target Night share (from advisoryDemand,
+// averaged over the month — the same data the coverage pass below already
+// compares against) gives the k used here. At the balanced 1:1:1 extreme
+// this solves to k=0 (nobody moves off the plain ROTATION, so a balanced
+// category is byte-for-byte unchanged from before this feature existed);
+// at the all-Night extreme (B2-like) it solves to k=N (everybody moves to
+// NIGHT_ONLY_CYCLE). This also means Night's overall on-duty share can
+// legitimately exceed what the flat ROTATION's own 1-in-3 ratio allows,
+// at the cost of a lower overall on-duty cadence for whichever staff move
+// to the Night-only pattern — confirmed directly with the user as the
+// intended tradeoff, not something to engineer back down.
+function computeNightOnlyCount(category, advisoryDemand, nDays, totalHeadcount) {
+  if (!totalHeadcount) return 0;
   let dM = 0, dA = 0, dN = 0;
   for (let d = 1; d <= nDays; d++) {
     const day = advisoryDemand?.[d];
@@ -106,35 +124,15 @@ function buildCategoryCycle(category, advisoryDemand, nDays) {
     dA += day.A?.[category] || 0;
     dN += day.N?.[category] || 0;
   }
+  const total = dM + dA + dN;
   // No computed demand at all for this category (e.g. STO, which sits
   // outside the whole mandatory/advisory workload system) — nothing to
-  // weight from, so this category's staff keep today's flat rotation
-  // exactly as before this change.
-  if (dM + dA + dN <= 0) return ROTATION;
-
-  if (dN <= 0) {
-    // No real Night demand for this category at all — no forced-rest
-    // overhead to plan around, so just split Morning/Afternoon by their
-    // own ratio over a short cycle.
-    const mCount = Math.min(3, Math.max(1, Math.round(4 * dM / (dM + dA || 1))));
-    const aCount = Math.max(1, 4 - mCount);
-    return [...Array(mCount).fill("M"), ...Array(aCount).fill("A")];
-  }
-
-  // One Night-pair (N,N,O,O — 2 work + its 2 forced-rest days, the
-  // smallest legal unit) is the base building block; maWorkSlots is how
-  // many Morning/Afternoon work-slots accompany it, sized to match the
-  // SAME (Morning+Afternoon):Night ratio real demand has. Capped at 10 so
-  // a category with only token Night demand doesn't balloon into an
-  // impractically long cycle.
-  const maWorkSlots = Math.min(10, Math.max(0, Math.round((2 * (dM + dA)) / dN)));
-  const mCount = Math.round((maWorkSlots * dM) / (dM + dA || 1));
-  const aCount = maWorkSlots - mCount;
-  const cycle = [];
-  if (mCount) cycle.push(...Array(mCount).fill("M"));
-  if (aCount) cycle.push(...Array(aCount).fill("A"));
-  cycle.push("N", "N", "O", "O");
-  return cycle;
+  // weight from, so this category's staff keep the plain flat ROTATION
+  // exactly as before this feature existed.
+  if (total <= 0) return 0;
+  const pNight = dN / total;
+  const k = (totalHeadcount * (3 * pNight - 1)) / (1 + pNight);
+  return Math.max(0, Math.min(totalHeadcount, Math.round(k)));
 }
 
 // Classification helpers matching reference-ui's isMorn/isAft/isNight/isLeave
@@ -270,13 +268,14 @@ function resyncCycleStart(codes, tail, preferredOffset) {
   if (!candidates.length) return null;
   const refined = candidates.length > 1 ? candidates.filter(i => codes[(i - 1 + len) % len] === tail[1]) : candidates;
   const pool = refined.length ? refined : candidates;
-  // The flat 8-day ROTATION's 8 consecutive-code pairs (MM/MA/AA/AN/NN/
-  // NO/OO/OM) are all distinct, so `pool` was always exactly 1 element in
-  // practice for it — this ambiguity branch was effectively dead code
-  // until buildCategoryCycle's demand-weighted cycles started producing
-  // repeated codes back-to-back (e.g. a Morning-heavy category's cycle
-  // legitimately containing M,M,M). When more than one position is
-  // equally consistent with this person's real recent history, picking
+  // Neither built-in no-pattern cycle has a repeated consecutive-code
+  // pair (ROTATION's 8 pairs — MM/MA/AA/AN/NN/NO/OO/OM — are all
+  // distinct, and NIGHT_ONLY_CYCLE's 4 are too), so `pool` is normally
+  // exactly 1 element for them. A hand-defined Staff Allocation pattern
+  // can legitimately contain repeated codes back-to-back though (e.g.
+  // M,M,M for a pattern an admin built with 3 Mornings in a row). When
+  // more than one position is equally consistent with this person's real
+  // recent history, picking
   // the SAME one (the original behavior: always pool[0]) for every staff
   // member who happens to share that tail collapses them all onto one
   // phase — exactly the clumping the even-spread offset below exists to
@@ -334,60 +333,74 @@ function buildRosterAssignments({
   // pure no-op for any caller that doesn't pass it.
   const dayAnchor = absoluteDayAnchor || 0;
 
-  // Cached per category, not per staff member — buildCategoryCycle only
-  // depends on the category's own demand series, never on who's in it.
-  const cycleByCategory = {};
-  function fallbackCycleFor(category) {
-    if (!category) return ROTATION;
-    if (!cycleByCategory[category]) cycleByCategory[category] = buildCategoryCycle(category, advisoryDemand, nDays);
-    return cycleByCategory[category];
-  }
-  // How many UNPATTERNED staff share each category's fallback cycle —
-  // needed up front (not discoverable mid-iteration) so their offsets can
-  // be spread evenly across the FULL cycle length, not just incrementally.
-  // A fixed step size (whether the original flat rotation's 2, or a
-  // naive 1) breaks down once a category's real headcount is smaller than
-  // its own cycle length: a run of N consecutive offsets (0,1,...,N-1) on
-  // a longer cycle leaves the remaining (cycle.length-N) positions
+  // How many UNPATTERNED staff are in each category — needed up front
+  // (not discoverable mid-iteration) to decide how many of them
+  // (computeNightOnlyCount) go on NIGHT_ONLY_CYCLE vs. the plain ROTATION,
+  // and to spread each sub-group's own offsets evenly across its own
+  // cycle length. A fixed step size (whether the original flat rotation's
+  // 2, or a naive 1) breaks down once a sub-group's real headcount is
+  // smaller than its own cycle length: a run of N consecutive offsets
+  // (0,1,...,N-1) on a longer cycle leaves the remaining positions
   // completely uncovered as one contiguous gap, and if that gap happens
   // to swallow an entire shift-block (e.g. a 2-wide Night pair), that
-  // shift goes completely uncovered by the base rotation on whichever
-  // calendar days line up with it — confirmed directly: 6 B2 staff on the
-  // flat 8-day rotation with offsets 0-5 left Night (positions 4,5)
-  // completely empty every 8th day, a real regression a fixed step
-  // doesn't have a safe universal value for. Spreading N offsets evenly
-  // around the FULL cycle (offset_i = round(i * cycle.length / N))
-  // instead keeps the largest gap between any two covered positions as
-  // small as mathematically possible for that N and cycle.length, so a
-  // multi-slot block is never left entirely uncovered on any given day
-  // unless genuinely more staff would be needed than the category has.
+  // shift goes completely uncovered on whichever calendar days line up
+  // with it — confirmed directly: 6 B2 staff on the flat 8-day rotation
+  // with offsets 0-5 left Night (positions 4,5) completely empty every
+  // 8th day. Spreading N offsets evenly around the FULL cycle
+  // (offset_i = round(i * cycle.length / N)) instead keeps the largest
+  // gap between any two covered positions as small as mathematically
+  // possible for that N and cycle.length.
   const unpatternedCountByCategory = {};
   staff.forEach(s => {
     if (!patternByUser?.[s.id]?.codes?.length) {
       unpatternedCountByCategory[s.category] = (unpatternedCountByCategory[s.category] || 0) + 1;
     }
   });
-  const catOffsetCounters = {};
+  // Which of a category's unpatterned staff (by their 0-based position
+  // among JUST that category's unpatterned staff, in iteration order —
+  // not their global list position) go on NIGHT_ONLY_CYCLE — the same
+  // even-spread formula as the offsets above, just choosing WHO instead
+  // of WHERE, so the k selected people aren't all clustered at the start
+  // of the category's list.
+  const nightOnlyCountByCategory = {};
+  const nightOnlySelectedByCategory = {}; // category -> Set(local index)
+  Object.keys(unpatternedCountByCategory).forEach(cat => {
+    const total = unpatternedCountByCategory[cat];
+    const k = computeNightOnlyCount(cat, advisoryDemand, nDays, total);
+    nightOnlyCountByCategory[cat] = k;
+    const selected = new Set();
+    for (let j = 0; j < k; j++) selected.add(Math.round((j * total) / k));
+    nightOnlySelectedByCategory[cat] = selected;
+  });
+  const catLocalIndexCounters = {};
+  const groupOffsetCounters = {}; // "<category>|N" or "<category>|S" -> counter
 
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
   staff.forEach((s) => {
     const tail = tailByUser?.[s.id] || ["O", "O", "O"]; // [lastDay, 2ndLast, 3rdLast] of previous month
-    // Staff Allocation tab: a staff member assigned a Shift Pattern gets that
-    // pattern's own cycle + start-day offset instead of the demand-weighted
-    // cycle every unpatterned staff member in their category gets otherwise
-    // (see fallbackCycleFor above) — same usePatterns branch reference-ui's
-    // applyAutoRoster() has, and everything below (rest-gap pass, coverage
-    // pass) is unchanged either way, exactly as in the reference: only how
-    // `proposed` is first computed differs.
+    // Staff Allocation tab: a staff member assigned a Shift Pattern gets
+    // that pattern's own cycle + start-day offset instead of being placed
+    // into their category's NIGHT_ONLY_CYCLE/ROTATION mix below — same
+    // usePatterns branch reference-ui's applyAutoRoster() has, and
+    // everything below (rest-gap pass, coverage pass) is unchanged either
+    // way, exactly as in the reference: only how `proposed` is first
+    // computed differs.
     const pattern = patternByUser?.[s.id];
     const codes = new Array(nDays);
     const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
-    const cycle = pattern?.codes?.length ? pattern.codes : fallbackCycleFor(s.category);
-    let offset = 0;
-    if (!pattern?.codes?.length) {
-      const catIdx = (catOffsetCounters[s.category] = (catOffsetCounters[s.category] || 0) + 1) - 1; // 0,1,2,...
-      const catCount = unpatternedCountByCategory[s.category] || 1;
-      offset = Math.round((catIdx * cycle.length) / catCount);
+    let cycle, offset = 0;
+    if (pattern?.codes?.length) {
+      cycle = pattern.codes;
+    } else {
+      const localIdx = (catLocalIndexCounters[s.category] = (catLocalIndexCounters[s.category] || 0) + 1) - 1;
+      const isNightOnly = !!nightOnlySelectedByCategory[s.category]?.has(localIdx);
+      cycle = isNightOnly ? NIGHT_ONLY_CYCLE : ROTATION;
+      const groupCount = isNightOnly
+        ? nightOnlyCountByCategory[s.category]
+        : unpatternedCountByCategory[s.category] - (nightOnlyCountByCategory[s.category] || 0);
+      const groupKey = `${s.category}|${isNightOnly ? "N" : "S"}`;
+      const groupIdx = (groupOffsetCounters[groupKey] = (groupOffsetCounters[groupKey] || 0) + 1) - 1;
+      offset = groupCount > 0 ? Math.round((groupIdx * cycle.length) / groupCount) : 0;
     }
     // Only attempted when the caller actually requested continuity
     // (tailByUser present at all — buildContinuationTails is only built
@@ -632,4 +645,7 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories, buildCategoryCycle, resyncCycleStart };
+module.exports = {
+  buildRosterAssignments, ROTATION, NIGHT_ONLY_CYCLE, DEFAULT_MANDATORY_COVERAGE_CONFIG,
+  shiftFamily, creditedCategories, computeNightOnlyCount, resyncCycleStart,
+};
