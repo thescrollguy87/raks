@@ -68,6 +68,72 @@ const { ruleAppliesToStaff } = require("./ruleEngine");
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 
+// When nobody's picked a Staff Allocation pattern, every unpatterned staff
+// member in a category used to get this exact same flat ROTATION
+// regardless of how that category's REAL workload actually splits across
+// shifts — an even 2:2:2:2 M:A:N:O cycle whether the category's real work
+// is mostly Night (weekly/service checks, wheel/brake changes — typical
+// heavy-maintenance NCS/CM/B2 demand) or mostly Morning/Afternoon
+// (transit/PDC-driven B1 demand). buildCategoryCycle instead derives each
+// category's OWN cycle from its real average per-shift demand (the same
+// advisoryDemand workloadEngine.computeDailyShiftDemand produces, already
+// the source the coverage pass below compares against) — proportionally
+// more Night slots for a Night-heavy category, proportionally more
+// Morning/Afternoon for one that isn't.
+//
+// The one non-negotiable physical constraint this has to respect is the
+// hardcoded "2 consecutive nights -> 2 forced rest days" safety rule a few
+// dozen lines below (isNight(prev2)&&isNight(prev) -> OFF): every 2 Night
+// slots a cycle contains cost exactly 2 OFF slots, non-negotiably. That
+// means a category whose real demand is mostly Night necessarily ends up
+// with a LOWER overall on-duty cadence than the original flat rotation's
+// 75% (6-of-8) — confirmed directly with the user as the intended
+// tradeoff (closing the real "not enough night coverage, too much
+// morning/afternoon" gap matters more than preserving a uniform 75%
+// cadence for every category regardless of what it actually needs), not
+// an artifact to engineer back down. A perfectly even 1:1:1 M:A:N category
+// reproduces the exact original M,M,A,A,N,N,O,O (verified: maWorkSlots
+// below works out to 4, split 2/2).
+function buildCategoryCycle(category, advisoryDemand, nDays) {
+  let dM = 0, dA = 0, dN = 0;
+  for (let d = 1; d <= nDays; d++) {
+    const day = advisoryDemand?.[d];
+    if (!day) continue;
+    dM += day.M?.[category] || 0;
+    dA += day.A?.[category] || 0;
+    dN += day.N?.[category] || 0;
+  }
+  // No computed demand at all for this category (e.g. STO, which sits
+  // outside the whole mandatory/advisory workload system) — nothing to
+  // weight from, so this category's staff keep today's flat rotation
+  // exactly as before this change.
+  if (dM + dA + dN <= 0) return ROTATION;
+
+  if (dN <= 0) {
+    // No real Night demand for this category at all — no forced-rest
+    // overhead to plan around, so just split Morning/Afternoon by their
+    // own ratio over a short cycle.
+    const mCount = Math.min(3, Math.max(1, Math.round(4 * dM / (dM + dA || 1))));
+    const aCount = Math.max(1, 4 - mCount);
+    return [...Array(mCount).fill("M"), ...Array(aCount).fill("A")];
+  }
+
+  // One Night-pair (N,N,O,O — 2 work + its 2 forced-rest days, the
+  // smallest legal unit) is the base building block; maWorkSlots is how
+  // many Morning/Afternoon work-slots accompany it, sized to match the
+  // SAME (Morning+Afternoon):Night ratio real demand has. Capped at 10 so
+  // a category with only token Night demand doesn't balloon into an
+  // impractically long cycle.
+  const maWorkSlots = Math.min(10, Math.max(0, Math.round((2 * (dM + dA)) / dN)));
+  const mCount = Math.round((maWorkSlots * dM) / (dM + dA || 1));
+  const aCount = maWorkSlots - mCount;
+  const cycle = [];
+  if (mCount) cycle.push(...Array(mCount).fill("M"));
+  if (aCount) cycle.push(...Array(aCount).fill("A"));
+  cycle.push("N", "N", "O", "O");
+  return cycle;
+}
+
 // Classification helpers matching reference-ui's isMorn/isAft/isNight/isLeave
 // closures exactly: Morning/Afternoon are fixed code lists (a pattern using
 // a custom code like "M1" or "AS" still counts as Morning/Afternoon for the
@@ -236,20 +302,38 @@ function buildRosterAssignments({
   // pure no-op for any caller that doesn't pass it.
   const dayAnchor = absoluteDayAnchor || 0;
 
+  // Cached per category, not per staff member — buildCategoryCycle only
+  // depends on the category's own demand series, never on who's in it.
+  const cycleByCategory = {};
+  function fallbackCycleFor(category) {
+    if (!category) return ROTATION;
+    if (!cycleByCategory[category]) cycleByCategory[category] = buildCategoryCycle(category, advisoryDemand, nDays);
+    return cycleByCategory[category];
+  }
+  // Counts same-category staff only (not global list position) — now that
+  // categories can have differently-SIZED cycles, spreading everyone by
+  // their position across the WHOLE staff list would clump same-category
+  // staff onto the same phase whenever two of them share a residue mod a
+  // shorter category cycle. A running per-category counter keeps the
+  // original idx*2 offset's actual goal ("this category isn't all on the
+  // same phase at once") correct regardless of cycle length.
+  const catOffsetCounters = {};
+
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
-  staff.forEach((s, idx) => {
-    const offset = idx * 2;
+  staff.forEach((s) => {
     const tail = tailByUser?.[s.id] || ["O", "O", "O"]; // [lastDay, 2ndLast, 3rdLast] of previous month
     // Staff Allocation tab: a staff member assigned a Shift Pattern gets that
-    // pattern's own cycle + start-day offset instead of the flat 8-day
-    // ROTATION every unpatterned staff member gets by list position — same
-    // usePatterns branch reference-ui's applyAutoRoster() has, and everything
-    // below (rest-gap pass, coverage pass) is unchanged either way, exactly
-    // as in the reference: only how `proposed` is first computed differs.
+    // pattern's own cycle + start-day offset instead of the demand-weighted
+    // cycle every unpatterned staff member in their category gets otherwise
+    // (see fallbackCycleFor above) — same usePatterns branch reference-ui's
+    // applyAutoRoster() has, and everything below (rest-gap pass, coverage
+    // pass) is unchanged either way, exactly as in the reference: only how
+    // `proposed` is first computed differs.
     const pattern = patternByUser?.[s.id];
     const codes = new Array(nDays);
     const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
-    const cycle = pattern?.codes?.length ? pattern.codes : ROTATION;
+    const cycle = pattern?.codes?.length ? pattern.codes : fallbackCycleFor(s.category);
+    const offset = pattern?.codes?.length ? 0 : (catOffsetCounters[s.category] = (catOffsetCounters[s.category] || 0) + 1) * 2 - 2;
     // Only attempted when the caller actually requested continuity
     // (tailByUser present at all — buildContinuationTails is only built
     // when "Continue from Previous Roster" is on) AND this staff member has
@@ -266,7 +350,7 @@ function buildRosterAssignments({
         ? (cycle[(resyncStart + day - 1) % cycle.length] || "O")
         : pattern?.codes?.length
           ? (pattern.codes[(dayAnchor + day - 1 + (pattern.offset || 0)) % pattern.codes.length] || "O")
-          : ROTATION[(dayAnchor + day - 1 + offset) % ROTATION.length];
+          : cycle[(dayAnchor + day - 1 + offset) % cycle.length];
 
       const prev = day > 1 ? codes[day - 2] : tail[0];
       const prev2 = day > 2 ? codes[day - 3] : (day === 2 ? tail[0] : tail[1]);
@@ -489,4 +573,4 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories, buildCategoryCycle };
