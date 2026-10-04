@@ -383,7 +383,7 @@ describe("buildRosterAssignments — blocking and leave", () => {
 
   it("shows the leave code on exactly the days a staff member is on approved leave, and nothing else", () => {
     const staff = [...makeStaff(3, "B1"), ...makeStaff(2, "B2")];
-    const leaveByUserDay = { B10: new Set([5, 6, 7]) };
+    const leaveByUserDay = { B10: new Map([[5, "ANNUAL"], [6, "ANNUAL"], [7, "ANNUAL"]]) };
     const result = buildRosterAssignments({ staff, nDays: 10, leaveByUserDay, blockedUserIds: [] });
 
     const codeOn = (day) => result.assignments.find(a => a.userId === "B10" && a.day === day).code;
@@ -391,6 +391,17 @@ describe("buildRosterAssignments — blocking and leave", () => {
     expect(codeOn(6)).toBe("L");
     expect(codeOn(7)).toBe("L");
     expect(codeOn(8)).not.toBe("L");
+  });
+
+  it("resolves Training and Deputation leave to their own shift codes, distinct from ordinary leave", () => {
+    const staff = makeStaff(1, "B1");
+    const leaveByUserDay = { B10: new Map([[1, "TRAINING"], [2, "DEPUTATION"], [3, "ANNUAL"]]) };
+    const result = buildRosterAssignments({ staff, nDays: 3, leaveByUserDay, blockedUserIds: [] });
+
+    const codeOn = (day) => result.assignments.find(a => a.userId === "B10" && a.day === day).code;
+    expect(codeOn(1)).toBe("TRG");
+    expect(codeOn(2)).toBe("D");
+    expect(codeOn(3)).toBe("L");
   });
 });
 

@@ -77,7 +77,18 @@ const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 // the no-pattern path's behavior is unchanged whether or not one is passed.
 const MORN_CODES = new Set(["M", "M1", "MS"]);
 const AFT_CODES = new Set(["A", "A1", "A2", "AS"]);
-const DEFAULT_SHIFT_TYPES = { M: "duty", A: "duty", N: "night", O: "off", L: "leave" };
+const DEFAULT_SHIFT_TYPES = { M: "duty", A: "duty", N: "night", O: "off", L: "leave", TRG: "training", D: "deputation" };
+
+// Approved leave resolves to its own shift code — plain "L" for ordinary
+// leave (annual/sick/casual/medical/LWP/other), but Training and Deputation
+// get their own distinct codes so the roster grid (and everything
+// downstream that reads a ShiftDefinition's `type`, e.g. dashboard "on
+// leave" counts) can tell them apart from real leave. Mirrors
+// LEAVE_CODE_DEFAULTS in rosterGenerationService.js, which is what actually
+// keeps TRG/D's ShiftDefinition rows seeded — kept as a small local literal
+// map here (not imported) since this file is deliberately DB-free/pure.
+const LEAVE_TYPE_CODES = { TRAINING: "TRG", DEPUTATION: "D" };
+function leaveCodeForType(leaveType) { return LEAVE_TYPE_CODES[leaveType] || "L"; }
 function shiftType(code, shiftDefsByCode) {
   return shiftDefsByCode?.[code] ?? DEFAULT_SHIFT_TYPES[code] ?? "duty";
 }
@@ -248,8 +259,8 @@ function buildRosterAssignments({
 
     for (let day = 1; day <= nDays; day++) {
       if (blocked.has(s.id) || unpatternedTrainingPending) { codes[day - 1] = "O"; continue; }
-      const onLeave = leaveByUserDay?.[s.id]?.has(day);
-      if (onLeave) { codes[day - 1] = "L"; continue; }
+      const onLeaveType = leaveByUserDay?.[s.id]?.get(day);
+      if (onLeaveType) { codes[day - 1] = leaveCodeForType(onLeaveType); continue; }
 
       let proposed = resyncStart !== null
         ? (cycle[(resyncStart + day - 1) % cycle.length] || "O")

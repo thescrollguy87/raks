@@ -193,6 +193,18 @@ function upsertShiftDef(airlineId, { code, name, startTime, endTime, breakMin, t
   });
 }
 
+// Create-if-missing, never touching an existing row — unlike upsertShiftDef
+// above (the admin import/export flow, which intentionally overwrites on a
+// match), this is for silently bootstrapping a well-known reference code
+// (Training/Deputation) the first time a feature that depends on it is
+// actually used at a given airline, without clobbering any customization an
+// admin already made to that code (name, color, sortOrder, ...) since.
+async function ensureShiftDefExists(airlineId, code, defaults) {
+  const existing = await prisma.shiftDefinition.findUnique({ where: { airlineId_code: { airlineId, code } } });
+  if (existing) return existing;
+  return prisma.shiftDefinition.create({ data: { airlineId, code, isActive: true, ...defaults } });
+}
+
 // Soft-delete only — a code that's already used on real shift assignments
 // must stay resolvable for historical rosters, so this deactivates rather
 // than removing the row (mirrors every other "delete" in this codebase).
@@ -257,6 +269,6 @@ module.exports = {
   findRosterByStationAndMonth, findRosterById, createRoster, publishRoster, unpublishRoster, getRosterGrid, getRosterGridForExport,
   listRostersForStation, updateRosterSortOrders,
   getActiveStaffContacts, getActiveStaffForGeneration, findStationById,
-  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, deactivateShiftDef,
+  findShiftDefByCode, findShiftDefById, findShiftsForDate, findAllShiftDefs, findAllShiftDefsIncludingInactive, upsertShiftDef, ensureShiftDefExists, deactivateShiftDef,
   findAssignment, upsertAssignment, bulkUpsertAssignments, findAssignmentsByStationDateShift,
 };

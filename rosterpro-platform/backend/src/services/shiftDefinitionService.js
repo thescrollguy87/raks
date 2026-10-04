@@ -6,8 +6,8 @@ const { findHeaderRowIndex, parseExcelTimeCell } = require("../utils/xlsxParser"
 const ApiError = require("../utils/ApiError");
 const { resolveAirlineId } = require("../utils/stationScope");
 
-const HEADER = ["Code", "Name", "Start Time (HH:MM)", "End Time (HH:MM)", "Break (min)", "Type (duty/night/off/leave/other)"];
-const VALID_TYPES = new Set(["duty", "night", "off", "leave", "other"]);
+const HEADER = ["Code", "Name", "Start Time (HH:MM)", "End Time (HH:MM)", "Break (min)", "Type (duty/night/off/leave/training/deputation/other)"];
+const VALID_TYPES = new Set(["duty", "night", "off", "leave", "training", "deputation", "other"]);
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Shift definitions are per-airline reference data, not per-station (see
@@ -66,7 +66,7 @@ async function importShiftDefinitions(buffer, actor, req, stationId) {
     seenCodes.add(code);
 
     if (!name) errors.push(`Row ${r} (${code}): Name is required`);
-    if (!VALID_TYPES.has(type)) errors.push(`Row ${r} (${code}): Type must be one of duty, night, off, leave, other`);
+    if (!VALID_TYPES.has(type)) errors.push(`Row ${r} (${code}): Type must be one of duty, night, off, leave, training, deputation, other`);
     if (startTime && !TIME_RE.test(startTime)) errors.push(`Row ${r} (${code}): Start Time must be HH:MM (24-hour)`);
     if (endTime && !TIME_RE.test(endTime)) errors.push(`Row ${r} (${code}): End Time must be HH:MM (24-hour)`);
     if ((startTime && !endTime) || (!startTime && endTime)) {

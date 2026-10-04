@@ -34,10 +34,16 @@ function yearMonth(monthKey) {
   return { year: y, month: m };
 }
 
-// Builds the { userId: Set(days) } shape the pure algorithm expects, from
-// the flat list of approved leave records the repo returns — this is
-// deliberately the ONLY place date-range-to-day-set conversion happens, so
-// the algorithm itself never has to know about actual calendar dates.
+// Builds the { userId: Map(day -> leaveType) } shape the pure algorithm
+// expects, from the flat list of approved leave records the repo returns —
+// this is deliberately the ONLY place date-range-to-day-set conversion
+// happens, so the algorithm itself never has to know about actual calendar
+// dates. A Map (not a plain Set of days) so the algorithm can tell WHICH
+// leave type covers a given day — Training and Deputation resolve to their
+// own shift code instead of the plain "L" every other leave type shares
+// (see LEAVE_CODE_DEFAULTS/leaveCodeForType below); callers that only ever
+// checked presence via `.has(day)` keep working unchanged, Map supports it
+// identically to Set.
 function buildLeaveByUserDay(leaves, monthKey, nDays) {
   const map = {};
   const monthStart = dateAt(monthKey, 1);
@@ -45,12 +51,49 @@ function buildLeaveByUserDay(leaves, monthKey, nDays) {
   for (const l of leaves) {
     const from = l.fromDate < monthStart ? monthStart : l.fromDate;
     const to = l.toDate > monthEnd ? monthEnd : l.toDate;
-    const days = map[l.userId] ??= new Set();
+    const days = map[l.userId] ??= new Map();
     for (let d = new Date(from); d <= to; d.setUTCDate(d.getUTCDate() + 1)) {
-      days.add(d.getUTCDate());
+      days.set(d.getUTCDate(), l.leaveType);
     }
   }
   return map;
+}
+
+// Training and Deputation are approved Leave records like any other (same
+// blocking-the-rotation behavior, same "deducted from available manpower"
+// effect — nobody on an approved leave of ANY type is ever auto/manually
+// assignable), but they're NOT "leave" in the ordinary sense: a dashboard's
+// "on leave" headcount, a staff member's leave balance, and the roster grid
+// itself all need to tell them apart from real leave (annual/sick/casual/
+// etc). They get their own ShiftDefinition `type` (so every existing
+// `type === "leave"` check elsewhere already excludes them for free) and
+// their own code, bootstrapped automatically — see ensureLeaveShiftDefs
+// below — the first time either is actually approved for an airline, so no
+// manual Shift Definitions setup step is required.
+const LEAVE_CODE_DEFAULTS = {
+  TRAINING: { code: "TRG", name: "Training", type: "training", color: "#AB47BC", sortOrder: 85 },
+  DEPUTATION: { code: "D", name: "Deputation", type: "deputation", color: "#FF8A65", sortOrder: 86 },
+};
+function leaveCodeForType(leaveType) { return LEAVE_CODE_DEFAULTS[leaveType]?.code || "L"; }
+
+// Idempotent — ensureShiftDefExists never touches a row that's already
+// there, so an admin who's since customized TRG/D's name or color keeps
+// that customization. Mutates `shiftDefs` in place (pushing any newly
+// created row) so every downstream lookup built from it — shiftDefsByCode,
+// codeToId, shiftDefRowByCode — picks the new code up without a second
+// round trip. Runs even on `preview: true`: the missing-shift-code check
+// below runs unconditionally too (a preview is still a real computation of
+// what WOULD be written), so without this a preview would 400 the very
+// first time Training/Deputation leave is used, before Apply ever got the
+// chance to create them.
+async function ensureLeaveShiftDefs(airlineId, leaves, shiftDefs) {
+  const existingCodes = new Set(shiftDefs.map(d => d.code));
+  const neededTypes = [...new Set(leaves.map(l => l.leaveType))]
+    .filter(t => LEAVE_CODE_DEFAULTS[t] && !existingCodes.has(LEAVE_CODE_DEFAULTS[t].code));
+  for (const t of neededTypes) {
+    const { code, ...defaults } = LEAVE_CODE_DEFAULTS[t];
+    shiftDefs.push(await rosterRepo.ensureShiftDefExists(airlineId, code, defaults));
+  }
 }
 
 function previousMonthKey(monthKey) {
@@ -415,6 +458,8 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, airlineId),
   ]);
 
+  if (applyLeave && leaves.length) await ensureLeaveShiftDefs(airlineId, leaves, shiftDefs);
+
   const blockedUserIds = staff.filter((s, i) => complianceSummaries[i].isBlocked).map(s => s.id);
   const trainingPendingUserIds = staff.filter(s => s.trainingPending).map(s => s.id);
   const leaveByUserDay = applyLeave ? buildLeaveByUserDay(leaves, monthKey, nDays) : {};
@@ -461,7 +506,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const codeToId = Object.fromEntries(shiftDefs.map(d => [d.code, d.id]));
   const missingCodes = [...new Set(assignments.map(a => a.code))].filter(c => !codeToId[c]);
   if (missingCodes.length) {
-    throw ApiError.badRequest(`Cannot generate: shift code(s) not defined: ${missingCodes.join(", ")}. Seed the M/A/N/O/L shift definitions first.`);
+    throw ApiError.badRequest(`Cannot generate: shift code(s) not defined: ${missingCodes.join(", ")}. Seed the M/A/N/O/L/TRG/D shift definitions first.`);
   }
 
   // Manpower plan: how many of each category are on duty per shift, summed
@@ -589,7 +634,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
 }
 
 module.exports = {
-  generateRoster, buildLeaveByUserDay,
+  generateRoster, buildLeaveByUserDay, leaveCodeForType,
   // Exported additionally for the Roster Assistant chat tools (see
   // chatToolsService.js) to compose real, already-correct demand/rule
   // logic instead of re-deriving any of it — the CRITICAL architectural

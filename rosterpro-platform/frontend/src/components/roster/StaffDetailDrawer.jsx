@@ -41,7 +41,12 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
   }, [staff, monthKey, nDays]);
 
   const overview = useMemo(() => {
-    let morning = 0, afternoon = 0, night = 0, leave = 0, off = 0, totalHours = 0;
+    // Training/Deputation get their own counters, distinct from `leave` —
+    // same blocking-the-rotation effect as real leave, but not leave, so
+    // they shouldn't be folded into (or silently dropped from) this
+    // breakdown — see shiftDefByCode's `type`, set by rosterGenerationService
+    // via the station's ShiftDefinition rows for the TRG/D codes.
+    let morning = 0, afternoon = 0, night = 0, leave = 0, training = 0, deputation = 0, off = 0, totalHours = 0;
     const restViolations = [];
     let prevWindow = null; // effectiveShiftWindow() result for the previous day worked
     for (const { dateStr, a } of assignmentsByDay) {
@@ -51,6 +56,8 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
       else if (code[0] === "M") morning++;
       else if (code[0] === "A") afternoon++;
       else if (def?.type === "leave") leave++;
+      else if (def?.type === "training") training++;
+      else if (def?.type === "deputation") deputation++;
       else if (code === "O" || def?.type === "off") off++;
       totalHours += shiftNetHours(def, a);
 
@@ -64,11 +71,15 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
       prevWindow = effectiveShiftWindow(def, a, dateStr);
     }
     const totalDuties = morning + afternoon + night;
-    return { morning, afternoon, night, leave, off, totalDuties, totalHours, restViolations };
+    return { morning, afternoon, night, leave, training, deputation, off, totalDuties, totalHours, restViolations };
   }, [assignmentsByDay, shiftDefByCode]);
 
   const today = staff.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayISO());
-  const isOnLeaveToday = today && shiftDefByCode[today.shiftDef.code]?.type === "leave";
+  const todayType = today && shiftDefByCode[today.shiftDef.code]?.type;
+  const todayStatusLabel = todayType === "leave" ? "On Leave Today"
+    : todayType === "training" ? "On Training Today"
+    : todayType === "deputation" ? "On Deputation Today"
+    : null;
 
   // "Recent" means most-recent-up-to-today when viewing the current month
   // (never a future-scheduled day later in the month) — for a past or
@@ -89,8 +100,8 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
             <div className="drawer-name">{staff.fullName.split("(")[0].trim()}</div>
             <div className="drawer-role">{staff.designation} • {staff.category || "NCS"}</div>
             <div className="drawer-avail">
-              <span className={`avail-dot ${isOnLeaveToday ? "amber" : "green"}`} />
-              {isOnLeaveToday ? "On Leave Today" : "Available"}
+              <span className={`avail-dot ${todayStatusLabel ? "amber" : "green"}`} />
+              {todayStatusLabel || "Available"}
             </div>
           </div>
           <button className="drawer-close" onClick={onClose}>✕</button>
@@ -112,6 +123,8 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
               <div className="drawer-metric-row"><span className="drawer-metric-label">Afternoon</span><span className="drawer-metric-val">{overview.afternoon}</span></div>
               <div className="drawer-metric-row"><span className="drawer-metric-label">Night</span><span className="drawer-metric-val">{overview.night}</span></div>
               <div className="drawer-metric-row"><span className="drawer-metric-label">Leaves</span><span className="drawer-metric-val">{overview.leave}</span></div>
+              <div className="drawer-metric-row"><span className="drawer-metric-label">Training</span><span className="drawer-metric-val">{overview.training}</span></div>
+              <div className="drawer-metric-row"><span className="drawer-metric-label">Deputation</span><span className="drawer-metric-val">{overview.deputation}</span></div>
               <div className="drawer-metric-row"><span className="drawer-metric-label">Off Days</span><span className="drawer-metric-val">{overview.off}</span></div>
               <div className="drawer-metric-row"><span className="drawer-metric-label">Total Hours (est.)</span><span className="drawer-metric-val">{overview.totalHours.toFixed(1)}h</span></div>
               <div className="drawer-metric-row">
@@ -163,7 +176,7 @@ export default function StaffDetailDrawer({ staff, monthKey, nDays, shiftDefByCo
               {leaves && leaves.length === 0 && <div className="empty-note">No approved leave on record.</div>}
               {leaves && leaves.map(l => (
                 <div key={l.id} className="alert-card amber" style={{ marginBottom: 6 }}>
-                  <span>🏖</span>
+                  <span>{l.leaveType === "TRAINING" ? "🎓" : l.leaveType === "DEPUTATION" ? "🔁" : "🏖"}</span>
                   <div>
                     <div className="alert-card-title">{l.leaveType}</div>
                     <div className="alert-card-sub">{fmt(l.fromDate)} – {fmt(l.toDate)}</div>

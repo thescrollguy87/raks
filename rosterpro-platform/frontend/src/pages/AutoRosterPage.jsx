@@ -12,7 +12,7 @@ import FlightScheduleManager from "../components/flights/FlightScheduleManager.j
 
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_LABELS = { M: "Morning", A: "Afternoon", N: "Night" };
-const SHIFT_TYPES = ["duty", "night", "off", "leave", "other"];
+const SHIFT_TYPES = ["duty", "night", "off", "leave", "training", "deputation", "other"];
 const LEAVE_TYPE_OPTIONS = [
   { value: "ANNUAL", label: "L — Annual/Earned" },
   { value: "SICK", label: "SL — Sick" },
@@ -20,11 +20,20 @@ const LEAVE_TYPE_OPTIONS = [
   { value: "MEDICAL", label: "ML — Medical" },
   { value: "LWP", label: "LWP — Leave W/O Pay" },
   { value: "TRAINING", label: "TRG — Training" },
+  { value: "DEPUTATION", label: "D — Deputation (to another station)" },
   { value: "OTHER", label: "Other" },
 ];
+// Training and Deputation are entered the same way as real leave (they
+// block the rotation and reduce available manpower here exactly like
+// Annual/Sick/etc. does), but they AREN'T leave — a staff member on
+// Training or Deputation hasn't taken time off, so neither should count
+// against their leave balance or show up in "on leave" figures elsewhere
+// in the app. Kept as one tab (same workflow, same date-range entry) but
+// visually and semantically separated wherever leave gets summarized.
+const NON_LEAVE_TYPES = new Set(["TRAINING", "DEPUTATION"]);
 
 // The RosterPro PWA's Auto-Roster Generator is a multi-tab wizard — Shift
-// Definitions, Shift Patterns, Staff Allocation, Leave & Absence, Flight
+// Definitions, Shift Patterns, Staff Allocation, Leave/Trainings, Flight
 // Schedule, Workload Config, Rule Builder, Daily Ops, Generate — backed by
 // real station-scoped data instead of that PWA's in-browser-only arrays,
 // feeding the same buildRosterAssignments()/computeManpowerPlan() ports
@@ -39,7 +48,7 @@ export default function AutoRosterPage() {
     { key: "defs", label: "⏱ Shift Definitions" },
     { key: "patterns", label: "🔁 Shift Patterns" },
     { key: "allocation", label: "👤 Staff Allocation" },
-    { key: "leave", label: "🌴 Leave & Absence" },
+    { key: "leave", label: "🌴 Leave/Trainings" },
     { key: "flightschedule", label: "✈ Flight Schedule" },
     { key: "workloadconfig", label: "⚙ Workload Config" },
     { key: "rulebuilder", label: "📐 Rule Builder" },
@@ -462,25 +471,34 @@ function LeaveAbsenceTab({ stationId }) {
     } catch (err) { alert(`Failed: ${err.message}`); }
   }
 
-  const byStaff = {};
-  for (const e of entries || []) (byStaff[e.leaveType] ??= []).push(e);
+  // Training and Deputation entries are kept out of the "leave" bucket
+  // everywhere they're summarized here — they share this tab's entry form
+  // (same date-range workflow, same blocking-the-rotation effect) but
+  // aren't actual leave, so they shouldn't inflate a leave count.
+  const leaveEntries = (entries || []).filter(e => !NON_LEAVE_TYPES.has(e.leaveType));
+  const trainingEntries = (entries || []).filter(e => e.leaveType === "TRAINING");
+  const deputationEntries = (entries || []).filter(e => e.leaveType === "DEPUTATION");
+  const byLeaveType = {};
+  for (const e of leaveEntries) (byLeaveType[e.leaveType] ??= []).push(e);
+
+  function entryIcon(type) { return type === "TRAINING" ? "🎓" : type === "DEPUTATION" ? "🔁" : "🏖"; }
 
   return (
     <>
       <HowToUseTab>
-        Approved leave entered here overrides the base rotation on those exact dates — the generator marks the staff member's leave code on the roster and never considers them for a shift (mandatory or advisory) on a day they're on leave, regardless of coverage pressure.
+        Approved leave entered here overrides the base rotation on those exact dates — the generator marks the staff member's leave/training/deputation code on the roster and never considers them for a shift (mandatory or advisory) on those days, regardless of coverage pressure. Training and Deputation work the same way (blocked from rostering, deducted from available manpower) but are NOT leave — they're tracked and shown separately, and never count against a staff member's leave balance.
       </HowToUseTab>
       <div className="two-col">
       <div>
         <div className="card">
-          <div className="card-title">🌴 Leave Entries for Target Month</div>
+          <div className="card-title">🌴 Leave / Training / Deputation Entries for Target Month</div>
           <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-            Enter approved leave/absence for each staff member. These days will automatically be marked on the roster and that staff cannot be manually or auto-rostered on those dates.
+            Enter approved leave, scheduled training, or a staff member's deputation to another station. Any of these automatically marks the roster and blocks that staff member from being manually or auto-rostered on those dates — a deputed staff member is deducted from this station's available manpower for the period.
           </div>
           {error && <div className="ab red">{error}</div>}
           <div className="fg2" style={{ marginBottom: 10 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
-            <div className="fg"><label className="fl">Add Leave For</label>
+            <div className="fg"><label className="fl">Add For</label>
               <select className="fi" value={userId} onChange={e => setUserId(e.target.value)}>
                 {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
               </select>
@@ -491,23 +509,23 @@ function LeaveAbsenceTab({ stationId }) {
             <div className="fg"><label className="fl">To Date</label><input className="fi" type="date" value={toDate} onChange={e => setToDate(e.target.value)} /></div>
           </div>
           <div className="fg" style={{ marginBottom: 10 }}>
-            <label className="fl">Leave Type</label>
+            <label className="fl">Type</label>
             <select className="fi" value={leaveType} onChange={e => setLeaveType(e.target.value)}>
               {LEAVE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={addLeave} disabled={busy}>＋ Add Leave</button>
+          <button className="btn btn-primary btn-sm" onClick={addLeave} disabled={busy}>＋ Add Entry</button>
         </div>
         <div className="card" style={{ marginTop: 0 }}>
-          <div className="card-title">📋 Leave Entries This Month</div>
+          <div className="card-title">📋 Entries This Month</div>
           <div style={{ maxHeight: 300, overflowY: "auto" }}>
             {!entries || entries.length === 0 ? (
-              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No leave entries for this month.</div>
+              <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No entries for this month.</div>
             ) : entries.map(e => (
               <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
-                <span>{e.user?.fullName || e.userId}</span>
+                <span>{entryIcon(e.leaveType)} {e.user?.fullName || e.userId}</span>
                 <span style={{ color: "var(--text-dim)" }}>{e.leaveType} · {e.fromDate?.slice(0, 10)} → {e.toDate?.slice(0, 10)}</span>
-                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => removeLeave(e.id)} title="Cancel this leave request">✕</button>
+                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => removeLeave(e.id)} title="Cancel this entry">✕</button>
               </div>
             ))}
           </div>
@@ -516,11 +534,11 @@ function LeaveAbsenceTab({ stationId }) {
       <div>
         <div className="card">
           <div className="card-title">📊 Leave Summary — {monthKey}</div>
-          {!entries || entries.length === 0 ? (
+          {leaveEntries.length === 0 ? (
             <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No leave entries this month.</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {Object.entries(byStaff).map(([type, list]) => (
+              {Object.entries(byLeaveType).map(([type, list]) => (
                 <div key={type} style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
                   <span style={{ color: "var(--text-dim)" }}>{type}</span>
                   <strong>{list.length}</strong>
@@ -528,6 +546,20 @@ function LeaveAbsenceTab({ stationId }) {
               ))}
             </div>
           )}
+        </div>
+        <div className="card" style={{ marginTop: 10 }}>
+          <div className="card-title">🎓 Training &amp; 🔁 Deputation — {monthKey}</div>
+          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 8 }}>
+            Not leave — shown separately and excluded from the Leave Summary above and from leave-balance figures.
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+              <span style={{ color: "var(--text-dim)" }}>🎓 Training</span><strong>{trainingEntries.length}</strong>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+              <span style={{ color: "var(--text-dim)" }}>🔁 Deputation</span><strong>{deputationEntries.length}</strong>
+            </div>
+          </div>
         </div>
       </div>
       </div>

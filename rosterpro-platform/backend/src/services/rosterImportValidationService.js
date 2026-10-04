@@ -4,7 +4,7 @@ const rosterRepo = require("../repositories/rosterRepository");
 const rosterService = require("./rosterService");
 const rosterVersionService = require("./rosterVersionService");
 const leaveRepo = require("../repositories/leaveRepository");
-const { buildLeaveByUserDay } = require("./rosterGenerationService");
+const { buildLeaveByUserDay, leaveCodeForType } = require("./rosterGenerationService");
 const ApiError = require("../utils/ApiError");
 const auditTrail = require("../utils/auditTrail");
 const { resolveAirlineId, assertOwnStation } = require("../utils/stationScope");
@@ -168,7 +168,8 @@ async function validateRosterImport(stationId, monthKey, buffer, fileName, actor
         continue; // this one cell is skipped; the rest of the row still processes
       }
       fileCodeByDay.set(day, code);
-      if (code !== "O" && code !== "L" && leaveByUserDay[match.id]?.has(day)) {
+      const leaveType = leaveByUserDay[match.id]?.get(day);
+      if (code !== "O" && leaveType && code !== leaveCodeForType(leaveType)) {
         errors.push({
           rowNumber: fileRowNum, field: `Day ${day}`, value: code,
           message: `${name} is on approved leave this date`,

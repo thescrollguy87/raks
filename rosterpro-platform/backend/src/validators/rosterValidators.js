@@ -74,7 +74,7 @@ const compareVersionsQuerySchema = z.object({
 });
 
 // ─── Shift definition single-row CRUD (Shift Definitions tab) ───────────────
-const shiftDefTypes = z.enum(["duty", "night", "off", "leave", "other"]);
+const shiftDefTypes = z.enum(["duty", "night", "off", "leave", "training", "deputation", "other"]);
 const timeStr = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Expected HH:MM (24-hour)");
 
 const upsertShiftDefSchema = z.object({

@@ -77,7 +77,7 @@ function list({ userId, userIdIn, stationId, stationIdIn, reportsToId, status, f
 // this calendar year, per leave type. Real entitlement policy (carry-over,
 // pro-rating for mid-year joiners, category-specific rules) belongs in a
 // LeavePolicy table once you need it — this is a reasonable v1.
-const DEFAULT_ENTITLEMENT = { ANNUAL: 30, SICK: 12, CASUAL: 12, MEDICAL: 0, LWP: 0, TRAINING: 0, OTHER: 0 };
+const DEFAULT_ENTITLEMENT = { ANNUAL: 30, SICK: 12, CASUAL: 12, MEDICAL: 0, LWP: 0, TRAINING: 0, DEPUTATION: 0, OTHER: 0 };
 
 // Returns raw approved leave rows for the year — day-counting (including
 // clipping a leave that spans across Dec 31 → Jan 1) is date math that
@@ -104,7 +104,12 @@ function approvedLeaveForStaffInRange(userIds, from, to) {
       userId: { in: userIds }, status: "APPROVED", deletedAt: null,
       fromDate: { lte: to }, toDate: { gte: from },
     },
-    select: { userId: true, fromDate: true, toDate: true },
+    // leaveType IS needed now — rosterGenerationService's
+    // buildLeaveByUserDay/ensureLeaveShiftDefs both read it (to resolve
+    // Training/Deputation to their own shift code instead of the plain
+    // "L" every other leave type shares), where previously this only ever
+    // needed to know WHICH days were covered, not by what type.
+    select: { userId: true, leaveType: true, fromDate: true, toDate: true },
   });
 }
 

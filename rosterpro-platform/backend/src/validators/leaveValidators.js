@@ -2,7 +2,7 @@ const { z } = require("zod");
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected date as YYYY-MM-DD");
 
-const LEAVE_TYPES = ["ANNUAL", "SICK", "CASUAL", "MEDICAL", "LWP", "TRAINING", "OTHER"];
+const LEAVE_TYPES = ["ANNUAL", "SICK", "CASUAL", "MEDICAL", "LWP", "TRAINING", "DEPUTATION", "OTHER"];
 
 const requestLeaveSchema = z.object({
   userId: z.string().uuid().optional(), // omitted = requesting for yourself; set by a manager requesting on someone's behalf
