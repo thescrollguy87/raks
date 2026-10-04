@@ -215,26 +215,26 @@ table{border-collapse:collapse}
 .gauge-label-sub{font-size:10px;color:var(--text-dim)}
 
 /* ROSTER */
-/* .roster-wrap is its OWN horizontal scroll container (not .content) — the
-   table's sticky thead/left-columns stick relative to whichever ancestor
-   actually scrolls, and keeping that scroll LOCAL to the table itself is
-   what stops everything ABOVE the table (toolbar, KPI cards) from being
-   dragged along for the ride. An earlier version deliberately left this
-   overflow-less, reasoning that .content should be the one scrolling
-   ancestor for both axes — that turned out to have a real, hard-to-work-
-   around cost: a position:sticky element only has "room" to stick within
-   the width of its own containing block, and the toolbar/KPI block above
-   the table has no wide content of its own to give it one, so it could
-   never be pinned against .content's horizontal scroll no matter how it
-   was styled (verified directly against the live app — confirmed even a
-   freshly-injected, maximally-simple sticky div at that same nesting depth
-   tracked the scroll 1:1, zero stickiness). overflow-x:auto here also
-   switches overflow-y to auto (CSS requires both once either isn't
-   visible) — harmless for the default (unconstrained-height) case since
-   nothing ever makes this box taller than its content, and it's exactly
-   what the virtualized path already relies on via its own inline
-   maxHeight+overflow override below. */
-.roster-wrap{border-radius:var(--r);overflow-x:auto}
+/* No overflow of its own by default — .content stays the ONE scrolling
+   ancestor for both axes, which is what the sticky day-header row needs:
+   CSS forces overflow-y to become a real scroll container the moment
+   overflow-x isn't `visible` (there's no such thing as "horizontal-only"
+   overflow), and an unconstrained-height box like this one never actually
+   has anything to scroll vertically — so giving it overflow-x:auto doesn't
+   add horizontal scrolling so much as it QUIETLY HIJACKS the thead's
+   position:sticky;top:0 onto a box that can never scroll, breaking it
+   (confirmed directly: the date header stopped sticking the moment this
+   had its own overflow-x, even though the Staff/Cat columns and widgets
+   both worked). The virtualized path below still gets its own LOCAL
+   scroll container via its own INLINE style override — that one's correct
+   on purpose, since useVirtualizer's getScrollElement reads scrollElRef
+   (this same element) to know which rows are currently visible, so its
+   thead sticking to IT (not .content) is exactly what that mode needs. The
+   toolbar/KPI block staying put during the table's horizontal scroll is
+   handled in RosterPage.jsx with a scroll-linked transform instead — see
+   its own comment; position:sticky turned out to have no way to do it
+   here, a plain block has no wide content of its own to stick within. */
+.roster-wrap{border-radius:var(--r)}
 .rt{min-width:100%;font-size:10px;border-collapse:separate;border-spacing:0}
 /* table-layout:fixed is scoped to the roster grid specifically (.rt-roster,
    RosterPage's own table only) — .rt itself is shared by half a dozen other

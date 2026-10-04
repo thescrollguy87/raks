@@ -691,6 +691,37 @@ export default function RosterPage() {
   const numTotCols = viewMode === "month" ? weekBlocks(nDays).length + 1 : 0;
   const tableWidthPx = 172 + 50 + dayRange.length * 60 + numTotCols * 44;
 
+  // Keeps the toolbar/KPI block visually still while the wide table below
+  // scrolls horizontally. position:sticky can't do this: .content is the
+  // one shared scroll container (needed so the table's OWN sticky thead/
+  // left-columns stick to a box that actually scrolls — see .roster-wrap's
+  // CSS comment), and a sticky element only has "room" to stick within the
+  // width of its OWN containing block; this block has no wide content of
+  // its own, so there's never anywhere for it to be held once scrolled
+  // past (confirmed directly against the live app — even a freshly-
+  // injected, maximally-simple sticky div at this nesting depth tracked
+  // the scroll 1:1, zero stickiness). Counter-translating by .content's
+  // own scrollLeft, driven by a real scroll listener rather than React
+  // state, keeps this off the render path entirely — exactly the "scroll-
+  // linked, not state-linked" approach this kind of effect needs.
+  // A callback ref (not useRef + useEffect([])) because this component
+  // returns early (loading/no-station/error states) on its first render —
+  // a plain effect with [] deps fires once, right after THAT render, while
+  // the div below hasn't mounted yet and never gets a second chance to
+  // attach. A callback ref instead fires exactly when the node itself
+  // mounts, whichever render that turns out to be.
+  const stickyWidgetsCleanupRef = useRef(null);
+  const stickyWidgetsRef = useCallback((node) => {
+    stickyWidgetsCleanupRef.current?.();
+    stickyWidgetsCleanupRef.current = null;
+    const content = node?.closest(".content");
+    if (!node || !content) return;
+    const onScroll = () => { node.style.transform = `translateX(${content.scrollLeft}px)`; };
+    content.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    stickyWidgetsCleanupRef.current = () => content.removeEventListener("scroll", onScroll);
+  }, []);
+
   // Order matters here for the same reason as DashboardPage.jsx: check
   // stationLoading (still figuring out which station to use) before the
   // "no station" message, so a real stationId arriving doesn't briefly
@@ -710,6 +741,7 @@ export default function RosterPage() {
         <GenerationResultPanel result={generationResult} onDismiss={() => setGenerationResult(null)} />
       )}
 
+      <div ref={stickyWidgetsRef}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <StatusPill roster={roster} />
         <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} lastError={saveQueue.lastError} onRetry={saveQueue.retry} />
@@ -769,6 +801,7 @@ export default function RosterPage() {
         {canEdit
           ? ` · Click to select (shift+click for a range), double-click to edit · Delete clears · Ctrl+C/X/V copy/cut/paste${selectedCells.size ? ` · ${selectedCells.size} selected${clipboard ? (clipboard.isCut ? " · cut pending" : " · copied") : ""}` : ""}`
           : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
+      </div>
       </div>
 
       <div className="roster-wrap" ref={scrollElRef} style={shouldVirtualize ? { maxHeight: "min(72vh, 780px)", overflow: "auto" } : undefined}>
