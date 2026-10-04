@@ -654,9 +654,10 @@ export default function RosterPage() {
   // Row virtualization (staff count only — see VIRTUALIZE_STAFF_THRESHOLD)
   // renders a flat list of "either a category header or a staff row" so one
   // virtualizer can window across category groups. Below the threshold this
-  // is entirely unused — `.roster-wrap` keeps its original (no-overflow,
-  // page-scrolls) layout and every row renders directly, unchanged from
-  // before this pass.
+  // is entirely unused — `.roster-wrap` scrolls (vertically, unconstrained-
+  // height) at its own natural height either way, and every row renders
+  // directly, unchanged from before this pass; only the virtualized path
+  // additionally caps its own height to actually make the windowing visible.
   const shouldVirtualize = flatStaffOrder.length > VIRTUALIZE_STAFF_THRESHOLD;
   const renderItems = useMemo(() => {
     const items = [];
@@ -677,6 +678,18 @@ export default function RosterPage() {
   });
 
   const totalCols = 2 + dayRange.length + (viewMode === "month" ? weekBlocks(nDays).length + 1 : 0);
+  // Every column gets an explicit px width (via colgroup) AND the <table>
+  // itself gets that exact sum as its own width — table-layout:fixed only
+  // treats column widths as authoritative when the table's OWN width is
+  // definite; left at width:auto (even with min-width:100%), Chromium's
+  // column-sizing step instead scales every column — including explicitly-
+  // sized ones — proportionally to fit, which is what was desyncing the
+  // Staff column's real rendered width from the Cat column's hardcoded
+  // sticky `left` offset (verified directly against the live page: a
+  // handful of columns renders the specified px exactly, ~39 silently
+  // shrinks them — reproducible with nothing but column COUNT changing).
+  const numTotCols = viewMode === "month" ? weekBlocks(nDays).length + 1 : 0;
+  const tableWidthPx = 172 + 50 + dayRange.length * 60 + numTotCols * 44;
 
   // Order matters here for the same reason as DashboardPage.jsx: check
   // stationLoading (still figuring out which station to use) before the
@@ -697,12 +710,6 @@ export default function RosterPage() {
         <GenerationResultPanel result={generationResult} onDismiss={() => setGenerationResult(null)} />
       )}
 
-      {/* Sticky to the LEFT edge of .content (same position:sticky;left:0
-          mechanism the table's own Staff/Cat columns use below) — without
-          this, scrolling the wide roster table to the right scrolls this
-          whole toolbar/KPI block away sideways too, since .content is one
-          shared scroll container for both the page and the table. */}
-      <div className="roster-sticky-header">
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <StatusPill roster={roster} />
         <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} lastError={saveQueue.lastError} onRetry={saveQueue.retry} />
@@ -763,10 +770,15 @@ export default function RosterPage() {
           ? ` · Click to select (shift+click for a range), double-click to edit · Delete clears · Ctrl+C/X/V copy/cut/paste${selectedCells.size ? ` · ${selectedCells.size} selected${clipboard ? (clipboard.isCut ? " · cut pending" : " · copied") : ""}` : ""}`
           : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
-      </div>
 
       <div className="roster-wrap" ref={scrollElRef} style={shouldVirtualize ? { maxHeight: "min(72vh, 780px)", overflow: "auto" } : undefined}>
-        <table className="rt">
+        <table className="rt rt-roster" style={{ width: tableWidthPx }}>
+          <colgroup>
+            <col style={{ width: 172 }} />
+            <col style={{ width: 50 }} />
+            {dayRange.map(day => <col key={`d${day}`} style={{ width: 60 }} />)}
+            {Array.from({ length: numTotCols }, (_, i) => <col key={`t${i}`} style={{ width: 44 }} />)}
+          </colgroup>
           <thead>
             <tr>
               <th className="sc">Staff</th>

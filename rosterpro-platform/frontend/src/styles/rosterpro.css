@@ -215,19 +215,36 @@ table{border-collapse:collapse}
 .gauge-label-sub{font-size:10px;color:var(--text-dim)}
 
 /* ROSTER */
-/* No overflow of its own — .content is the single scrolling ancestor for
-   both axes (see .content above). A wrapper-level overflow-x:auto here
-   would make THIS the sticky-positioning ancestor instead (per spec,
-   overflow-x:auto forces overflow-y:auto too), so the sticky day-header
-   row and frozen staff-name column would "stick" to a box that never
-   itself scrolls — i.e. scroll straight off screen with everything else. */
-/* Pins the toolbar/KPI block above the table to the left edge of .content
-   — see the long comment above: since .roster-wrap deliberately has no
-   overflow of its own, .content scrolls horizontally too, and without this
-   this whole block would scroll away sideways along with the table. */
-.roster-sticky-header{position:sticky;left:0}
-.roster-wrap{border-radius:var(--r)}
+/* .roster-wrap is its OWN horizontal scroll container (not .content) — the
+   table's sticky thead/left-columns stick relative to whichever ancestor
+   actually scrolls, and keeping that scroll LOCAL to the table itself is
+   what stops everything ABOVE the table (toolbar, KPI cards) from being
+   dragged along for the ride. An earlier version deliberately left this
+   overflow-less, reasoning that .content should be the one scrolling
+   ancestor for both axes — that turned out to have a real, hard-to-work-
+   around cost: a position:sticky element only has "room" to stick within
+   the width of its own containing block, and the toolbar/KPI block above
+   the table has no wide content of its own to give it one, so it could
+   never be pinned against .content's horizontal scroll no matter how it
+   was styled (verified directly against the live app — confirmed even a
+   freshly-injected, maximally-simple sticky div at that same nesting depth
+   tracked the scroll 1:1, zero stickiness). overflow-x:auto here also
+   switches overflow-y to auto (CSS requires both once either isn't
+   visible) — harmless for the default (unconstrained-height) case since
+   nothing ever makes this box taller than its content, and it's exactly
+   what the virtualized path already relies on via its own inline
+   maxHeight+overflow override below. */
+.roster-wrap{border-radius:var(--r);overflow-x:auto}
 .rt{min-width:100%;font-size:10px;border-collapse:separate;border-spacing:0}
+/* table-layout:fixed is scoped to the roster grid specifically (.rt-roster,
+   RosterPage's own table only) — .rt itself is shared by half a dozen other
+   pages (PastRostersPage, LeavePage, StaffPage, ...) that rely on its
+   DEFAULT content-based column sizing; forcing fixed layout on all of them
+   would make every column in those tables equal-width regardless of
+   content. The roster grid needs it because its colgroup-specified column
+   widths (see table.rt-roster's own colgroup) are only authoritative under
+   fixed layout — see that element's own comment for why. */
+.rt.rt-roster{table-layout:fixed}
 .rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:30;border-bottom:1px solid rgba(15,23,42,.12)}
 /* Staff/Cat (left-frozen) column widths are a FIXED, not just minimum,
    size — th.sc2/td.sc2's own `left` offset below is hardcoded to match
