@@ -890,4 +890,49 @@ describe("buildRosterAssignments — demand-weighted base rotation, end to end",
     const onDutyRatio = codes.filter(c => c === "N").length / codes.length;
     expect(onDutyRatio).toBeLessThan(0.6);
   });
+
+  // Regression: a fixed offset STEP (first 2, matching the old flat
+  // rotation's block size, then a naive 1) broke down once a category's
+  // real headcount was smaller than its own cycle length — the run of
+  // consecutive offsets left the remaining cycle positions as one
+  // contiguous uncovered gap, and when that gap swallowed an entire
+  // multi-slot block (e.g. a 2-wide Night pair), that shift went
+  // completely uncovered by the base rotation on whichever calendar days
+  // lined up with it. Caught directly against a live example: 6 B2 staff
+  // on the flat 8-day rotation had ZERO Night coverage every 8th day
+  // before offsets were spread evenly across the full cycle length
+  // instead of by a fixed step.
+  it("never leaves a shift completely uncovered by the base rotation on any day, when headcount is smaller than the category's own cycle length", () => {
+    const staff = makeStaff(6, "B2"); // no advisoryDemand -> flat 8-day ROTATION fallback
+    const result = buildRosterAssignments({ staff, nDays: 24, leaveByUserDay: {}, blockedUserIds: [] });
+    const nightByDay = {};
+    result.assignments.forEach(a => { if (a.code === "N") nightByDay[a.day] = (nightByDay[a.day] || 0) + 1; });
+    for (let d = 1; d <= 24; d++) expect(nightByDay[d] || 0).toBeGreaterThan(0);
+  });
+
+  it("spreads NCS-sized headcount (17 staff) evenly across a demand-weighted cycle shorter than the old 8-day rotation, on every single day — not just on average", () => {
+    // This session's real NCS numbers: M 2.1, A 2.0, N 4.0 -> builds the
+    // M,A,N,N,O,O (6-long) cycle covered by the buildCategoryCycle tests
+    // above. The bug this guards against only showed up per-DAY (a step
+    // size that clumped 17 people onto just 3 of the cycle's 6 positions,
+    // e.g. day 1 showing 5 Morning / 2 Afternoon / 2 Night against a
+    // ~17*1/6≈2.8/2.8/5.7 target) — a test that only checked the MONTHLY
+    // AVERAGE wouldn't have caught it, since the average across a full
+    // repeating cycle is identical regardless of how badly any single day
+    // clumps.
+    const staff = makeStaff(17, "NCS");
+    const advisoryDemand = {};
+    for (let d = 1; d <= 30; d++) advisoryDemand[d] = { M: { NCS: 2.1 }, A: { NCS: 2.0 }, N: { NCS: 4.0 } };
+    const result = buildRosterAssignments({ staff, nDays: 30, leaveByUserDay: {}, blockedUserIds: [], advisoryDemand });
+    const byDayCode = {};
+    result.assignments.forEach(a => { (byDayCode[a.day] ??= {})[a.code] = (byDayCode[a.day]?.[a.code] || 0) + 1; });
+    for (let d = 1; d <= 30; d++) {
+      const counts = byDayCode[d] || {};
+      // Every one of the 6 cycle positions should be occupied by at least
+      // one of the 17 staff every day — nothing left at literally zero.
+      expect(counts.M || 0).toBeGreaterThan(0);
+      expect(counts.A || 0).toBeGreaterThan(0);
+      expect(counts.N || 0).toBeGreaterThan(0);
+    }
+  });
 });

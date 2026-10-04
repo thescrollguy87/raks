@@ -6,10 +6,13 @@
 //
 // Ported from reference-ui/index.html's applyAutoRoster()/fillMinCat(), which
 // is the source of truth for this algorithm. Steps, in order:
-//   1. Each staff member gets an 8-day rotation (M,M,A,A,N,N,O,O), offset by
-//      twice their position in the roster (idx*2) so the whole station isn't
-//      on the same phase of the cycle at once — same offset formula as the
-//      reference's "auto-distribute" default.
+//   1. Each unpatterned staff member gets their CATEGORY's own demand-
+//      weighted cycle (see buildCategoryCycle — a perfectly even category
+//      reproduces the original flat 8-day M,M,A,A,N,N,O,O), offset by
+//      their position among same-category staff so the whole category
+//      isn't on the same phase of the cycle at once — same spreading goal
+//      as the reference's "auto-distribute" default, generalized to work
+//      for a cycle of any shape, not just the original uniformly-paired one.
 //   2. Blocked staff (expired quals/license) get all-OFF — never scheduled.
 //   3. Approved leave overrides the rotation for those specific days.
 //   4. A rest-gap pass, applied inline day-by-day (not as a separate sweep,
@@ -310,13 +313,31 @@ function buildRosterAssignments({
     if (!cycleByCategory[category]) cycleByCategory[category] = buildCategoryCycle(category, advisoryDemand, nDays);
     return cycleByCategory[category];
   }
-  // Counts same-category staff only (not global list position) — now that
-  // categories can have differently-SIZED cycles, spreading everyone by
-  // their position across the WHOLE staff list would clump same-category
-  // staff onto the same phase whenever two of them share a residue mod a
-  // shorter category cycle. A running per-category counter keeps the
-  // original idx*2 offset's actual goal ("this category isn't all on the
-  // same phase at once") correct regardless of cycle length.
+  // How many UNPATTERNED staff share each category's fallback cycle —
+  // needed up front (not discoverable mid-iteration) so their offsets can
+  // be spread evenly across the FULL cycle length, not just incrementally.
+  // A fixed step size (whether the original flat rotation's 2, or a
+  // naive 1) breaks down once a category's real headcount is smaller than
+  // its own cycle length: a run of N consecutive offsets (0,1,...,N-1) on
+  // a longer cycle leaves the remaining (cycle.length-N) positions
+  // completely uncovered as one contiguous gap, and if that gap happens
+  // to swallow an entire shift-block (e.g. a 2-wide Night pair), that
+  // shift goes completely uncovered by the base rotation on whichever
+  // calendar days line up with it — confirmed directly: 6 B2 staff on the
+  // flat 8-day rotation with offsets 0-5 left Night (positions 4,5)
+  // completely empty every 8th day, a real regression a fixed step
+  // doesn't have a safe universal value for. Spreading N offsets evenly
+  // around the FULL cycle (offset_i = round(i * cycle.length / N))
+  // instead keeps the largest gap between any two covered positions as
+  // small as mathematically possible for that N and cycle.length, so a
+  // multi-slot block is never left entirely uncovered on any given day
+  // unless genuinely more staff would be needed than the category has.
+  const unpatternedCountByCategory = {};
+  staff.forEach(s => {
+    if (!patternByUser?.[s.id]?.codes?.length) {
+      unpatternedCountByCategory[s.category] = (unpatternedCountByCategory[s.category] || 0) + 1;
+    }
+  });
   const catOffsetCounters = {};
 
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
@@ -333,7 +354,12 @@ function buildRosterAssignments({
     const codes = new Array(nDays);
     const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
     const cycle = pattern?.codes?.length ? pattern.codes : fallbackCycleFor(s.category);
-    const offset = pattern?.codes?.length ? 0 : (catOffsetCounters[s.category] = (catOffsetCounters[s.category] || 0) + 1) * 2 - 2;
+    let offset = 0;
+    if (!pattern?.codes?.length) {
+      const catIdx = (catOffsetCounters[s.category] = (catOffsetCounters[s.category] || 0) + 1) - 1; // 0,1,2,...
+      const catCount = unpatternedCountByCategory[s.category] || 1;
+      offset = Math.round((catIdx * cycle.length) / catCount);
+    }
     // Only attempted when the caller actually requested continuity
     // (tailByUser present at all — buildContinuationTails is only built
     // when "Continue from Previous Roster" is on) AND this staff member has
