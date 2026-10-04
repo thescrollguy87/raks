@@ -1,4 +1,4 @@
-const { buildRosterAssignments, buildCategoryCycle, ROTATION } = require("../src/utils/rosterGenerationAlgorithm");
+const { buildRosterAssignments, buildCategoryCycle, resyncCycleStart, ROTATION } = require("../src/utils/rosterGenerationAlgorithm");
 
 function makeStaff(n, category) {
   return Array.from({ length: n }, (_, i) => ({ id: `${category}${i}`, category }));
@@ -934,5 +934,54 @@ describe("buildRosterAssignments — demand-weighted base rotation, end to end",
       expect(counts.A || 0).toBeGreaterThan(0);
       expect(counts.N || 0).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("resyncCycleStart — preferred-offset tiebreaker for ambiguous continuity matches", () => {
+  // The flat 8-day ROTATION's consecutive-code pairs (MM/MA/AA/AN/NN/NO/
+  // OO/OM) are all distinct, so this ambiguity case never came up before
+  // buildCategoryCycle started producing cycles with repeated codes back
+  // to back (e.g. a Morning-heavy category's M,M,M,A,N,N,O,O).
+  const cycle = ["M", "M", "M", "A", "N", "N", "O", "O"];
+
+  it("without a usable preferred offset, falls back to the first matching position (old behavior)", () => {
+    // tail = [yesterday, day-before] = ["M", "M"] matches positions 1 and 2
+    // (both preceded by an M); position 0 doesn't qualify (preceded by O).
+    expect(resyncCycleStart(cycle, ["M", "M"])).toBe((1 + 1) % 8);
+  });
+
+  it("two staff members with the IDENTICAL ambiguous tail resolve to DIFFERENT positions when their preferred offsets differ", () => {
+    const a = resyncCycleStart(cycle, ["M", "M"], 0); // prefers position 0 -> closest tied match is 1
+    const b = resyncCycleStart(cycle, ["M", "M"], 4); // prefers position 4 -> closest tied match is 2
+    expect(a).not.toBe(b);
+    expect(a).toBe((1 + 1) % 8);
+    expect(b).toBe((2 + 1) % 8);
+  });
+
+  it("never picks a position inconsistent with real history just to chase the preferred offset", () => {
+    // tail fully disambiguates to position 2 regardless of what's preferred.
+    const result = resyncCycleStart(cycle, ["M", "M", "M"], /* preferredOffset */ 7);
+    // tail[0]="M" candidates [0,1,2]; tail[1]="M" refines to [1,2] (pos0
+    // preceded by O doesn't match); still ambiguous between 1 and 2, so
+    // the tiebreaker IS used here — this case only confirms it never
+    // returns something outside the real candidate set.
+    expect([2, 3]).toContain(result);
+  });
+});
+
+describe("buildRosterAssignments — continuity into a reshaped cycle doesn't re-clump staff", () => {
+  it("two staff members continuing identical recent history into a Morning-heavy category cycle land on different phases, not the same one", () => {
+    const staff = [{ id: "x0", category: "X" }, { id: "x1", category: "X" }];
+    // Both staff ended last month on the same 2 days: Afternoon then
+    // Morning — a real, plausible coincidence for two different people.
+    const tailByUser = { x0: ["M", "A", "O"], x1: ["M", "A", "O"] };
+    const advisoryDemand = {};
+    // Strongly Morning-dominant, negligible Night -> buildCategoryCycle
+    // produces a cycle with 3 consecutive M's (duplicate M,M pairs),
+    // exactly the shape that exposed the clumping bug.
+    for (let d = 1; d <= 8; d++) advisoryDemand[d] = { M: { X: 8 }, A: { X: 1 }, N: { X: 1 } };
+    const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, advisoryDemand });
+    const codesFor = (id) => result.assignments.filter(a => a.userId === id).sort((a, b) => a.day - b.day).map(a => a.code);
+    expect(codesFor("x0")).not.toEqual(codesFor("x1"));
   });
 });

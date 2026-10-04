@@ -257,14 +257,43 @@ function creditedCategories(s) {
   return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
 }
 
-function resyncCycleStart(codes, tail) {
+// preferredOffset is the position this staff member would land on anyway
+// via the plain even-spread offset formula (buildRosterAssignments below)
+// — used ONLY as a tiebreaker when their real recent history is
+// genuinely ambiguous about where in the cycle they belong (see below),
+// never to override a history-backed match.
+function resyncCycleStart(codes, tail, preferredOffset) {
   if (!codes?.length || tail?.[0] == null) return null;
   const len = codes.length;
   const candidates = [];
   for (let i = 0; i < len; i++) if (codes[i] === tail[0]) candidates.push(i);
   if (!candidates.length) return null;
   const refined = candidates.length > 1 ? candidates.filter(i => codes[(i - 1 + len) % len] === tail[1]) : candidates;
-  const picked = refined.length === 1 ? refined[0] : candidates[0];
+  const pool = refined.length ? refined : candidates;
+  // The flat 8-day ROTATION's 8 consecutive-code pairs (MM/MA/AA/AN/NN/
+  // NO/OO/OM) are all distinct, so `pool` was always exactly 1 element in
+  // practice for it — this ambiguity branch was effectively dead code
+  // until buildCategoryCycle's demand-weighted cycles started producing
+  // repeated codes back-to-back (e.g. a Morning-heavy category's cycle
+  // legitimately containing M,M,M). When more than one position is
+  // equally consistent with this person's real recent history, picking
+  // the SAME one (the original behavior: always pool[0]) for every staff
+  // member who happens to share that tail collapses them all onto one
+  // phase — exactly the clumping the even-spread offset below exists to
+  // prevent, just reintroduced through the back door of month-to-month
+  // continuity. Preferring whichever tied candidate is closest to this
+  // person's own fair-share offset keeps both promises at once: still
+  // only ever choosing among positions their actual history supports,
+  // while not needlessly re-clumping people continuity was never meant
+  // to distinguish between in the first place.
+  let picked = pool[0];
+  if (pool.length > 1 && preferredOffset != null) {
+    let bestDist = Infinity;
+    for (const i of pool) {
+      const dist = Math.min(Math.abs(i - preferredOffset), len - Math.abs(i - preferredOffset));
+      if (dist < bestDist) { bestDist = dist; picked = i; }
+    }
+  }
   return (picked + 1) % len;
 }
 
@@ -365,7 +394,11 @@ function buildRosterAssignments({
     // when "Continue from Previous Roster" is on) AND this staff member has
     // a real previous-month record to resync from (see resyncCycleStart);
     // null falls straight through to the existing day-anchor formula below.
-    const resyncStart = tailByUser ? resyncCycleStart(cycle, tail) : null;
+    // The preferred-offset tiebreaker is the pattern's own offset for a
+    // pattern-holder, or this person's even-spread offset otherwise —
+    // whichever one `cycle` itself actually came from.
+    const preferredOffset = pattern?.codes?.length ? (pattern.offset || 0) : offset;
+    const resyncStart = tailByUser ? resyncCycleStart(cycle, tail, preferredOffset) : null;
 
     for (let day = 1; day <= nDays; day++) {
       if (blocked.has(s.id) || unpatternedTrainingPending) { codes[day - 1] = "O"; continue; }
@@ -599,4 +632,4 @@ function buildRosterAssignments({
   return { assignments, violations, advisoryGaps, flexiAssignments, staffCount: staff.length };
 }
 
-module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories, buildCategoryCycle };
+module.exports = { buildRosterAssignments, ROTATION, DEFAULT_MANDATORY_COVERAGE_CONFIG, shiftFamily, creditedCategories, buildCategoryCycle, resyncCycleStart };
