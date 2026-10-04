@@ -300,16 +300,6 @@ function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
   absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds,
-  // Defaults true (the current, demand-weighted behavior) so any existing
-  // caller that doesn't pass this explicitly — every test in this file
-  // included — sees no change. false reproduces the pre-NIGHT_ONLY_CYCLE
-  // behavior exactly: every unpatterned staff member in every category on
-  // the plain flat ROTATION, uniform M,M,A,A,N,N,O,O regardless of real
-  // demand — offered as an explicit station-level choice (see
-  // rosterGenerationService.js's splitNightOnly) for a manager who'd
-  // rather have one simple, predictable pattern for everyone than the
-  // better-matched-to-demand but less uniform two-pattern mix.
-  splitNightOnly = true,
 }) {
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
@@ -376,7 +366,7 @@ function buildRosterAssignments({
   const nightOnlySelectedByCategory = {}; // category -> Set(local index)
   Object.keys(unpatternedCountByCategory).forEach(cat => {
     const total = unpatternedCountByCategory[cat];
-    const k = splitNightOnly ? computeNightOnlyCount(cat, advisoryDemand, nDays, total) : 0;
+    const k = computeNightOnlyCount(cat, advisoryDemand, nDays, total);
     nightOnlyCountByCategory[cat] = k;
     const selected = new Set();
     for (let j = 0; j < k; j++) selected.add(Math.round((j * total) / k));

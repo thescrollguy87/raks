@@ -49,8 +49,8 @@ const shiftDefinitions = asyncHandler(async (req, res) => {
 });
 
 const generate = asyncHandler(async (req, res) => {
-  const { stationId, monthKey, preview, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, splitNightOnly } = req.body;
-  const result = await rosterGenerationService.generateRoster(stationId, monthKey, req.user, req, { preview, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, splitNightOnly });
+  const { stationId, monthKey, preview, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer } = req.body;
+  const result = await rosterGenerationService.generateRoster(stationId, monthKey, req.user, req, { preview, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
   res.json(result);
 });
 
