@@ -697,6 +697,12 @@ export default function RosterPage() {
         <GenerationResultPanel result={generationResult} onDismiss={() => setGenerationResult(null)} />
       )}
 
+      {/* Sticky to the LEFT edge of .content (same position:sticky;left:0
+          mechanism the table's own Staff/Cat columns use below) — without
+          this, scrolling the wide roster table to the right scrolls this
+          whole toolbar/KPI block away sideways too, since .content is one
+          shared scroll container for both the page and the table. */}
+      <div className="roster-sticky-header">
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
         <StatusPill roster={roster} />
         <SaveStatusPill status={saveQueue.status} pendingCount={saveQueue.pendingCount} lastError={saveQueue.lastError} onRetry={saveQueue.retry} />
@@ -757,6 +763,7 @@ export default function RosterPage() {
           ? ` · Click to select (shift+click for a range), double-click to edit · Delete clears · Ctrl+C/X/V copy/cut/paste${selectedCells.size ? ` · ${selectedCells.size} selected${clipboard ? (clipboard.isCut ? " · cut pending" : " · copied") : ""}` : ""}`
           : isReadOnly ? " · Read-only (subscription required — see banner above)" : " · View-only"}
       </div>
+      </div>
 
       <div className="roster-wrap" ref={scrollElRef} style={shouldVirtualize ? { maxHeight: "min(72vh, 780px)", overflow: "auto" } : undefined}>
         <table className="rt">
@@ -787,7 +794,7 @@ export default function RosterPage() {
                   if (!s) return null;
                   return (
                     <RosterRow
-                      key={item.key} userId={s.id} fullName={s.fullName} designation={s.designation} cat={item.cat}
+                      key={item.key} userId={s.id} fullName={s.fullName} designation={s.designation} employeeId={s.employeeId} cat={item.cat}
                       isBlocked={!!s.isBlocked} blockReason={(s.blockReasons || []).join("; ")}
           trainingPending={!!s.trainingPending} trainingPendingNote={s.trainingPendingNote}
                       shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
@@ -1066,7 +1073,7 @@ function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode,
       <CategoryHeaderRow cat={group.cat} count={group.staff.length} colSpan={colSpan} />
       {group.staff.map(s => (
         <RosterRow
-          key={s.id} userId={s.id} fullName={s.fullName} designation={s.designation} cat={group.cat}
+          key={s.id} userId={s.id} fullName={s.fullName} designation={s.designation} employeeId={s.employeeId} cat={group.cat}
           isBlocked={!!s.isBlocked} blockReason={(s.blockReasons || []).join("; ")}
           trainingPending={!!s.trainingPending} trainingPendingNote={s.trainingPendingNote}
           shiftAssignments={s.shiftAssignments} nDays={nDays} dayRange={dayRange} monthKey={monthKey}
@@ -1088,7 +1095,7 @@ function RosterCategoryGroup({ group, nDays, dayRange, monthKey, shiftDefByCode,
 // own RosterRow — everyone else's `shiftAssignments` array kept its old
 // reference and memo bails out before touching their DOM at all.
 const RosterRow = memo(function RosterRow({
-  userId, fullName, designation, cat, isBlocked, blockReason, trainingPending, trainingPendingNote, shiftAssignments, nDays, dayRange, monthKey, shiftDefByCode,
+  userId, fullName, designation, employeeId, cat, isBlocked, blockReason, trainingPending, trainingPendingNote, shiftAssignments, nDays, dayRange, monthKey, shiftDefByCode,
   showTotals, selectedCells, cutPendingKeys, cellKey, onCellClick, onCellDoubleClick, onStaffClick, todayDayNum,
 }) {
   useRenderCount(`RosterRow:${userId}`);
@@ -1128,6 +1135,7 @@ const RosterRow = memo(function RosterRow({
             )}
           </div>
           <div className="sr">{designation}</div>
+          {employeeId && <div className="sid">{employeeId}</div>}
         </button>
       </td>
       <td className="sc2"><span className={`cat-tag cat-${cat}`}>{cat}</span></td>

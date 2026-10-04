@@ -221,22 +221,40 @@ table{border-collapse:collapse}
    overflow-x:auto forces overflow-y:auto too), so the sticky day-header
    row and frozen staff-name column would "stick" to a box that never
    itself scrolls — i.e. scroll straight off screen with everything else. */
+/* Pins the toolbar/KPI block above the table to the left edge of .content
+   — see the long comment above: since .roster-wrap deliberately has no
+   overflow of its own, .content scrolls horizontally too, and without this
+   this whole block would scroll away sideways along with the table. */
+.roster-sticky-header{position:sticky;left:0}
 .roster-wrap{border-radius:var(--r)}
 .rt{min-width:100%;font-size:10px;border-collapse:separate;border-spacing:0}
-.rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:10;border-bottom:1px solid rgba(15,23,42,.12)}
-.rt th.sc{position:sticky;left:0;z-index:20;text-align:left;padding-left:7px;min-width:165px}
-.rt th.sc2{position:sticky;left:165px;z-index:20;min-width:50px}
+.rt th{background:var(--navy-lite);color:var(--text-dim);padding:6px 4px;text-align:center;font-weight:800;font-size:9px;letter-spacing:.2px;white-space:nowrap;position:sticky;top:0;z-index:30;border-bottom:1px solid rgba(15,23,42,.12)}
+/* Staff/Cat (left-frozen) column widths are a FIXED, not just minimum,
+   size — th.sc2/td.sc2's own `left` offset below is hardcoded to match
+   th.sc/td.sc's width exactly (172px). If the name column were ever
+   allowed to grow past that (e.g. a long name/designation/employee code
+   not truncated), sc2 would stick at the wrong x position and the table's
+   own cells scrolling underneath would show through the gap — the
+   overflow/text-overflow rules on .sn/.sr/.sid below are what actually
+   guarantees it never grows past this width. z-index is bumped well above
+   .sp's own hover(10)/selected(11) states (and above the plain th row)
+   so neither sticky column nor the date header can ever render BEHIND a
+   normal cell scrolling past underneath them. */
+.rt th.sc{position:sticky;left:0;z-index:40;text-align:left;padding-left:7px;width:172px}
+.rt th.sc2{position:sticky;left:172px;z-index:40;width:50px}
 .rt th.wknd{background:#E8EFFB}
 .rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(15,23,42,.07)}
-.rt td.sc{position:sticky;left:0;z-index:5;background:var(--navy-mid);padding-left:7px;text-align:left}
+.rt td.sc{position:sticky;left:0;z-index:15;background:var(--navy-mid);padding-left:7px;text-align:left;width:172px;overflow:hidden}
 .rt td.sc-training-pending{background:rgba(245,166,35,.28)!important}
-.rt td.sc2{position:sticky;left:165px;z-index:5;background:var(--navy-mid)}
+.rt td.sc2{position:sticky;left:172px;z-index:15;background:var(--navy-mid)}
 .rt td.wknd{background:rgba(59,130,246,.045)}
 .rt td.today,.rt th.today{background:#DCEAFE!important}
 .rt td.today .sp{outline:2px solid var(--sky);outline-offset:-1px}
-.sn{font-weight:600;font-size:10px;line-height:1.2}
-.sr{font-size:8px;color:var(--text-dim)}
-.sid{font-size:8px;color:var(--text-dim);font-family:var(--mono)}
+/* overflow:hidden + ellipsis so none of these three lines can ever push
+   td.sc wider than its fixed 172px (see .rt td.sc's own comment) */
+.sn{font-weight:600;font-size:10px;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sr{font-size:8px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sid{font-size:8px;color:var(--text-dim);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Shift cell — a small, well-defined "chip" rather than a bare color
    swatch: a hairline dark border and soft shadow keep it legible even
    when two shift definitions happen to use similar background hues. */
@@ -427,7 +445,10 @@ input[type="time"].fi::-webkit-calendar-picker-indicator{filter:invert(1);cursor
 .legend-swatch{width:11px;height:11px;border-radius:3px;flex-shrink:0;border:1px solid rgba(0,0,0,.15)}
 .legend-code{font-weight:800;font-size:11px}
 .legend-time{color:var(--text-dim);font-family:var(--mono)}
-.staff-name-btn{background:none;border:none;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
+/* display:block + width:100% (not the default inline-block shrink-to-fit)
+   so .sn/.sr/.sid inside get a definite width to ellipsis against, bounded
+   by td.sc's own fixed 172px — see that rule's comment. */
+.staff-name-btn{display:block;width:100%;background:none;border:none;padding:0;font:inherit;color:inherit;cursor:pointer;text-align:left}
 .staff-name-btn:hover .sn{color:var(--sky);text-decoration:underline}
 
 /* Daily Coverage (Required vs Assigned) table below the roster grid. */
