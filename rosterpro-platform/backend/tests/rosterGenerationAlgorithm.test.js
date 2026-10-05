@@ -1006,3 +1006,65 @@ describe("buildRosterAssignments — flexi/redistribution pulls spread fairly in
     expect(Math.max(...counts)).toBeLessThanOrEqual(Math.ceil(result.flexiAssignments.length / 2));
   });
 });
+
+describe("buildRosterAssignments — staff inert for the whole month don't eat a real offset slot", () => {
+  // Confirmed directly against a live B1 roster: 7 total B1 staff, 2 of
+  // them on leave/training for literally every day of the month. The
+  // even-spread offset formula divided the 8-day ROTATION by 7 (the full
+  // headcount) instead of 5 (the staff who'd actually work), so the 5 real
+  // workers landed on whatever 5 of those 7 computed offsets iteration
+  // order happened to leave them — clumped, not evenly spread — leaving
+  // Morning empty on some days and Night empty 8 days later on others.
+  it("spreads the REAL working headcount evenly, ignoring blocked/training-pending/all-month-leave staff entirely", () => {
+    const leaveByUserDay = {};
+    const allMonthLeave = new Map();
+    for (let d = 1; d <= 30; d++) allMonthLeave.set(d, "ANNUAL");
+    leaveByUserDay.leaver = allMonthLeave;
+
+    const staff = [
+      { id: "w0", category: "B1" },
+      { id: "blocked0", category: "B1" },
+      { id: "w1", category: "B1" },
+      { id: "w2", category: "B1" },
+      { id: "leaver", category: "B1" },
+      { id: "w3", category: "B1" },
+      { id: "w4", category: "B1" },
+    ];
+    const result = buildRosterAssignments({
+      staff, nDays: 30, leaveByUserDay, blockedUserIds: ["blocked0"],
+      mandatoryCoverageConfig: { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } },
+    });
+
+    const codeByUserDay = {};
+    result.assignments.forEach(a => { (codeByUserDay[a.userId] ??= {})[a.day] = a.code; });
+
+    // Exactly the even-spread offsets a clean 5-person group gets on the
+    // 8-day ROTATION (round(i*8/5) for i=0..4: 0,2,3,5,6) — NOT whatever
+    // subset of the 7-slot division the bug used to leave them with.
+    expect(codeByUserDay.w0[1]).toBe("M"); // offset 0
+    expect(codeByUserDay.w1[1]).toBe("A"); // offset 2
+    expect(codeByUserDay.w2[1]).toBe("A"); // offset 3
+    expect(codeByUserDay.w3[1]).toBe("N"); // offset 5
+    expect(codeByUserDay.w4[1]).toBe("O"); // offset 6
+
+    // The two inert staff members still get a real (overridden) code every
+    // day — blocked/leave status is about not consuming an OFFSET slot,
+    // never about being skipped in the output grid.
+    for (let d = 1; d <= 30; d++) {
+      expect(codeByUserDay.blocked0[d]).toBe("O");
+      expect(codeByUserDay.leaver[d]).toBe("L");
+    }
+
+    // No day of the 8-day cycle leaves Morning or Night completely
+    // uncovered among the 5 real workers while another shift has surplus
+    // — the actual symptom reported live (2 in Night/0 in Morning on one
+    // day, 2+2 in M/A with 0 in Night eight days later).
+    const workers = ["w0", "w1", "w2", "w3", "w4"];
+    for (let d = 1; d <= 8; d++) {
+      const counts = { M: 0, A: 0, N: 0, O: 0 };
+      workers.forEach(id => { counts[codeByUserDay[id][d]] = (counts[codeByUserDay[id][d]] || 0) + 1; });
+      expect(counts.M).toBeGreaterThanOrEqual(1);
+      expect(counts.N).toBeGreaterThanOrEqual(1);
+    }
+  });
+});

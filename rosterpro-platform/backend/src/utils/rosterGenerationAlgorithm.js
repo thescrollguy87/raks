@@ -350,9 +350,32 @@ function buildRosterAssignments({
   // (offset_i = round(i * cycle.length / N)) instead keeps the largest
   // gap between any two covered positions as small as mathematically
   // possible for that N and cycle.length.
+  // A staff member who will never actually USE their no-pattern cycle this
+  // month at all — blocked, an unpatterned training-pending hold, or on
+  // approved leave for literally every day — still consumed one of the
+  // category's offset "slots" below for nothing: the even-spread formula
+  // divided the cycle by the FULL headcount (inert staff included), so the
+  // staff who actually work got pushed onto whatever subset of those
+  // slots iteration order happened to assign them, not spread evenly
+  // among themselves. Confirmed directly against a live B1 roster: 2 of 7
+  // B1 staff on leave/training the entire month left the real 5 working
+  // staff clumped (offsets 0,1,2,4,7 instead of the even 0,2,3,5,6),
+  // leaving Morning empty some days and Night empty on others, 8 days
+  // apart. Excluding genuinely-inert staff here fixes both this spacing
+  // AND computeNightOnlyCount's own headcount (which should also reflect
+  // only staff actually available to work, not the full roster).
+  function isFullyInert(s) {
+    if (blocked.has(s.id)) return true;
+    if (trainingPending.has(s.id) && !patternByUser?.[s.id]?.codes?.length) return true;
+    const leaveMap = leaveByUserDay?.[s.id];
+    if (!leaveMap) return false;
+    for (let d = 1; d <= nDays; d++) if (!leaveMap.has(d)) return false;
+    return true;
+  }
+
   const unpatternedCountByCategory = {};
   staff.forEach(s => {
-    if (!patternByUser?.[s.id]?.codes?.length) {
+    if (!patternByUser?.[s.id]?.codes?.length && !isFullyInert(s)) {
       unpatternedCountByCategory[s.category] = (unpatternedCountByCategory[s.category] || 0) + 1;
     }
   });
@@ -391,6 +414,11 @@ function buildRosterAssignments({
     let cycle, offset = 0;
     if (pattern?.codes?.length) {
       cycle = pattern.codes;
+    } else if (isFullyInert(s)) {
+      // Never actually used below (blocked/trainingPending/all-leave all
+      // short-circuit to "O" or the leave code in the day loop before
+      // `cycle`/`offset` matter) — just mustn't consume a real offset slot.
+      cycle = ROTATION;
     } else {
       const localIdx = (catLocalIndexCounters[s.category] = (catLocalIndexCounters[s.category] || 0) + 1) - 1;
       const isNightOnly = !!nightOnlySelectedByCategory[s.category]?.has(localIdx);
