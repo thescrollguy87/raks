@@ -93,4 +93,31 @@ describe("baRosterService.buildBARosterRows", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0][0]).toBe("700577");
   });
+
+  // Stores (STO) staff don't go airside and were never put through the
+  // airport's own ground-staff access test this portal gates on —
+  // confirmed directly with the user: they must never appear in this
+  // export, even when genuinely on duty with a real employee number.
+  it("excludes Stores (STO) category staff entirely, even when on duty with a valid employee number", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      {
+        id: "s1", fullName: "Stores Hand", category: "STO", employeeId: "702000",
+        shiftAssignments: [
+          { shiftDate: new Date("2026-09-05T00:00:00.000Z"), shiftDef: { code: "M", name: "Morning", type: "duty", startTime: "06:30", endTime: "14:00" }, in1: null, out1: null },
+        ],
+      },
+      {
+        id: "s2", fullName: "Rakesh Patel", category: "B1", employeeId: "700577",
+        shiftAssignments: [
+          { shiftDate: new Date("2026-09-05T00:00:00.000Z"), shiftDef: { code: "M", name: "Morning", type: "duty", startTime: "06:30", endTime: "14:00" }, in1: null, out1: null },
+        ],
+      },
+    ]);
+
+    const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0][0]).toBe("700577");
+  });
 });

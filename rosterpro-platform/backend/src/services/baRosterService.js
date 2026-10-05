@@ -50,6 +50,12 @@ async function buildBARosterRows(stationId, dateStr) {
   const rows = [];
 
   for (const s of staff) {
+    // Stores (STO) staff don't go airside and were never put through the
+    // airport's own ground-staff access test this portal gates on —
+    // confirmed directly with the user: they're not meant to appear in
+    // this export at all, regardless of whether they're rostered on duty
+    // that day.
+    if (s.category === "STO") continue;
     const todayShift = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
     if (!todayShift) continue;
     const def = todayShift.shiftDef;
