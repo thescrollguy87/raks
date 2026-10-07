@@ -52,7 +52,9 @@ export default function AutoRosterPage() {
     { key: "flightschedule", label: "✈ Flight Schedule" },
     { key: "workloadconfig", label: "⚙ Workload Config" },
     { key: "rulebuilder", label: "📐 Rule Builder" },
-    { key: "dailyops", label: "📅 Daily Ops" },
+    // Daily Ops tab hidden per user request (not useful to them currently) —
+    // the DailyOpsTab component and its route below are left in place so
+    // it's a one-line restore, not a rebuild, if they want it back later.
     { key: "generate", label: "🤖 Generate" },
   ];
 
