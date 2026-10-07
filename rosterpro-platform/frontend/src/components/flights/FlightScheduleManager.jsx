@@ -149,9 +149,9 @@ export default function FlightScheduleManager({ stationId, monthKey, onMonthKeyC
           {workloadView === "month" ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, marginTop: 10 }}>
               <KpiTile icon="🗓" label="Operating Days" value={`${schedule.summary.operatingDays} / ${schedule.summary.daysInMonth}`} />
-              <KpiTile icon="✈️" label="Total Movements" value={schedule.summary.totalMovements} />
-              <KpiTile icon="👥" label="Avg Daily Movements" value={schedule.summary.avgDailyMovements} />
-              <KpiTile icon="📈" label="Peak Daily Movements" value={schedule.summary.peakDailyMovements} sub={schedule.summary.peakDate || ""} />
+              <KpiTile icon="✈️" label="Total Departures" value={schedule.summary.totalDepartures} />
+              <KpiTile icon="👥" label="Avg Daily Departures" value={schedule.summary.avgDailyDepartures} />
+              <KpiTile icon="📈" label="Peak Daily Departures" value={schedule.summary.peakDailyDepartures} sub={schedule.summary.peakDepartureDate || ""} />
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(70px, 1fr))", gap: 8, marginTop: 10 }}>
@@ -164,7 +164,7 @@ export default function FlightScheduleManager({ stationId, monthKey, onMonthKeyC
             </div>
           )}
           <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 10 }}>
-            Source: {schedule.summary.turnRowCount} turn-report row(s), {schedule.summary.charterRowCount} charter row(s) — expanded against Effective/Discontinue dates and Days of the Week for the selected month. "Movements" = one takeoff or landing (a turn-report row contributes up to 2 per operating day: inbound arrival + outbound departure). Daily Avg shows the average movements for each weekday across every occurrence of that weekday this month.
+            Source: {schedule.summary.turnRowCount} turn-report row(s), {schedule.summary.charterRowCount} charter row(s) — expanded against Effective/Discontinue dates and Days of the Week for the selected month. "Departures" counts only the outbound leg of each turn-report row (a row's inbound arrival is the tail end of a flight that departed elsewhere, not a new flight this station handled, so it isn't counted here) plus each charter row. Daily Avg shows the average departures for each weekday across every occurrence of that weekday this month.
           </div>
         </div>
       )}

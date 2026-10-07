@@ -170,8 +170,21 @@ function expandOperatingDates(effDate, discDate, daysOfWeek, year, month) {
 // takeoff or landing; a single turn-report row occurring on one operating
 // date contributes 2 movements (inbound arrival + outbound departure) if
 // both legs are present, matching standard aviation usage of the term.
+// Also tracks DEPARTURES separately (outboundFlt only, for a turn row) —
+// the figure the Dashboard's "Total Flights" tile and the Flight Schedule
+// page's headline KPI actually want: a turn's inbound arrival is the tail
+// end of a flight that departed from somewhere else, not a new flight this
+// station is handling, so counting both legs as "flights" double-counts
+// every turn. Confirmed directly with the user: those two displays should
+// read departures only. totalMovements/avgDailyMovements themselves are
+// untouched — workloadEngine's real manpower demand math (flightShare) and
+// the Workload Analysis panel's own "Total Flight Movements" figure are
+// both already correctly labeled as movements and deliberately keep using
+// both legs, so changing the definition here would have silently changed
+// real demand calculations nobody asked to change.
 function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) {
   const byDate = {}; // "YYYY-MM-DD" -> movement count
+  const byDateDepartures = {}; // "YYYY-MM-DD" -> departure count
   const operatingDateSet = new Set();
 
   turnRecords.forEach(rec => {
@@ -181,7 +194,7 @@ function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) 
       operatingDateSet.add(key);
       let movements = 0;
       if (rec.inboundFlt) movements++;
-      if (rec.outboundFlt) movements++;
+      if (rec.outboundFlt) { movements++; byDateDepartures[key] = (byDateDepartures[key] || 0) + 1; }
       byDate[key] = (byDate[key] || 0) + movements;
     });
   });
@@ -191,14 +204,19 @@ function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) 
       const key = localDateKey(d);
       operatingDateSet.add(key);
       byDate[key] = (byDate[key] || 0) + 1; // one leg = one movement
+      byDateDepartures[key] = (byDateDepartures[key] || 0) + 1; // single-leg charter counted as its own departure
     });
   });
 
   const dailyCounts = Object.values(byDate);
   const totalMovements = dailyCounts.reduce((a, b) => a + b, 0);
+  const departureCounts = Object.values(byDateDepartures);
+  const totalDepartures = departureCounts.reduce((a, b) => a + b, 0);
   const daysInMonth = new Date(year, month, 0).getDate();
   let peakDate = null, peakCount = 0;
   Object.entries(byDate).forEach(([k, v]) => { if (v > peakCount) { peakCount = v; peakDate = k; } });
+  let peakDepartureDate = null, peakDepartureCount = 0;
+  Object.entries(byDateDepartures).forEach(([k, v]) => { if (v > peakDepartureCount) { peakDepartureCount = v; peakDepartureDate = k; } });
 
   return {
     operatingDays: operatingDateSet.size,
@@ -207,7 +225,12 @@ function computeFlightWorkloadSummary(turnRecords, charterRecords, year, month) 
     avgDailyMovements: operatingDateSet.size ? Math.round((totalMovements / operatingDateSet.size) * 10) / 10 : 0,
     peakDailyMovements: peakCount,
     peakDate,
+    totalDepartures,
+    avgDailyDepartures: operatingDateSet.size ? Math.round((totalDepartures / operatingDateSet.size) * 10) / 10 : 0,
+    peakDailyDepartures: peakDepartureCount,
+    peakDepartureDate,
     byDate,
+    byDateDepartures,
     turnRowCount: turnRecords.length,
     charterRowCount: charterRecords.length,
   };

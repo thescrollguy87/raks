@@ -144,7 +144,11 @@ async function flightCoverageWidget(stationId, from, to) {
   const schedule = await flightScheduleService
     .getFlightScheduleView(stationId, scheduleYear, scheduleMonth)
     .catch(() => null);
-  const totalFlights = schedule?.imported ? schedule.summary.totalMovements : flights.length;
+  // Departures only, not arrival+departure movements — a turn's inbound
+  // arrival is the tail end of a flight that departed elsewhere, not a new
+  // flight this station handled, so counting both legs here would
+  // double-count every turn. Confirmed directly with the user.
+  const totalFlights = schedule?.imported ? schedule.summary.totalDepartures : flights.length;
 
   return {
     from, to,
@@ -329,7 +333,7 @@ async function stationsOverviewWidget(actor) {
     return {
       stationId: s.id, iataCode: s.iataCode, name: s.name,
       staffCount: snapshot.totalStaff, onDutyToday: snapshot.onDutyToday,
-      flightsThisMonth: schedule?.imported ? schedule.summary.totalMovements : 0,
+      flightsThisMonth: schedule?.imported ? schedule.summary.totalDepartures : 0,
       coveragePct: snapshot.totalStaff > 0 ? Math.round((snapshot.onDutyToday / snapshot.totalStaff) * 100) : 0,
     };
   }));

@@ -130,17 +130,21 @@ describe("dashboardService.flightCoverageWidget", () => {
   // The Roster page's "Flights (this month)" KPI should reflect the real
   // Turn Report/Charter import a station actually uses — not the separate,
   // realistically-never-populated ad-hoc Flight log (still used for
-  // on-time rate/delay minutes above).
-  it("uses the imported Flight Schedule's total movements when one exists for the month", async () => {
+  // on-time rate/delay minutes above). Departures only, not totalMovements
+  // (arrival+departure) — confirmed directly with the user: a turn's
+  // inbound arrival is the tail end of a flight that departed elsewhere,
+  // not a new flight this station handled, so counting both legs here
+  // would double-count every turn.
+  it("uses the imported Flight Schedule's total DEPARTURES (not totalMovements) when one exists for the month", async () => {
     flightRepo.listFlightsForStation.mockResolvedValue([]); // ad-hoc Flight log empty, as it usually is
     flightRepo.listDelaysForStation.mockResolvedValue([]);
     flightScheduleService.getFlightScheduleView.mockResolvedValue({
-      imported: true, summary: { totalMovements: 47 },
+      imported: true, summary: { totalMovements: 47, totalDepartures: 24 },
     });
 
     const result = await dashboardService.flightCoverageWidget("station-1", "2026-09-01T00:00:00.000Z", "2026-09-30T23:59:59.000Z");
 
-    expect(result.totalFlights).toBe(47);
+    expect(result.totalFlights).toBe(24);
     expect(flightScheduleService.getFlightScheduleView).toHaveBeenCalledWith("station-1", 2026, 9);
   });
 });

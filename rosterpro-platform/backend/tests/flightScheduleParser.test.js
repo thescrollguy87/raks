@@ -238,5 +238,34 @@ describe("computeFlightWorkloadSummary + buildDailyFlightSchedule", () => {
     expect(summary.operatingDays).toBe(30);
     expect(summary.totalMovements).toBe(60); // 2 movements/day (inbound+outbound) x 30 days
     expect(summary.turnRowCount).toBe(1);
+    // Departures track only the outbound leg — half of totalMovements here
+    // since every row in this fixture has both legs.
+    expect(summary.totalDepartures).toBe(30);
+    expect(summary.avgDailyDepartures).toBe(1);
+  });
+
+  // Confirmed directly with the user: the Dashboard's "Total Flights" tile
+  // and the Flight Schedule page's headline KPI should count departures
+  // only, never arrival+departure movements — a turn's inbound arrival is
+  // the tail end of a flight that departed elsewhere, not a new flight
+  // this station is handling, so counting both legs double-counts every
+  // turn. This fixture deliberately mixes an inbound-only row (no
+  // departure contribution), a full inbound+outbound row, and a charter
+  // leg (counted as its own departure) to prove departures and movements
+  // diverge correctly rather than just always being totalMovements/2.
+  it("counts departures as outbound-leg-only, separately from totalMovements (inbound+outbound)", () => {
+    const turnRecords = [
+      // Inbound-only — arrives but never departs from this station in this record: 1 movement, 0 departures.
+      { inboundFlt: "IN1", outboundFlt: null, effectiveDate: new Date(2026, 8, 1), discontinueDate: new Date(2026, 8, 1), daysOfWeek: decodeDaysOfWeek(1234567) },
+      // Full turn: 2 movements, 1 departure.
+      { inboundFlt: "IN2", outboundFlt: "OUT2", effectiveDate: new Date(2026, 8, 1), discontinueDate: new Date(2026, 8, 1), daysOfWeek: decodeDaysOfWeek(1234567) },
+    ];
+    const charterRecords = [
+      { flightDesg: "CH1", effectiveDate: new Date(2026, 8, 1), discontinueDate: new Date(2026, 8, 1), daysOfWeek: decodeDaysOfWeek(1234567) },
+    ];
+    const summary = computeFlightWorkloadSummary(turnRecords, charterRecords, 2026, 9);
+    expect(summary.totalMovements).toBe(4); // 1 (inbound-only) + 2 (full turn) + 1 (charter)
+    expect(summary.totalDepartures).toBe(2); // 0 (inbound-only) + 1 (full turn) + 1 (charter)
+    expect(summary.byDateDepartures["2026-09-01"]).toBe(2);
   });
 });
