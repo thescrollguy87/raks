@@ -262,7 +262,15 @@ table{border-collapse:collapse}
 .rt th.wknd{background:#E8EFFB}
 .rt td{padding:3px 2.5px;text-align:center;border-bottom:1px solid rgba(15,23,42,.07)}
 .rt td.sc{position:sticky;left:0;z-index:15;background:var(--navy-mid);padding-left:7px;text-align:left;width:172px;overflow:hidden}
-.rt td.sc-training-pending{background:rgba(245,166,35,.28)!important}
+/* A solid, fully-opaque bright yellow — NOT a translucent rgba() tint like
+   .viol-* above. This cell is `position:sticky;left:0` (see td.sc's own
+   comment on why that sticking matters) sitting directly over whatever day
+   cells are currently scrolled underneath it; a translucent background
+   only partially occludes them, letting those cells' own shift-code chips
+   visibly bleed through the gap next to the staff's name whenever the
+   table is scrolled horizontally — confirmed directly against a live
+   screenshot. Full opacity is what makes sticky columns actually opaque. */
+.rt td.sc-training-pending{background:#FACC15!important}
 .rt td.sc2{position:sticky;left:172px;z-index:15;background:var(--navy-mid)}
 .rt td.wknd{background:rgba(59,130,246,.045)}
 .rt td.today,.rt th.today{background:#DCEAFE!important}
