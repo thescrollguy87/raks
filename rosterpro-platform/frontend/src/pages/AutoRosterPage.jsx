@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePageHeader } from "../store/PageHeaderContext.jsx";
 import { useStation } from "../store/StationContext.jsx";
 import * as rosterApi from "../api/roster.js";
@@ -1275,6 +1276,7 @@ function ManhoursCard({ manhours, title }) {
 }
 
 function GenerateTab({ stationId }) {
+  const navigate = useNavigate();
   const [monthKey, setMonthKey] = useState(new Date().toISOString().slice(0, 7));
   // "off": flat auto-distributed rotation only. "strict": follow Staff
   // Allocation patterns; coverage gaps are covered by same-day
@@ -1348,6 +1350,11 @@ function GenerateTab({ stationId }) {
     try {
       const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
       setApplied(result);
+      // The button itself promises "Apply → Open Shift Roster" — this is
+      // that promise kept: land on the exact month just generated (Shift
+      // Roster reads ?month= from the URL) instead of requiring a separate
+      // manual click to the sidebar afterward.
+      navigate(`/roster?month=${monthKey}`);
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
