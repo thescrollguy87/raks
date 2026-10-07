@@ -937,6 +937,31 @@ const HARD_CONDITION_TYPES = [
 ];
 const SOFT_CONDITION_TYPES = ["balance_total_hours", "balance_night_duties"];
 
+// Which of the two generic number fields (limitValue/offDays) each
+// condition type's own checker in ruleEngine.js actually reads — night_only/
+// no_night/rest_after_night read neither, both balance_* soft-rule scorers
+// read neither, forced_off_after_nights is the only one that reads both,
+// and everything else reads just limitValue. The Rule Builder grid used to
+// show both inputs live/editable regardless of conditionType, which read as
+// "these need a value" even for a rule type that silently ignores whatever
+// was typed in them — confirmed directly with the user, who'd set 2/0 on a
+// night_only row expecting them to mean something. Greying out (not
+// clearing — a value typed for a previously-selected condition type stays
+// intact if they switch back) whichever field the current conditionType
+// doesn't use makes that "not applicable" status visible instead of silent.
+const RULE_FIELD_USAGE = {
+  max_consecutive_nights: { limit: true, offDays: false },
+  rest_after_night: { limit: false, offDays: false },
+  min_rest_hours: { limit: true, offDays: false },
+  forced_off_after_nights: { limit: true, offDays: true },
+  max_weekly_hours: { limit: true, offDays: false },
+  max_monthly_hours: { limit: true, offDays: false },
+  night_only: { limit: false, offDays: false },
+  no_night: { limit: false, offDays: false },
+  balance_total_hours: { limit: false, offDays: false },
+  balance_night_duties: { limit: false, offDays: false },
+};
+
 function RuleBuilderTab({ stationId }) {
   const [groups, setGroups] = useState(null);
   const [rules, setRules] = useState(null);
@@ -1055,6 +1080,7 @@ function RuleBuilderTab({ stationId }) {
 
 function RuleRow({ rule: r, groups, conditionTypes, onSave, onDelete, busy, setRules, rules }) {
   function update(field, value) { setRules(list => list.map(x => (x.id === r.id ? { ...x, [field]: value } : x))); }
+  const fieldUsage = RULE_FIELD_USAGE[r.conditionType] || { limit: true, offDays: true };
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.2fr 90px 90px 130px 50px 50px 80px 40px 28px", gap: 4, marginBottom: 5, alignItems: "center" }}>
       <input className="fi" value={r.name} style={{ fontSize: 9 }} onChange={e => update("name", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
@@ -1073,8 +1099,16 @@ function RuleRow({ rule: r, groups, conditionTypes, onSave, onDelete, busy, setR
       <select className="fi" value={r.conditionType} style={{ fontSize: 9 }} onChange={e => { update("conditionType", e.target.value); onSave({ ...r, conditionType: e.target.value }); }} disabled={busy}>
         {conditionTypes.map(c => <option key={c} value={c}>{c}</option>)}
       </select>
-      <input className="fi" type="number" placeholder="limit" title="limitValue" style={{ fontSize: 9 }} value={r.limitValue ?? ""} onChange={e => update("limitValue", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
-      <input className="fi" type="number" placeholder="offDays" title="offDays" style={{ fontSize: 9 }} value={r.offDays ?? ""} onChange={e => update("offDays", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy} />
+      <input
+        className="fi" type="number" placeholder={fieldUsage.limit ? "limit" : "not used"} title={fieldUsage.limit ? "limitValue" : `"${r.conditionType}" doesn't use this field — it's ignored`}
+        style={{ fontSize: 9, opacity: fieldUsage.limit ? 1 : .45 }} value={r.limitValue ?? ""}
+        onChange={e => update("limitValue", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy || !fieldUsage.limit}
+      />
+      <input
+        className="fi" type="number" placeholder={fieldUsage.offDays ? "offDays" : "not used"} title={fieldUsage.offDays ? "offDays" : `"${r.conditionType}" doesn't use this field — it's ignored`}
+        style={{ fontSize: 9, opacity: fieldUsage.offDays ? 1 : .45 }} value={r.offDays ?? ""}
+        onChange={e => update("offDays", e.target.value)} onBlur={() => onSave(rules.find(x => x.id === r.id))} disabled={busy || !fieldUsage.offDays}
+      />
       <select className="fi" value={r.priority} style={{ fontSize: 9 }} onChange={e => { update("priority", e.target.value); onSave({ ...r, priority: e.target.value }); }} disabled={busy}>
         <option>High</option><option>Medium</option><option>Low</option>
       </select>
