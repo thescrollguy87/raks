@@ -204,6 +204,13 @@ export default function DashboardPage() {
         </Widget>
       </div>
 
+      {/* Man-Hours Available vs Expected (this month's roster) */}
+      {manhours && (
+        <div style={{ marginBottom: 14 }}>
+          <ManhoursWidget manhours={manhours} />
+        </div>
+      )}
+
       {/* Leave Balance / Roster Status */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 14, marginBottom: 14 }}>
         <Widget title="🏖 Leave Balance">
@@ -226,13 +233,6 @@ export default function DashboardPage() {
 
         <RosterStatusWidget rosterCoverage={rosterCoverage} station={currentStation} onOpenRoster={() => navigate("/roster")} onOpenAlerts={openAlerts} />
       </div>
-
-      {/* Man-Hours Available vs Expected (this month's roster) */}
-      {manhours && (
-        <div style={{ marginBottom: 14 }}>
-          <ManhoursWidget manhours={manhours} />
-        </div>
-      )}
 
       {/* Staff Workload trend + Quick Actions */}
       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 14, marginBottom: 14 }}>
