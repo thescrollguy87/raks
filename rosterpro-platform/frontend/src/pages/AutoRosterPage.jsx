@@ -1470,25 +1470,13 @@ function GenerateTab({ stationId }) {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card-title">👥 Manpower Requirement — Explainable Breakdown</div>
-            <table className="rt" style={{ width: "100%" }}>
-              <thead><tr><th style={{ textAlign: "left", paddingLeft: 9 }}>Shift</th><th>Flight/PDC Demand</th><th>Planned Maint.</th><th>Unplanned Reserve</th><th>Required</th></tr></thead>
-              <tbody>
-                {["M", "A", "N"].map(sh => (
-                  <tr key={sh}>
-                    <td style={{ textAlign: "left", paddingLeft: 9, fontWeight: 700 }}>{SHIFT_LABELS[sh]}</td>
-                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].flightPdcDemand}</td>
-                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].plannedMaintenance}</td>
-                    <td style={{ textAlign: "center" }}>{a.manpowerRequirement[sh].unplannedReserve}</td>
-                    <td style={{ textAlign: "center", fontWeight: 800, color: "var(--cyan)" }}>{a.manpowerRequirement[sh].required}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ fontSize: 9, color: "var(--text-dim)", marginTop: 6 }}>This is the advisory/optimization layer only — the mandatory safety floor per shift is set separately in Mandatory Minimum Coverage below.</div>
-            <div style={{ fontSize: 9, color: "var(--text-dim)" }}>This is a MONTHLY-AVERAGE view for a quick read. The table below is what generation actually enforces — real per-day figures, since a roster sized to the average day understaffs every busier-than-average day.</div>
-          </div>
+          {/* "Manpower Requirement — Explainable Breakdown" card hidden per
+              user request — it's a purely informational, flat monthly-
+              average view (computeExplainableManpower) that never feeds
+              generation at all; only the "Real Requirement — Average vs
+              Peak Day" table below (computeDailyShiftDemand's real output)
+              does. Data computation (a.manpowerRequirement) is untouched,
+              just not rendered — a one-block restore if wanted back. */}
 
           <div className="card">
             <div className="card-title">📐 Real Requirement — Average vs Peak Day (what generation actually uses)</div>
