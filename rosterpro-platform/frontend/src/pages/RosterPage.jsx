@@ -612,12 +612,33 @@ export default function RosterPage() {
         }
       }
     }
+    // coveragePct is deliberately MONTH-WIDE (every day 1..nDays), matching
+    // the scope of the Daily Coverage table and Roster Validation/
+    // "N uncovered shifts" shown right alongside it below — this used to
+    // only look at TODAY's assignments, which could read "100%" purely
+    // because today happened to be fully staffed while OTHER days in the
+    // very same roster had real shortfalls, directly contradicting the
+    // uncovered-shift count displayed next to it in the same card.
+    // Confirmed directly against a live roster (100% shown with 3 real
+    // uncovered shifts elsewhere in the month).
     let totalReq = 0;
     let covered = 0;
-    for (const sh of ["M", "A", "N"]) {
-      for (const req of requiredByShift[sh]) {
-        totalReq += req.minCount;
-        covered += Math.min(assignedTodayByCategory[sh][req.category] || 0, req.minCount);
+    for (let day = 1; day <= nDays; day++) {
+      const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
+      const assignedByCategory = { M: {}, A: {}, N: {} };
+      for (const s of staff) {
+        const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+        const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
+        if (bucket) {
+          const cat = s.category || "NCS";
+          assignedByCategory[bucket][cat] = (assignedByCategory[bucket][cat] || 0) + 1;
+        }
+      }
+      for (const sh of ["M", "A", "N"]) {
+        for (const req of requiredByShift[sh]) {
+          totalReq += req.minCount;
+          covered += Math.min(assignedByCategory[sh][req.category] || 0, req.minCount);
+        }
       }
     }
     const coveragePct = totalReq > 0 ? Math.round((covered / totalReq) * 100) : 100;
@@ -628,7 +649,7 @@ export default function RosterPage() {
       conflicts: dashboardSummary?.rosterCoverage?.violationCount ?? 0,
       requiredByShift, assignedToday, coveragePct,
     };
-  }, [staff, mandatoryRules, dashboardSummary, shiftDefByCode, isCurrentMonth, todayStr]);
+  }, [staff, mandatoryRules, dashboardSummary, shiftDefByCode, isCurrentMonth, todayStr, nDays, monthKey]);
 
   const violations = dashboardSummary?.rosterCoverage?.violations || [];
 
