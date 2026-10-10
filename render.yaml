@@ -30,6 +30,7 @@ services:
     name: rosterpro-backend
     plan: free
     rootDir: rosterpro-platform/backend
+    autoDeploy: true
     # `npx prisma db seed` runs prisma/seed.js — deliberately the ONLY
     # seed script in this pipeline, since it's just the platform-wide
     # role/permission matrix (every airline shares it, not tenant data).
@@ -123,6 +124,7 @@ services:
     runtime: static
     name: rosterpro-frontend
     rootDir: rosterpro-platform/frontend
+    autoDeploy: true
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
     routes:
