@@ -115,13 +115,23 @@ function MyAttendanceTab({ userId }) {
             <tbody>
               {days.map(d => {
                 const reg = regByDate.get(d.date);
-                const status = d.record?.status;
+                const sessions = d.sessions || [];
+                const lastSession = sessions[sessions.length - 1];
+                const status = lastSession?.status;
                 return (
                   <tr key={d.date}>
                     <td style={{ textAlign: "left" }}>{d.date}</td>
                     <td>{d.exempt ? "—" : d.scheduledShift?.code || "O"}</td>
-                    <td>{fmtTime(d.record?.punchInAt)}</td>
-                    <td>{fmtTime(d.record?.punchOutAt)}</td>
+                    <td>
+                      {sessions.length === 0 ? "" : sessions.map((s, i) => (
+                        <div key={i}>{fmtTime(s.punchInAt)}</div>
+                      ))}
+                    </td>
+                    <td>
+                      {sessions.length === 0 ? "" : sessions.map((s, i) => (
+                        <div key={i}>{fmtTime(s.punchOutAt)}</div>
+                      ))}
+                    </td>
                     <td>{status ? <span className="tag" style={STATUS_STYLE[status]}>{status.replace("_", " ")}</span> : d.exempt ? "—" : ""}</td>
                     <td>
                       {reg ? (

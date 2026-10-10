@@ -14,7 +14,7 @@ function serialize(record) {
 
 const today = asyncHandler(async (req, res) => {
   const ctx = await attendanceService.getTodayContext(req.user);
-  res.json({ ...ctx, record: serialize(ctx.record) });
+  res.json({ ...ctx, sessions: ctx.sessions.map(serialize), openSession: serialize(ctx.openSession) });
 });
 
 const punchIn = asyncHandler(async (req, res) => {
@@ -51,7 +51,7 @@ const overview = asyncHandler(async (req, res) => {
     return res.status(403).json({ error: "You can only view your own attendance overview" });
   }
   const days = await attendanceService.buildDailyOverview(userId, req.user.stationId, req.query.from, req.query.to);
-  res.json({ userId, days: days.map(d => ({ ...d, record: serialize(d.record) })) });
+  res.json({ userId, days: days.map(d => ({ ...d, sessions: d.sessions.map(serialize) })) });
 });
 
 module.exports = { today, punchIn, punchOut, list, overview };

@@ -38,10 +38,16 @@ async function createRequest(body, actor, req) {
     throw ApiError.badRequest(`This day is already explained by the roster (${shiftDef.code}) — no regularization is needed.`);
   }
 
-  let record = await attendanceRepo.findByUserAndDate(targetUserId, date);
+  // Regularization is about "this day had no attendance at all" — anchored
+  // to the day's FIRST session (sessionIndex 1), same as before this day
+  // could ever have more than one session. If literally nothing was
+  // punched that day, there's no session 1 yet to attach the request to,
+  // so one is created as a MISSING placeholder, exactly as before.
+  const sessionsThatDay = await attendanceRepo.findSessionsByUserAndDate(targetUserId, date);
+  let record = sessionsThatDay.find(s => s.sessionIndex === 1);
   if (!record) {
     record = await attendanceRepo.create({
-      userId: targetUserId, stationId: target.stationId, date, status: "MISSING",
+      userId: targetUserId, stationId: target.stationId, date, sessionIndex: 1, status: "MISSING",
       scheduledShiftDefId: scheduled?.shiftDefId || null,
       scheduledShiftCode: shiftDef?.code || null,
       scheduledStartTime: shiftDef?.startTime || null,

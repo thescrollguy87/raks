@@ -24,11 +24,13 @@ function punchBody(overrides = {}) {
   };
 }
 
+let nextAttId = 1;
 beforeEach(() => {
   jest.clearAllMocks();
-  attendanceRepo.findByUserAndDate.mockResolvedValue(null);
+  nextAttId = 1;
+  attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([]);
   attendanceRepo.findScheduledShift.mockResolvedValue(null);
-  attendanceRepo.create.mockImplementation(async (data) => ({ id: "att-1", ...data }));
+  attendanceRepo.create.mockImplementation(async (data) => ({ id: `att-${nextAttId++}`, ...data }));
   attendanceRepo.update.mockImplementation(async (id, data) => ({ id, ...data }));
   officeLocationRepo.listActiveForStation.mockResolvedValue([hangar, office]);
 });
@@ -121,9 +123,9 @@ describe("attendanceService.punchIn — late detection against the scheduled shi
 
 describe("attendanceService.punchOut — early-out detection", () => {
   it("marks EARLY_OUT when leaving well before the scheduled end", async () => {
-    attendanceRepo.findByUserAndDate.mockResolvedValue({
-      id: "att-1", punchInAt: new Date("2026-09-16T02:00:00.000Z"), punchOutAt: null, status: "ON_TIME",
-    });
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([
+      { id: "att-1", sessionIndex: 1, punchInAt: new Date("2026-09-16T02:00:00.000Z"), punchOutAt: null, status: "ON_TIME" },
+    ]);
     attendanceRepo.findScheduledShift.mockResolvedValue({
       shiftDefId: "sd-1", shiftDef: { code: "M", type: "duty", startTime: "07:30", endTime: "15:30" },
     });
@@ -131,8 +133,55 @@ describe("attendanceService.punchOut — early-out detection", () => {
     expect(record.status).toBe("EARLY_OUT");
   });
 
-  it("rejects punching out twice", async () => {
-    attendanceRepo.findByUserAndDate.mockResolvedValue({ id: "att-1", punchOutAt: new Date() });
+  it("rejects punching out twice (no open session, and the last session already has a punch-out)", async () => {
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([
+      { id: "att-1", sessionIndex: 1, punchInAt: new Date(), punchOutAt: new Date() },
+    ]);
     await expect(attendanceService.punchOut(punchBody(), actor, {})).rejects.toMatchObject({ statusCode: 409 });
+  });
+});
+
+describe("attendanceService.punchIn — multiple sessions per day (split/Break Shift)", () => {
+  it("rejects punching in again while a session is still open", async () => {
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([
+      { id: "att-1", sessionIndex: 1, punchInAt: new Date(), punchOutAt: null },
+    ]);
+    await expect(attendanceService.punchIn(punchBody(), actor, {})).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("succeeds with sessionIndex 2 once the first session is fully closed (punched in, out, then in again)", async () => {
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([
+      { id: "att-1", sessionIndex: 1, punchInAt: new Date("2026-09-16T01:00:00.000Z"), punchOutAt: new Date("2026-09-16T05:00:00.000Z") },
+    ]);
+    const record = await attendanceService.punchIn(punchBody({ capturedAt: "2026-09-16T08:30:00.000Z" }), actor, {});
+    expect(record.sessionIndex).toBe(2);
+  });
+
+  it("closing session 2 updates that exact row, leaving session 1 untouched", async () => {
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([
+      { id: "att-1", sessionIndex: 1, punchInAt: new Date("2026-09-16T01:00:00.000Z"), punchOutAt: new Date("2026-09-16T05:00:00.000Z") },
+      { id: "att-2", sessionIndex: 2, punchInAt: new Date("2026-09-16T08:30:00.000Z"), punchOutAt: null },
+    ]);
+    const record = await attendanceService.punchOut(punchBody({ capturedAt: "2026-09-16T12:00:00.000Z" }), actor, {});
+    expect(attendanceRepo.update).toHaveBeenCalledWith("att-2", expect.anything());
+    expect(record.id).toBe("att-2");
+  });
+});
+
+describe("attendanceService.buildDailyOverview — groups multiple sessions under the same date", () => {
+  it("returns both sessions for a split/Break Shift day, in sessionIndex order, instead of the second silently overwriting the first", async () => {
+    attendanceRepo.list.mockResolvedValue({
+      items: [
+        { id: "att-2", userId: "staff-1", date: new Date("2026-09-16T00:00:00.000Z"), sessionIndex: 2, punchInAt: new Date("2026-09-16T08:30:00.000Z"), punchOutAt: new Date("2026-09-16T12:00:00.000Z"), regularizationRequests: [] },
+        { id: "att-1", userId: "staff-1", date: new Date("2026-09-16T00:00:00.000Z"), sessionIndex: 1, punchInAt: new Date("2026-09-16T01:00:00.000Z"), punchOutAt: new Date("2026-09-16T05:00:00.000Z"), regularizationRequests: [] },
+      ],
+    });
+    attendanceRepo.findScheduledShiftsForRange.mockResolvedValue([]);
+
+    const days = await attendanceService.buildDailyOverview("staff-1", "station-1", "2026-09-16", "2026-09-16");
+
+    expect(days).toHaveLength(1);
+    expect(days[0].sessions).toHaveLength(2);
+    expect(days[0].sessions.map(s => s.sessionIndex)).toEqual([1, 2]);
   });
 });

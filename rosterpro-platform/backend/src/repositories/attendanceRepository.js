@@ -1,7 +1,10 @@
 const prisma = require("../config/prisma");
 
-function findByUserAndDate(userId, date) {
-  return prisma.attendanceRecord.findUnique({ where: { userId_date: { userId, date } } });
+// A day can have more than one punch session (split/Break Shift days, or
+// any ad-hoc extra punch) — returns every session row for that user+date,
+// ordered 1, 2, 3... (possibly empty, never null).
+function findSessionsByUserAndDate(userId, date) {
+  return prisma.attendanceRecord.findMany({ where: { userId, date }, orderBy: { sessionIndex: "asc" } });
 }
 
 function findById(id) {
@@ -76,7 +79,10 @@ function list({ userId, userIdIn, stationId, stationIdIn, status, from, to, page
 }
 
 // Every attendance row for one station across a date range, keyed by
-// userId+date — the shape the monthly register report builds from.
+// userId+date — the shape the monthly register report builds from. A
+// userId+date can now span multiple rows (multiple sessions); sorting by
+// sessionIndex too means callers that group rows by userId+date get them
+// back in chronological session order for free, without a separate sort.
 function listForRange(stationId, from, to) {
   return prisma.attendanceRecord.findMany({
     where: { stationId, date: { gte: from, lte: to } },
@@ -84,7 +90,7 @@ function listForRange(stationId, from, to) {
       user: { select: { id: true, fullName: true, category: true, employeeId: true } },
       regularizationRequests: { orderBy: { createdAt: "desc" }, take: 1 },
     },
-    orderBy: [{ date: "asc" }],
+    orderBy: [{ date: "asc" }, { sessionIndex: "asc" }],
   });
 }
 
@@ -92,8 +98,14 @@ function listForRange(stationId, from, to) {
 // only by the shift-end-reminder cron job to know who's already punched
 // out, so it isn't scoped to one station (the job itself iterates every
 // station's ending shifts in one pass, same as the existing daily reminder).
+// Selects punchInAt too (not just punchOutAt) so the job can tell an OPEN
+// session (punched in, not yet out — still needs a reminder) apart from a
+// session that was never punched into at all in the first place.
 function listForDate(date) {
-  return prisma.attendanceRecord.findMany({ where: { date }, select: { userId: true, punchOutAt: true } });
+  return prisma.attendanceRecord.findMany({ where: { date }, select: { userId: true, punchInAt: true, punchOutAt: true } });
 }
 
-module.exports = { findByUserAndDate, findById, findScheduledShift, findScheduledShiftsForRange, create, update, list, listForRange, listForDate };
+module.exports = {
+  findSessionsByUserAndDate, findById, findScheduledShift, findScheduledShiftsForRange,
+  create, update, list, listForRange, listForDate,
+};

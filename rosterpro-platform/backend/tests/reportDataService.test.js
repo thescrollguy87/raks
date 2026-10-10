@@ -1,10 +1,12 @@
 jest.mock("../src/repositories/rosterRepository");
 jest.mock("../src/repositories/stationRepository");
+jest.mock("../src/repositories/attendanceRepository");
 jest.mock("../src/services/complianceService");
 jest.mock("../src/services/leaveService");
 
 const rosterRepo = require("../src/repositories/rosterRepository");
 const stationRepo = require("../src/repositories/stationRepository");
+const attendanceRepo = require("../src/repositories/attendanceRepository");
 const complianceService = require("../src/services/complianceService");
 const reportDataService = require("../src/services/reportDataService");
 
@@ -63,5 +65,59 @@ describe("reportDataService.getComplianceReportData", () => {
 
     expect(report.rows[0][4]).toBe("EXPIRED");
     expect(report.rows[0][0]).toBe("Alice Staff");
+  });
+});
+
+describe("reportDataService.getAttendanceRegisterData — multiple sessions per day", () => {
+  // header: Date, Staff, Category, Scheduled Shift, Punch In, Punch Out, Sessions, All Punch Times, Status, Regularization
+  beforeEach(() => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      { id: "s1", fullName: "Rakesh Patel", category: "B1", shiftAssignments: [] },
+    ]);
+  });
+
+  it("shows first punch-in and last punch-out as the summary, plus a session count and full detail, for a day with 2 sessions (split/Break Shift)", async () => {
+    attendanceRepo.listForRange.mockResolvedValue([
+      {
+        userId: "s1", date: new Date("2026-09-01T00:00:00.000Z"), sessionIndex: 1, status: "ON_TIME",
+        punchInAt: "2026-09-01T06:30:00.000Z", punchOutAt: "2026-09-01T10:30:00.000Z",
+        regularizationRequests: [],
+      },
+      {
+        userId: "s1", date: new Date("2026-09-01T00:00:00.000Z"), sessionIndex: 2, status: "ON_TIME",
+        punchInAt: "2026-09-01T14:00:00.000Z", punchOutAt: "2026-09-01T18:00:00.000Z",
+        regularizationRequests: [],
+      },
+    ]);
+
+    const report = await reportDataService.getAttendanceRegisterData("station-1", "2026-09");
+
+    expect(report.header).toEqual(["Date", "Staff", "Category", "Scheduled Shift", "Punch In", "Punch Out", "Sessions", "All Punch Times", "Status", "Regularization"]);
+    const day1 = report.rows.find(r => r[0] === "2026-09-01");
+    expect(day1[4]).toBe("06:30"); // first session's punch-in
+    expect(day1[5]).toBe("18:00"); // last session's punch-out
+    expect(day1[6]).toBe(2); // session count
+    expect(day1[7]).toBe("06:30-10:30; 14:00-18:00"); // every session, nothing dropped
+    expect(day1[8]).toBe("On Time"); // last session's status
+  });
+
+  it("reads exactly as before for a plain single-session day (no regression)", async () => {
+    attendanceRepo.listForRange.mockResolvedValue([
+      {
+        userId: "s1", date: new Date("2026-09-01T00:00:00.000Z"), sessionIndex: 1, status: "LATE",
+        punchInAt: "2026-09-01T06:45:00.000Z", punchOutAt: "2026-09-01T14:10:00.000Z",
+        regularizationRequests: [],
+      },
+    ]);
+
+    const report = await reportDataService.getAttendanceRegisterData("station-1", "2026-09");
+
+    const day1 = report.rows.find(r => r[0] === "2026-09-01");
+    expect(day1[4]).toBe("06:45");
+    expect(day1[5]).toBe("14:10");
+    expect(day1[6]).toBe(1);
+    expect(day1[7]).toBe("06:45-14:10");
+    expect(day1[8]).toBe("Late");
   });
 });

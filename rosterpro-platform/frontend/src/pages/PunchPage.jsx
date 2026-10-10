@@ -30,10 +30,12 @@ export default function PunchPage() {
   const [position, setPosition] = useState(null);
   const [locating, setLocating] = useState(false);
   const [busy, setBusy] = useState(false);
-  // Optimistic local echo of a just-queued punch — the server-fetched ctx
-  // won't reflect it until the queue actually syncs, and offline that could
-  // be hours away, so the UI shouldn't sit there looking like nothing happened.
-  const [localPunch, setLocalPunch] = useState({ in: null, out: null });
+  // Optimistic local echo of queued-but-not-yet-synced sessions — the
+  // server-fetched ctx won't reflect them until the queue actually syncs,
+  // and offline that could be hours away, so the UI shouldn't sit there
+  // looking like nothing happened. Each entry mirrors the server's session
+  // shape ({ punchInAt, punchOutAt }) so it can sit alongside ctx.sessions.
+  const [localSessions, setLocalSessions] = useState([]);
 
   usePageHeader({ title: "Punch In / Out", subtitle: currentStation ? `${currentStation.name} Line Maintenance` : "" });
 
@@ -78,7 +80,17 @@ export default function PunchPage() {
         photoBase64,
       };
       await queue.enqueue(kind, payload);
-      setLocalPunch((p) => ({ ...p, [kind === "punch-in" ? "in" : "out"]: payload.capturedAt }));
+      if (kind === "punch-in") {
+        setLocalSessions((arr) => [...arr, { punchInAt: payload.capturedAt, punchOutAt: null }]);
+      } else {
+        setLocalSessions((arr) => {
+          const openIdx = arr.findIndex((s) => !s.punchOutAt);
+          if (openIdx === -1) return [...arr, { punchInAt: null, punchOutAt: payload.capturedAt }];
+          const copy = [...arr];
+          copy[openIdx] = { ...copy[openIdx], punchOutAt: payload.capturedAt };
+          return copy;
+        });
+      }
       loadContext();
     } catch (err) {
       setError(err.message || "Couldn't capture the punch");
@@ -104,8 +116,17 @@ export default function PunchPage() {
     return <div className="card" style={{ maxWidth: 480, margin: "20px auto" }}>{error || "Loading…"}</div>;
   }
 
-  const hasPunchedIn = !!ctx.record?.punchInAt || !!localPunch.in;
-  const hasPunchedOut = !!ctx.record?.punchOutAt || !!localPunch.out;
+  // Merge server-confirmed sessions with any not-yet-synced local ones —
+  // once a local session's punch-in time shows up in ctx.sessions, the
+  // server has caught up and the local echo is dropped to avoid listing it twice.
+  const confirmedInTimes = new Set(ctx.sessions.map((s) => s.punchInAt));
+  const pendingLocalSessions = localSessions.filter((s) => !(s.punchInAt && confirmedInTimes.has(s.punchInAt)));
+  const allSessions = [...ctx.sessions, ...pendingLocalSessions].sort(
+    (a, b) => new Date(a.punchInAt || 0) - new Date(b.punchInAt || 0)
+  );
+  const openSession = ctx.openSession || pendingLocalSessions.find((s) => s.punchInAt && !s.punchOutAt) || null;
+  const isPunchedIn = !!openSession;
+  const completedSessions = allSessions.filter((s) => s.punchInAt && s.punchOutAt);
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto" }}>
@@ -163,23 +184,26 @@ export default function PunchPage() {
       {error && <div className="ab red">{error}</div>}
 
       <div className="card" style={{ textAlign: "center" }}>
-        {!hasPunchedIn ? (
-          <button className="btn btn-primary" style={{ width: "100%", padding: 16, fontSize: 15 }} disabled={busy || !camera.active} onClick={() => doPunch("punch-in")}>
-            {busy ? "Capturing…" : "🟢 Punch In"}
-          </button>
-        ) : !hasPunchedOut ? (
+        {completedSessions.length > 0 && (
+          <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 12, textAlign: "left" }}>
+            {completedSessions.map((s, i) => (
+              <div key={i}>Session {i + 1}: {fmtTime(s.punchInAt)} → {fmtTime(s.punchOutAt)}</div>
+            ))}
+          </div>
+        )}
+        {isPunchedIn ? (
           <>
             <div style={{ fontSize: 12, color: "var(--text-dim)", marginBottom: 10 }}>
-              Punched in at {fmtTime(ctx.record?.punchInAt || localPunch.in)}
+              Punched in at {fmtTime(openSession.punchInAt)}
             </div>
             <button className="btn btn-primary" style={{ width: "100%", padding: 16, fontSize: 15, background: "linear-gradient(135deg,#DC2626,#EF4444)" }} disabled={busy || !camera.active} onClick={() => doPunch("punch-out")}>
               {busy ? "Capturing…" : "🔴 Punch Out"}
             </button>
           </>
         ) : (
-          <div style={{ fontSize: 13 }}>
-            ✅ Done for today — {fmtTime(ctx.record?.punchInAt || localPunch.in)} → {fmtTime(ctx.record?.punchOutAt || localPunch.out)}
-          </div>
+          <button className="btn btn-primary" style={{ width: "100%", padding: 16, fontSize: 15 }} disabled={busy || !camera.active} onClick={() => doPunch("punch-in")}>
+            {busy ? "Capturing…" : "🟢 Punch In"}
+          </button>
         )}
       </div>
     </div>

@@ -274,7 +274,12 @@ const STATUS_LABEL = {
 // One row per staff-member-per-day (not per staff-member-per-month) — a
 // register reads as a chronological log, matching how a real attendance
 // register/muster roll is laid out, unlike the Roster export's one-row-
-// per-staff/one-column-per-day grid.
+// per-staff/one-column-per-day grid. A day can hold more than one punch
+// session now (split/Break Shift, or any ad-hoc extra punch) — Punch In/
+// Punch Out still show the day's overall first-in/last-out (so the common
+// single-session case reads exactly as before), with two extra columns
+// (Sessions, All Punch Times) so a multi-session day never silently loses
+// the sessions in between.
 async function getAttendanceRegisterData(stationId, monthKey) {
   const nDays = daysInMonth(monthKey);
   const from = new Date(`${dateLabel(monthKey, 1)}T00:00:00.000Z`);
@@ -284,7 +289,15 @@ async function getAttendanceRegisterData(stationId, monthKey) {
   const staffWithShifts = roster ? byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id)) : byCategoryThenName(await rosterRepo.getActiveStaffForGeneration(stationId));
   const attendanceRows = await attendanceRepo.listForRange(stationId, from, to);
 
-  const attendanceByKey = new Map(attendanceRows.map(r => [`${r.userId}:${r.date.toISOString().slice(0, 10)}`, r]));
+  // Grouped (not overwritten) by userId:date — listForRange already orders
+  // by [date, sessionIndex], so each group's rows arrive in chronological
+  // session order for free.
+  const sessionsByKey = new Map();
+  attendanceRows.forEach(r => {
+    const key = `${r.userId}:${r.date.toISOString().slice(0, 10)}`;
+    if (!sessionsByKey.has(key)) sessionsByKey.set(key, []);
+    sessionsByKey.get(key).push(r);
+  });
   const shiftByKey = new Map();
   for (const s of staffWithShifts) {
     for (const sa of s.shiftAssignments || []) {
@@ -293,29 +306,36 @@ async function getAttendanceRegisterData(stationId, monthKey) {
   }
 
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
-  const header = ["Date", "Staff", "Category", "Scheduled Shift", "Punch In", "Punch Out", "Status", "Regularization"];
+  const header = ["Date", "Staff", "Category", "Scheduled Shift", "Punch In", "Punch Out", "Sessions", "All Punch Times", "Status", "Regularization"];
   const rows = [];
   for (const s of staffWithShifts) {
     for (let day = 1; day <= nDays; day++) {
       const iso = dateLabel(monthKey, day);
       const key = `${s.id}:${iso}`;
       const shiftDef = shiftByKey.get(key) || null;
-      const record = attendanceByKey.get(key) || null;
+      const sessions = sessionsByKey.get(key) || [];
+      const firstSession = sessions[0] || null;
+      const lastSession = sessions[sessions.length - 1] || null;
       const exempt = attendanceService.isExemptShiftType(shiftDef?.type);
       const isPast = new Date(`${iso}T00:00:00.000Z`) < today;
 
       let statusLabel;
-      if (record) statusLabel = STATUS_LABEL[record.status] || record.status;
+      if (lastSession) statusLabel = STATUS_LABEL[lastSession.status] || lastSession.status;
       else if (exempt) statusLabel = STATUS_LABEL.EXEMPT;
       else if (shiftDef && isPast) statusLabel = STATUS_LABEL.MISSING;
       else statusLabel = "";
 
-      const latestReg = record?.regularizationRequests?.[0];
+      const latestReg = firstSession?.regularizationRequests?.[0];
       const regularizationLabel = latestReg ? `${latestReg.status} (${latestReg.reason})` : "";
+
+      const allPunchTimes = sessions
+        .map(sess => `${formatClockTime(sess.punchInAt) || "?"}-${formatClockTime(sess.punchOutAt) || "?"}`)
+        .join("; ");
 
       rows.push([
         iso, s.fullName, s.category || "", shiftDef?.code || (exempt ? "" : "O"),
-        formatClockTime(record?.punchInAt), formatClockTime(record?.punchOutAt),
+        formatClockTime(firstSession?.punchInAt), formatClockTime(lastSession?.punchOutAt),
+        sessions.length || "", allPunchTimes,
         statusLabel, regularizationLabel,
       ]);
     }

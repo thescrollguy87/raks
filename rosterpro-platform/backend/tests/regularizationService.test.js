@@ -50,7 +50,7 @@ describe("regularizationService.createRequest — roster-driven auto-exemption",
     attendanceRepo.findScheduledShift.mockResolvedValue({
       shiftDefId: "sd-m", shiftDef: { code: "M", type: "duty", startTime: "07:30", endTime: "15:30" },
     });
-    attendanceRepo.findByUserAndDate.mockResolvedValue(null);
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([]);
     attendanceRepo.create.mockResolvedValue({ id: "att-1" });
     regularizationRepo.findPendingForAttendanceRecord.mockResolvedValue(null);
     regularizationRepo.create.mockResolvedValue({ id: "reg-1", status: "PENDING" });
@@ -68,7 +68,7 @@ describe("regularizationService.createRequest — roster-driven auto-exemption",
 
   it("rejects a duplicate request while one is already pending", async () => {
     attendanceRepo.findScheduledShift.mockResolvedValue({ shiftDefId: "sd-m", shiftDef: { code: "M", type: "duty" } });
-    attendanceRepo.findByUserAndDate.mockResolvedValue({ id: "att-1" });
+    attendanceRepo.findSessionsByUserAndDate.mockResolvedValue([{ id: "att-1", sessionIndex: 1 }]);
     regularizationRepo.findPendingForAttendanceRecord.mockResolvedValue({ id: "existing-reg" });
 
     await expect(regularizationService.createRequest({ date: "2026-09-10", reason: "OTHER" }, staff, {}))

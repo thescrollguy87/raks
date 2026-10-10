@@ -84,19 +84,27 @@ async function resolveDistance(stationId, lat, lng) {
   return { nearest: ranked[0], all: ranked };
 }
 
+// A session is OPEN when it has a punchInAt but no punchOutAt yet — the
+// single signal everything below uses to decide "mid-session" vs "free to
+// punch in again" instead of a single flat day-level in/out pair.
+function findOpenSession(sessions) {
+  return sessions.find(s => s.punchInAt && !s.punchOutAt) || null;
+}
+
 async function getTodayContext(actor) {
   if (!actor.stationId) throw ApiError.badRequest("Your account has no station assigned — attendance punching isn't available.");
   const today = toDateOnly(new Date());
-  const [scheduledShift, record, locations] = await Promise.all([
+  const [scheduledShift, sessions, locations] = await Promise.all([
     attendanceRepo.findScheduledShift(actor.sub, actor.stationId, today),
-    attendanceRepo.findByUserAndDate(actor.sub, today),
+    attendanceRepo.findSessionsByUserAndDate(actor.sub, today),
     officeLocationRepo.listActiveForStation(actor.stationId),
   ]);
   return {
     date: today.toISOString().slice(0, 10),
     scheduledShift: scheduledShift?.shiftDef || null,
     exempt: isExemptShiftType(scheduledShift?.shiftDef?.type),
-    record,
+    sessions,
+    openSession: findOpenSession(sessions),
     officeLocations: locations.map(l => ({ id: l.id, name: l.name, latitude: l.latitude, longitude: l.longitude, radiusMeters: l.radiusMeters })),
   };
 }
@@ -107,8 +115,9 @@ async function punchIn(body, actor, req) {
   if (Number.isNaN(capturedAt.getTime())) throw ApiError.badRequest("capturedAt must be a valid timestamp");
   const date = toDateOnly(capturedAt);
 
-  const existing = await attendanceRepo.findByUserAndDate(actor.sub, date);
-  if (existing?.punchInAt) throw ApiError.conflict("You've already punched in today.");
+  const sessionsToday = await attendanceRepo.findSessionsByUserAndDate(actor.sub, date);
+  if (findOpenSession(sessionsToday)) throw ApiError.conflict("You're already punched in — punch out before punching in again.");
+  const nextSessionIndex = sessionsToday.reduce((max, s) => Math.max(max, s.sessionIndex), 0) + 1;
 
   const { nearest } = await resolveDistance(actor.stationId, body.lat, body.lng);
   const mockSuspected = looksLikeMockLocation({ accuracy: body.accuracy, nearestDistanceM: nearest.distanceM });
@@ -130,7 +139,7 @@ async function punchIn(body, actor, req) {
   const { buffer: photo, mime: photoMime } = decodePhoto(body.photoBase64);
 
   const data = {
-    userId: actor.sub, stationId: actor.stationId, date,
+    userId: actor.sub, stationId: actor.stationId, date, sessionIndex: nextSessionIndex,
     scheduledShiftDefId: scheduled?.shiftDefId || null,
     scheduledShiftCode: shiftDef?.code || null,
     scheduledStartTime: shiftDef?.startTime || null,
@@ -144,12 +153,14 @@ async function punchIn(body, actor, req) {
     status,
   };
 
-  const record = existing
-    ? await attendanceRepo.update(existing.id, data)
-    : await attendanceRepo.create(data);
+  // Every punch-in is its own new session row now — never an update onto a
+  // prior one (that was only ever correct when a day could hold at most one
+  // session; `findOpenSession` above already guarantees there's nothing to
+  // resume into here).
+  const record = await attendanceRepo.create(data);
 
   await auditTrail.logActivity(
-    "Punched in", `${date.toISOString().slice(0, 10)} — ${Math.round(nearest.distanceM)}m from ${nearest.location.name}${status === "LATE" ? " (late)" : ""}`,
+    "Punched in", `${date.toISOString().slice(0, 10)} (session ${nextSessionIndex}) — ${Math.round(nearest.distanceM)}m from ${nearest.location.name}${status === "LATE" ? " (late)" : ""}`,
     actor.stationId, actor, req
   );
   return record;
@@ -161,8 +172,13 @@ async function punchOut(body, actor, req) {
   if (Number.isNaN(capturedAt.getTime())) throw ApiError.badRequest("capturedAt must be a valid timestamp");
   const date = toDateOnly(capturedAt);
 
-  let existing = await attendanceRepo.findByUserAndDate(actor.sub, date);
-  if (existing?.punchOutAt) throw ApiError.conflict("You've already punched out today.");
+  const sessionsToday = await attendanceRepo.findSessionsByUserAndDate(actor.sub, date);
+  const existing = findOpenSession(sessionsToday);
+  if (!existing) {
+    const lastSession = sessionsToday[sessionsToday.length - 1];
+    if (lastSession?.punchOutAt) throw ApiError.conflict("You've already punched out — punch in again first.");
+  }
+  const nextSessionIndex = sessionsToday.reduce((max, s) => Math.max(max, s.sessionIndex), 0) + 1;
 
   const { nearest } = await resolveDistance(actor.stationId, body.lat, body.lng);
   const mockSuspected = looksLikeMockLocation({ accuracy: body.accuracy, nearestDistanceM: nearest.distanceM });
@@ -198,11 +214,11 @@ async function punchOut(body, actor, req) {
   const record = existing
     ? await attendanceRepo.update(existing.id, data)
     : await attendanceRepo.create({
-        userId: actor.sub, stationId: actor.stationId, date, status: "MISSING", ...data,
+        userId: actor.sub, stationId: actor.stationId, date, sessionIndex: nextSessionIndex, status: "MISSING", ...data,
       });
 
   await auditTrail.logActivity(
-    "Punched out", `${date.toISOString().slice(0, 10)} — ${Math.round(nearest.distanceM)}m from ${nearest.location.name}${status === "EARLY_OUT" ? " (early)" : ""}`,
+    "Punched out", `${date.toISOString().slice(0, 10)} (session ${existing ? existing.sessionIndex : nextSessionIndex}) — ${Math.round(nearest.distanceM)}m from ${nearest.location.name}${status === "EARLY_OUT" ? " (early)" : ""}`,
     actor.stationId, actor, req
   );
   return record;
@@ -218,17 +234,27 @@ function listRecords(query) {
 // Day-by-day picture for one person over a range — the "My Attendance"
 // view's data source, and reused by the monthly register report. Purely
 // computed at read time: a day nobody's punched simply has no
-// AttendanceRecord row (see punchIn/punchOut above — rows are created lazily,
-// never pre-seeded by a job), so "missing" here means "duty/night was
-// scheduled, no row exists, and no regularization has been approved for it".
+// AttendanceRecord rows (see punchIn/punchOut above — rows are created
+// lazily, never pre-seeded by a job), so "missing" here means "duty/night
+// was scheduled, no session exists, and no regularization has been
+// approved for it". A day can now hold more than one session (sessionIndex
+// 1, 2, 3...) — `sessions` is grouped by date, not a single value, so a
+// split/Break Shift day (or any ad-hoc extra punch) shows every session
+// instead of only the first/last one silently winning.
 async function buildDailyOverview(userId, stationId, from, to) {
   const fromDate = toDateOnly(from);
   const toDateEnd = toDateOnly(to);
   const [records, shifts] = await Promise.all([
-    attendanceRepo.list({ userId, stationId, from: fromDate, to: toDateEnd, pageSize: 100 }).then(r => r.items),
+    attendanceRepo.list({ userId, stationId, from: fromDate, to: toDateEnd, pageSize: 200 }).then(r => r.items),
     attendanceRepo.findScheduledShiftsForRange(userId, stationId, fromDate, toDateEnd),
   ]);
-  const recordByDate = new Map(records.map(r => [r.date.toISOString().slice(0, 10), r]));
+  const sessionsByDate = new Map();
+  records.forEach(r => {
+    const iso = r.date.toISOString().slice(0, 10);
+    if (!sessionsByDate.has(iso)) sessionsByDate.set(iso, []);
+    sessionsByDate.get(iso).push(r);
+  });
+  sessionsByDate.forEach(sessions => sessions.sort((a, b) => a.sessionIndex - b.sessionIndex));
   const shiftByDate = new Map(shifts.map(s => [s.shiftDate.toISOString().slice(0, 10), s.shiftDef]));
 
   const days = [];
@@ -237,13 +263,14 @@ async function buildDailyOverview(userId, stationId, from, to) {
   while (cursor <= toDateEnd) {
     const iso = cursor.toISOString().slice(0, 10);
     const shiftDef = shiftByDate.get(iso) || null;
-    const record = recordByDate.get(iso) || null;
+    const sessions = sessionsByDate.get(iso) || [];
     const exempt = isExemptShiftType(shiftDef?.type);
     const isPast = cursor < today;
+    const latestReg = sessions[0]?.regularizationRequests?.[0];
     const needsRegularization =
-      !exempt && !!shiftDef && isPast && (!record || !record.punchInAt) &&
-      !(record?.regularizationRequests?.[0] && record.regularizationRequests[0].status !== "REJECTED" && record.regularizationRequests[0].status !== "CANCELLED");
-    days.push({ date: iso, scheduledShift: shiftDef, exempt, record, needsRegularization });
+      !exempt && !!shiftDef && isPast && (sessions.length === 0 || !sessions[0].punchInAt) &&
+      !(latestReg && latestReg.status !== "REJECTED" && latestReg.status !== "CANCELLED");
+    days.push({ date: iso, scheduledShift: shiftDef, exempt, sessions, needsRegularization });
     cursor.setUTCDate(cursor.getUTCDate() + 1);
   }
   return days;

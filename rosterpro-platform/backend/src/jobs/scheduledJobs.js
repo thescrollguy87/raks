@@ -105,7 +105,22 @@ async function runShiftEndReminders() {
     rosterRepo.findShiftsForDate(today),
     attendanceRepo.listForDate(today),
   ]);
-  const punchedOutUserIds = new Set(todaysAttendance.filter(r => r.punchOutAt).map(r => r.userId));
+  // A day can now hold more than one punch session (split/Break Shift, or
+  // any ad-hoc extra punch) — "already punched out, skip the reminder" has
+  // to mean "has no CURRENTLY OPEN session" (punched in, not yet out), not
+  // just "has any row with a punchOutAt somewhere today": someone on their
+  // 2nd session (still open) must still get reminded, even though their
+  // completed 1st session already has a punchOutAt on file.
+  const sessionsByUser = new Map();
+  todaysAttendance.forEach(r => {
+    if (!sessionsByUser.has(r.userId)) sessionsByUser.set(r.userId, []);
+    sessionsByUser.get(r.userId).push(r);
+  });
+  const punchedOutUserIds = new Set(
+    [...sessionsByUser.entries()]
+      .filter(([, sessions]) => sessions.length > 0 && !sessions.some(s => s.punchInAt && !s.punchOutAt))
+      .map(([userId]) => userId)
+  );
 
   const now = new Date();
   let sent = 0, skipped = 0;

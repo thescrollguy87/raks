@@ -1537,14 +1537,23 @@ model OfficeLocation {
   @@map("office_locations")
 }
 
-// One row per staff member per calendar day. Punch-in and punch-out are two
-// independent events on the same row (not two rows) so "did they punch out"
-// is a single nullable-field check, not a second query. Every "*At" here is
-// the timestamp CAPTURED ON THE DEVICE at the moment the button was tapped —
-// never the time the server received it — because the whole point of the
-// offline queue is that those two can legitimately differ by hours in a
-// hangar with poor signal; "*SyncedAt" is separately when the server actually
-// saw it, kept purely for audit/debugging, never used for status math.
+// One row per staff member per calendar day PER SESSION. Punch-in and
+// punch-out within the SAME session are two independent events on the same
+// row (not two rows) so "did they punch out" is a single nullable-field
+// check, not a second query. A day can have more than one session — split/
+// Break Shift days, or any ad-hoc reason someone punches in again after
+// already completing an in+out pair that day — so `sessionIndex` (1, 2, 3...
+// in the order they were punched) plus `date` is what's actually unique per
+// user, not `date` alone. Confirmed directly with the user: no cap on
+// session count, and nothing ties it to the roster's own (separate,
+// hard-capped-at-2) Break Shift in1/out1/in2/out2 convention — a staff
+// member can simply punch in again any time they're not currently punched
+// in. Every "*At" here is the timestamp CAPTURED ON THE DEVICE at the
+// moment the button was tapped — never the time the server received it —
+// because the whole point of the offline queue is that those two can
+// legitimately differ by hours in a hangar with poor signal; "*SyncedAt" is
+// separately when the server actually saw it, kept purely for audit/
+// debugging, never used for status math.
 model AttendanceRecord {
   id        String   @id @default(uuid())
   userId    String
@@ -1552,6 +1561,7 @@ model AttendanceRecord {
   stationId String
   station   Station  @relation(fields: [stationId], references: [id])
   date      DateTime @db.Date
+  sessionIndex Int   @default(1) // 1, 2, 3... which punch-in/out pair this row is for that user+date
 
   // Snapshot of the roster's shift for this exact date at punch time — not
   // re-derived later, so a subsequent roster edit can't silently rewrite
@@ -1593,7 +1603,7 @@ model AttendanceRecord {
 
   regularizationRequests RegularizationRequest[]
 
-  @@unique([userId, date])
+  @@unique([userId, date, sessionIndex])
   @@index([stationId, date])
   @@map("attendance_records")
 }
