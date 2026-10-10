@@ -228,31 +228,42 @@ function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMe
 // `codes` at all — callers fall back to the day-anchor formula in that
 // case, so this is a pure improvement, never a regression, wherever it
 // can't confidently resync.
-// A real licensing hierarchy, not a per-station opt-in: every B1 engineer
-// is, by the nature of the B1 license itself, also qualified to perform CM
-// (Certifying Mechanic) work — confirmed directly with the user. Unlike
-// `secondaryCategories` (a per-staff-member flag for a qualification that
-// varies person to person, e.g. a specific Station I/C also holding CM
-// certification on top of some OTHER primary category), this applies to
-// every B1 staff member automatically, present and future, with nothing to
-// flag per person. Keyed by primary category -> categories it also covers.
-const CATEGORY_HIERARCHY = { B1: ["CM"] };
-
-// Every category a staff member's shift should be CREDITED toward for
-// reporting purposes — primary, hierarchy-implied, and explicit secondary —
-// deduped. Confirmed directly with the user that this is a READ-ONLY,
-// reporting-side fact only: Coverage Analysis uses it to correctly tally a
-// shift someone was deliberately, manually placed into (e.g. a B1 Station
-// I/C manually rostered onto a CM-short shift), but roster GENERATION
-// itself (rebalanceDay below) deliberately does NOT use this to
-// automatically move anyone across categories — same-day redistribution and
-// the off-day flexi fallback both stay strictly same-category. A
-// cross-category shortfall is left as an honestly-reported gap for a human
-// to resolve by hand, either by adding real headcount in that category or
-// by deliberately choosing to move someone's day off themselves — never a
-// decision the generator makes silently on its own.
+// B1 is a full-scope license (all Airframe & Engine work) and CM is a
+// limited-scope authorization (only Layover Inspection, Weekly Inspection,
+// Wheel Change, Brake Change) — so a B1 CAN physically do CM-scope work,
+// but a blanket "every B1 automatically also counts as CM" credit was
+// confirmed DIRECTLY WITH THE USER to be wrong for coverage/gap reporting:
+// it double-counts the same person against two independently-sized
+// requirements they can't simultaneously satisfy (a B1 already needed to
+// meet B1's own floor that shift isn't simultaneously "free" CM capacity,
+// since CM's 4 listed tasks are real, separate, dedicated work — not idle
+// B1 backup capacity). A previous version of this function credited every
+// B1 toward CM automatically via a CATEGORY_HIERARCHY map; removed
+// entirely — Coverage Analysis should always show CM's true gap. If spare
+// B1 capacity exists on a given day, assigning it to cover CM work is a
+// deliberate MANUAL decision a human makes (and can reflect here via the
+// explicit `secondaryCategories` flag below, same as any other dual
+// qualification), never something this reporting layer assumes on its own.
+//
+// `secondaryCategories` is a DIFFERENT, deliberate per-staff-member flag —
+// a qualification that varies person to person (e.g. a specific Station
+// I/C who is primarily B1 but is ALSO individually CM-certified, flagged
+// by an admin as a known fact about that one person) — not an automatic
+// assumption about every B1. Every category a staff member's shift should
+// be CREDITED toward for reporting purposes — primary + explicit secondary
+// only, deduped. Confirmed directly with the user that this is a
+// READ-ONLY, reporting-side fact only: Coverage Analysis uses it to
+// correctly tally a shift a genuinely dual-qualified person was rostered
+// onto, but roster GENERATION itself (rebalanceDay below) deliberately
+// does NOT use this to automatically move anyone across categories —
+// same-day redistribution and the off-day flexi fallback both stay
+// strictly same-category. A cross-category shortfall is left as an
+// honestly-reported gap for a human to resolve by hand, either by adding
+// real headcount in that category or by deliberately choosing to move
+// someone's day off themselves — never a decision the generator makes
+// silently on its own.
 function creditedCategories(s) {
-  return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
+  return [...new Set([s.category, ...(s.secondaryCategories || [])])].filter(Boolean);
 }
 
 // preferredOffset is the position this staff member would land on anyway

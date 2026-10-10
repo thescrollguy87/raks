@@ -113,7 +113,16 @@ describe("rosterAnalysisService.getCoverageAnalysis", () => {
     expect(b1Night.gapDays.find(g => g.day === 1)).toBeUndefined();
   });
 
-  it("credits a plain B1 staff member's shift toward CM coverage via the license hierarchy, with no secondaryCategories flag at all", async () => {
+  // B1 is full-scope and CAN physically do CM's limited-scope work, but a
+  // plain B1 shift must NOT automatically close a CM gap — confirmed
+  // directly with the user: that B1 is simultaneously needed to satisfy
+  // B1's OWN separate floor, and CM's 4 listed tasks (Layover/Weekly
+  // Inspection, Wheel/Brake Change) are real, separate, dedicated work,
+  // not idle B1 backup capacity. An earlier version of this behavior
+  // auto-credited every B1 toward CM via a CATEGORY_HIERARCHY map; removed
+  // entirely. Only an EXPLICIT secondaryCategories flag (see the next
+  // test) should ever close a cross-category gap.
+  it("does NOT credit a plain B1 staff member's shift toward CM coverage, with no secondaryCategories flag", async () => {
     rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: false });
     rosterRepo.getRosterGrid.mockResolvedValue([
       { id: "b1_1", category: "B1", fullName: "Plain B1", shiftAssignments: [1].map(d => shiftAssignment(d, "M", "duty")) },
@@ -123,9 +132,13 @@ describe("rosterAnalysisService.getCoverageAnalysis", () => {
     ]);
     const result = await getCoverageAnalysis("station-1", "2026-09");
     const cmMorning = result.rows.find(r => r.category === "CM" && r.shift === "M");
-    expect(cmMorning.gapDays.find(g => g.day === 1)).toBeUndefined();
-    // Still a 0-headcount CM category by primary-category count — the
-    // hierarchy credits the SHIFT, not the headcount.
+    expect(cmMorning.gapDays.find(g => g.day === 1)).toBeDefined(); // CM Morning floor of 1 is genuinely unmet
+    expect(cmMorning.gapDays.find(g => g.day === 1).actual).toBe(0);
+    // The B1 Morning floor IS still satisfied by this same person — the two
+    // requirements are checked independently, each against its own real
+    // primary-category headcount.
+    const b1Morning = result.rows.find(r => r.category === "B1" && r.shift === "M");
+    expect(b1Morning.gapDays.find(g => g.day === 1)).toBeUndefined();
     expect(result.headcountByCategory.CM.total).toBe(0);
   });
 

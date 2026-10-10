@@ -31,24 +31,24 @@ const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
 
-// Mirrors CATEGORY_HIERARCHY/creditedCategories in the backend's
-// rosterGenerationAlgorithm.js exactly: a real licensing hierarchy, not a
-// per-station opt-in — every B1 engineer is, by the nature of the B1
-// license itself, also qualified to perform CM (Certifying Mechanic) work.
-// Coverage Analysis (rosterAnalysisService.js) already credits a shift
-// toward every category a staff member is qualified for (primary +
-// hierarchy-implied + any explicit secondaryCategories) when checking
-// whether a Mandatory Coverage floor was met that day. The Shift Roster
-// page's own Daily Coverage table/KPI used to only count a staff member's
-// literal primary category, so a shift fully covered by on-duty B1 staff
-// (who also legitimately cover CM) could show as "CM short" here while
-// Coverage Analysis correctly showed 0 gap days for the exact same
-// roster — confirmed directly against a live roster. Mirroring the same
-// crediting here is what keeps the two screens from ever disagreeing
-// about whether a category's floor was actually met.
-const CATEGORY_HIERARCHY = { B1: ["CM"] };
+// Mirrors creditedCategories in the backend's rosterGenerationAlgorithm.js
+// exactly. An earlier version of both this and the backend's function
+// credited EVERY B1 toward CM's own coverage floor too (B1 is full-scope
+// and can physically do CM's limited-scope work), which read as "CM fully
+// covered" here and in Coverage Analysis even when the only B1 on duty was
+// simultaneously the one satisfying B1's OWN separate floor — double-
+// counting the same person against two requirements they can't
+// simultaneously fill, since CM's work (Layover/Weekly Inspection, Wheel/
+// Brake Change) is real, separate, dedicated work, not idle B1 backup
+// capacity. Confirmed directly with the user this was wrong: Coverage
+// Analysis (and this table) should always show CM's true gap; if spare B1
+// capacity exists to cover it on a given day, assigning them is a
+// deliberate MANUAL decision a human makes, not something automatically
+// assumed here. `secondaryCategories` is kept — a DIFFERENT, deliberate
+// per-person flag (e.g. a specific Station I/C individually confirmed as
+// also CM-certified), not a blanket assumption about every B1.
 function creditedCategories(s) {
-  return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
+  return [...new Set([s.category, ...(s.secondaryCategories || [])])].filter(Boolean);
 }
 
 // A roster this size (staff count, not day count — see the plan's scope
