@@ -31,6 +31,26 @@ const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
 
+// Mirrors CATEGORY_HIERARCHY/creditedCategories in the backend's
+// rosterGenerationAlgorithm.js exactly: a real licensing hierarchy, not a
+// per-station opt-in — every B1 engineer is, by the nature of the B1
+// license itself, also qualified to perform CM (Certifying Mechanic) work.
+// Coverage Analysis (rosterAnalysisService.js) already credits a shift
+// toward every category a staff member is qualified for (primary +
+// hierarchy-implied + any explicit secondaryCategories) when checking
+// whether a Mandatory Coverage floor was met that day. The Shift Roster
+// page's own Daily Coverage table/KPI used to only count a staff member's
+// literal primary category, so a shift fully covered by on-duty B1 staff
+// (who also legitimately cover CM) could show as "CM short" here while
+// Coverage Analysis correctly showed 0 gap days for the exact same
+// roster — confirmed directly against a live roster. Mirroring the same
+// crediting here is what keeps the two screens from ever disagreeing
+// about whether a category's floor was actually met.
+const CATEGORY_HIERARCHY = { B1: ["CM"] };
+function creditedCategories(s) {
+  return [...new Set([s.category, ...(CATEGORY_HIERARCHY[s.category] || []), ...(s.secondaryCategories || [])])].filter(Boolean);
+}
+
 // A roster this size (staff count, not day count — see the plan's scope
 // note on column virtualization) is where rendering every row up front
 // starts to cost real frame time; below it, virtualizing would only add
@@ -600,16 +620,11 @@ export default function RosterPage() {
       if (requiredByShift[r.shift]) requiredByShift[r.shift].push({ category: r.category, minCount: r.minCount });
     });
     const assignedToday = { M: 0, A: 0, N: 0 };
-    const assignedTodayByCategory = { M: {}, A: {}, N: {} };
     if (isCurrentMonth) {
       for (const s of staff) {
         const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === todayStr);
         const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
-        if (bucket) {
-          assignedToday[bucket]++;
-          const cat = s.category || "NCS";
-          assignedTodayByCategory[bucket][cat] = (assignedTodayByCategory[bucket][cat] || 0) + 1;
-        }
+        if (bucket) assignedToday[bucket]++;
       }
     }
     // coveragePct is deliberately MONTH-WIDE (every day 1..nDays), matching
@@ -630,8 +645,9 @@ export default function RosterPage() {
         const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
         const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
         if (bucket) {
-          const cat = s.category || "NCS";
-          assignedByCategory[bucket][cat] = (assignedByCategory[bucket][cat] || 0) + 1;
+          creditedCategories(s).forEach(cat => {
+            assignedByCategory[bucket][cat] = (assignedByCategory[bucket][cat] || 0) + 1;
+          });
         }
       }
       for (const sh of ["M", "A", "N"]) {
@@ -1339,19 +1355,36 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
     return req;
   }, [mandatoryRules]);
 
+  // Two parallel tallies per day/shift, deliberately kept separate: `counts`
+  // is the real headcount by each staff member's LITERAL primary category —
+  // used for the overall per-shift total (and the Total row), which must
+  // count each real person exactly once, never twice. `creditedCounts` is
+  // the same crediting Coverage Analysis uses (primary + hierarchy-implied
+  // + secondary categories — see creditedCategories above) — used ONLY to
+  // decide whether a category's own Mandatory Coverage floor was actually
+  // met, so a shift fully covered by on-duty B1 staff (who also
+  // legitimately cover CM) reads as CM-covered here exactly like it already
+  // does in Coverage Analysis, instead of this table claiming "CM short"
+  // for a floor Coverage Analysis correctly shows as met. Folding this
+  // crediting into `counts` itself would double-count a B1 staff member
+  // (once under B1, once under CM) in the overall per-shift headcount.
   const assignedByDayShift = useMemo(() => {
     return dayRange.map(day => {
       const dateStr = dateAt(monthKey, day).toISOString().slice(0, 10);
       const counts = { M: {}, A: {}, N: {} };
+      const creditedCounts = { M: {}, A: {}, N: {} };
       for (const s of staff) {
         const a = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
         const bucket = a && shiftBucket(a.shiftDef.code, shiftDefByCode[a.shiftDef.code]);
         if (bucket) {
           const cat = s.category || "NCS";
           counts[bucket][cat] = (counts[bucket][cat] || 0) + 1;
+          creditedCategories(s).forEach(c => {
+            creditedCounts[bucket][c] = (creditedCounts[bucket][c] || 0) + 1;
+          });
         }
       }
-      return { day, counts };
+      return { day, counts, creditedCounts };
     });
   }, [staff, dayRange, monthKey, shiftDefByCode]);
 
@@ -1393,13 +1426,14 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
                 <Fragment key={sh.key}>
                   <tr>
                     <td>{sh.label}{hasRules && totalReq > 0 ? ` (Req ${totalReq})` : ""}</td>
-                    {assignedByDayShift.map(({ day, counts }) => {
+                    {assignedByDayShift.map(({ day, counts, creditedCounts }) => {
                       const dayCounts = counts[sh.key];
+                      const creditedDayCounts = creditedCounts[sh.key];
                       const assigned = totalAssigned(dayCounts);
-                      const shortCategories = reqs.filter(r => (dayCounts[r.category] || 0) < r.minCount);
+                      const shortCategories = reqs.filter(r => (creditedDayCounts[r.category] || 0) < r.minCount);
                       const short = hasRules && shortCategories.length > 0;
                       const title = shortCategories.length > 0
-                        ? `Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount}, have ${dayCounts[c.category] || 0})`).join(", ")}`
+                        ? `Short: ${shortCategories.map(c => `${c.category} (need ${c.minCount}, have ${creditedDayCounts[c.category] || 0})`).join(", ")}`
                         : undefined;
                       return <td key={day} title={title} className={short ? "dc-short" : hasRules && reqs.length > 0 ? "dc-ok" : undefined}>{assigned}</td>;
                     })}
@@ -1411,8 +1445,8 @@ function DailyCoverageCard({ staff, dayRange, monthKey, shiftDefByCode, mandator
                         <td style={{ paddingLeft: 20, fontSize: 10, fontWeight: 400, color: "var(--text-dim)" }}>
                           {cat}{hasRules && req ? ` (Req ${req.minCount})` : ""}
                         </td>
-                        {assignedByDayShift.map(({ day, counts }) => {
-                          const have = counts[sh.key][cat] || 0;
+                        {assignedByDayShift.map(({ day, creditedCounts }) => {
+                          const have = creditedCounts[sh.key][cat] || 0;
                           const short = hasRules && req && have < req.minCount;
                           return (
                             <td key={day} style={{ fontSize: 10, color: "var(--text-dim)" }} className={short ? "dc-short" : undefined}>
