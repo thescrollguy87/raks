@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import * as stationsApi from "../../api/stations.js";
 
 const EMPTY = { name: "", iataCode: "", icaoCode: "" };
@@ -33,7 +34,17 @@ export default function AddStationModal({ airlineName, onClose, onCreated }) {
     }
   }
 
-  return (
+  // Portaled to document.body — this modal is triggered from AirlineSwitcher,
+  // which lives inside .sidebar, and .sidebar locally redeclares the app's
+  // color variables (--navy-mid/--navy-lite/--white/--text-dim) to its own
+  // dark purple theme for its own content. Rendered inline, this modal (and
+  // its "fi" input) would inherit those dark variables instead of the
+  // normal light modal theme every OTHER modal in the app gets — confirmed
+  // directly against a live screenshot where the Name field's typed text
+  // was unreadable. Portaling out of the sidebar's DOM subtree is what
+  // actually fixes it; CSS variables inherit via the DOM tree regardless of
+  // position:fixed, so simply being an overlay never escaped the scope.
+  return createPortal(
     <div className="modal-overlay open" onClick={onClose}>
       <div className="modal" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
         <button className="modal-close" onClick={onClose}>✕</button>
@@ -60,6 +71,7 @@ export default function AddStationModal({ airlineName, onClose, onCreated }) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
