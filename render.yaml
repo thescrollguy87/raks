@@ -1,5 +1,7 @@
 # Render Blueprint — deploys RosterPro as three services:
-#   1. rosterpro-db        PostgreSQL (free tier — see the caveat below)
+#   1. rosterpro-db        PostgreSQL (paid 0.5 CPU / 1GB plan — upgraded
+#                          from the original free tier; see the plan field
+#                          below)
 #   2. rosterpro-backend   the Node/Express API (free tier — sleeps after
 #                          15 min idle, wakes on the next request)
 #   3. rosterpro-frontend  the built React app, served as static files
@@ -9,19 +11,24 @@
 # New -> Blueprint -> connect this GitHub repo. Render reads this file and
 # creates all three services in one go.
 #
-# IMPORTANT (Option A / fully free, as chosen): Render deletes a free
-# PostgreSQL database 30 days after it's created (14-day grace period to
-# upgrade before the data is actually wiped). This is fine for testing,
-# but don't treat this database as a safe long-term home for real roster
-# data until it's upgraded to a paid plan — see infra note in
-# rosterpro-platform/infra/aws/DEPLOYMENT_GUIDE.md's philosophy, which
-# applies here too: know which backup is authoritative before relying on it.
+# The database started on Render's free tier (which gets deleted 30 days
+# after creation — 14-day grace period first) but has since been upgraded
+# to a paid plan for real roster data, matching the `plan:` field below.
+# If this ever needs to change again, update it here too — Render refuses
+# to sync a Blueprint whose database plan reads as a downgrade from what's
+# actually live, which blocks the sync for every service, not just the
+# database.
 
 databases:
   - name: rosterpro-db
     databaseName: rosterpro
     user: rosterpro
-    plan: free
+    # The free tier (see the comment block above) was upgraded on Render's
+    # dashboard at some point after this Blueprint was first applied — the
+    # file has to track that or every future Blueprint sync is rejected
+    # outright (Render refuses to sync a plan change that reads as a
+    # downgrade), which blocks the *whole* sync, not just this field.
+    plan: 0.5c-1g
 
 services:
   # ── Backend API ────────────────────────────────────────────────────────
