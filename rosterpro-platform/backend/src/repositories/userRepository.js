@@ -165,33 +165,24 @@ function hardDelete(id) {
 // Every relation to User deliberately left NOT cascading (unlike the ones
 // listed above) because the record is meaningful even after the person is
 // gone — a Shift Pattern assignment, a Rule Builder staff group
-// membership, a departure's real releaser/support history, a quality
-// audit finding they raised, or a CAPA they own. A hard delete correctly
-// fails against any of these (Postgres FK violation), but that failure on
-// its own doesn't tell the caller WHICH one — this runs the same checks
-// up front so deleteStaff can name them specifically instead of just
-// "some historical record exists somewhere."
+// membership, or a departure's real releaser/support history. A hard
+// delete correctly fails against any of these (Postgres FK violation), but
+// that failure on its own doesn't tell the caller WHICH one — this runs
+// the same checks up front so deleteStaff can name them specifically
+// instead of just "some historical record exists somewhere."
 //
-// Split into two kinds, because they're not equally serious:
-//   - clearable: current-state scheduling config (which shift pattern/
-//     cycle a person is on, which Rule Builder group they're in) or a
-//     detachable reference on someone else's record (a departure's
-//     releaser/support — the departure itself, date, and flight stay; only
-//     the now-deleted person's name on it is cleared, the same SetNull
-//     treatment tool issues/activity log already get elsewhere). A caller
-//     that explicitly asks to force-delete may clear these first.
-//   - permanent: real compliance/audit-trail records (a quality finding
-//     they raised, a CAPA they own) where losing who was responsible is a
-//     genuine traceability loss, not just tidying up config. Never
-//     force-cleared — the caller must reassign/remove these first.
+// Current-state scheduling config (which shift pattern/cycle a person is
+// on, which Rule Builder group they're in) or a detachable reference on
+// someone else's record (a departure's releaser/support — the departure
+// itself, date, and flight stay; only the now-deleted person's name on it
+// is cleared, the same SetNull treatment activity log already gets
+// elsewhere). A caller that explicitly asks to force-delete may clear these.
 async function findDeleteBlockers(userId) {
-  const [pattern, staffGroupCount, releaserCount, supportCount, auditFindingCount, capaCount] = await Promise.all([
+  const [pattern, staffGroupCount, releaserCount, supportCount] = await Promise.all([
     prisma.staffShiftAllocation.findUnique({ where: { userId } }),
     prisma.workloadRuleStaffGroupMember.count({ where: { userId } }),
     prisma.departureManpowerAssignment.count({ where: { releaserUserId: userId } }),
     prisma.departureManpowerAssignment.count({ where: { supportUserId: userId } }),
-    prisma.auditFinding.count({ where: { raisedById: userId } }),
-    prisma.capa.count({ where: { ownerId: userId } }),
   ]);
   const clearable = [];
   if (pattern) clearable.push("a Shift Pattern assignment");
@@ -199,11 +190,7 @@ async function findDeleteBlockers(userId) {
   const departureCount = releaserCount + supportCount;
   if (departureCount) clearable.push(`${departureCount} departure manpower assignment${departureCount === 1 ? "" : "s"}`);
 
-  const permanent = [];
-  if (auditFindingCount) permanent.push(`${auditFindingCount} quality audit finding${auditFindingCount === 1 ? "" : "s"} they raised`);
-  if (capaCount) permanent.push(`${capaCount} CAPA record${capaCount === 1 ? "" : "s"} they own`);
-
-  return { clearable, permanent };
+  return { clearable };
 }
 
 // Clears exactly the "clearable" blockers findDeleteBlockers identifies —

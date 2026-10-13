@@ -108,21 +108,6 @@ enum NotificationStatus {
   FAILED
 }
 
-enum CapaStatus {
-  OPEN
-  IN_PROGRESS
-  CLOSED
-  OVERDUE
-}
-
-enum ToolCalibrationStatus {
-  IN_CALIBRATION
-  VALID
-  DUE
-  OVERDUE
-  QUARANTINED
-}
-
 // ─── Tenancy & organization ─────────────────────────────────────────────────
 
 model Airline {
@@ -260,9 +245,6 @@ model Station {
   users           User[]
   rosters         Roster[]
   flights         Flight[]
-  stores          StoreItem[]
-  tools           Tool[]
-  auditFindings   AuditFinding[]
   shiftPatterns   ShiftPattern[]
   workloadItems   WorkloadItem[]
   flightScheduleImports FlightScheduleImport[]
@@ -370,9 +352,6 @@ model User {
   approvedLeaves    Leave[]           @relation("LeaveApprover")
   shiftAssignments  ShiftAssignment[]
   notifications     Notification[]
-  toolIssues        ToolIssue[]       @relation("ToolIssuedTo")
-  auditFindingsRaised AuditFinding[]  @relation("FindingRaisedBy")
-  capaOwned         Capa[]            @relation("CapaOwner")
   activityLogs      ActivityLog[]
   chatConversationLogs ChatConversationLog[]
   shiftAllocation   StaffShiftAllocation?
@@ -1229,160 +1208,6 @@ model StaffAuthorization {
   @@map("staff_authorizations")
 }
 
-// ─── Tool control & calibration ──────────────────────────────────────────────
-
-model Tool {
-  id              String   @id @default(uuid())
-  stationId       String
-  station         Station  @relation(fields: [stationId], references: [id])
-  toolNo          String
-  description     String
-  calibrationDue  DateTime? @db.Date
-  status          ToolCalibrationStatus @default(VALID)
-
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  version     Int      @default(1)
-
-  issues          ToolIssue[]
-  calibrationLogs ToolCalibrationLog[]
-
-  @@unique([stationId, toolNo])
-  @@map("tools")
-}
-
-model ToolCalibrationLog {
-  id           String   @id @default(uuid())
-  toolId       String
-  tool         Tool     @relation(fields: [toolId], references: [id])
-  calibratedOn DateTime @db.Date
-  nextDue      DateTime @db.Date
-  certificateNo String?
-  attachmentId String?
-  attachment   Attachment? @relation(fields: [attachmentId], references: [id])
-
-  createdById String?
-  createdAt   DateTime @default(now())
-
-  @@map("tool_calibration_logs")
-}
-
-model ToolIssue {
-  id          String   @id @default(uuid())
-  toolId      String
-  tool        Tool     @relation(fields: [toolId], references: [id])
-  issuedToId  String?
-  issuedTo    User?    @relation("ToolIssuedTo", fields: [issuedToId], references: [id], onDelete: SetNull)
-  issuedAt    DateTime @default(now())
-  returnedAt  DateTime?
-  workOrderRef String?
-
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  @@index([toolId])
-  @@index([issuedToId])
-  @@map("tool_issues")
-}
-
-// ─── Stores / inventory ──────────────────────────────────────────────────────
-
-model StoreItem {
-  id            String   @id @default(uuid())
-  stationId     String
-  station       Station  @relation(fields: [stationId], references: [id])
-  partNo        String
-  description   String
-  quantityOnHand Int     @default(0)
-  minStockLevel Int      @default(0)
-  unit          String   @default("EA")
-
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  version     Int      @default(1)
-
-  movements     StoreMovement[]
-
-  @@unique([stationId, partNo])
-  @@map("store_items")
-}
-
-model StoreMovement {
-  id          String   @id @default(uuid())
-  storeItemId String
-  storeItem   StoreItem @relation(fields: [storeItemId], references: [id])
-  direction   String   // IN | OUT
-  quantity    Int
-  reference   String?  // work order / GRN / issue slip number
-  note        String?
-
-  createdById String?
-  createdAt   DateTime @default(now())
-
-  @@index([storeItemId])
-  @@map("store_movements")
-}
-
-// ─── Quality: audit findings & CAPA ──────────────────────────────────────────
-
-model AuditFinding {
-  id           String   @id @default(uuid())
-  stationId    String
-  station      Station  @relation(fields: [stationId], references: [id])
-  raisedById   String
-  raisedBy     User     @relation("FindingRaisedBy", fields: [raisedById], references: [id])
-  auditRef     String?
-  category     String   // e.g. "Documentation", "Tooling", "Human Factors"
-  severity     String   // minor | major | critical
-  description  String
-  dueDate      DateTime? @db.Date
-  status       CapaStatus @default(OPEN)
-
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  version     Int      @default(1)
-
-  capas        Capa[]
-
-  @@index([stationId])
-  @@map("audit_findings")
-}
-
-model Capa {
-  id            String   @id @default(uuid())
-  findingId     String
-  finding       AuditFinding @relation(fields: [findingId], references: [id])
-  ownerId       String
-  owner         User     @relation("CapaOwner", fields: [ownerId], references: [id])
-  correctiveAction String
-  rootCause     String?
-  preventiveAction String?
-  targetDate    DateTime @db.Date
-  closedDate    DateTime? @db.Date
-  status        CapaStatus @default(OPEN)
-
-  createdById String?
-  updatedById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-  version     Int      @default(1)
-
-  @@index([findingId])
-  @@map("capas")
-}
-
 // ─── Notifications, attachments, audit trail, activity log ──────────────────
 
 model Notification {
@@ -1419,7 +1244,6 @@ model Attachment {
   qualifications Qualification[]
   licenses       License[]
   trainings      Training[]
-  toolCalibrationLogs ToolCalibrationLog[]
 
   @@map("attachments")
 }
