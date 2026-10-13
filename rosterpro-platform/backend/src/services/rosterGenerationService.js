@@ -464,6 +464,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const trainingPendingUserIds = staff.filter(s => s.trainingPending).map(s => s.id);
   const leaveByUserDay = applyLeave ? buildLeaveByUserDay(leaves, monthKey, nDays) : {};
   const shiftDefsByCode = Object.fromEntries(shiftDefs.map(d => [d.code, d.type]));
+  const shiftHoursByCode = Object.fromEntries(shiftDefs.map(d => [d.code, shiftNetHours(d)]));
   // Every staff member with a real (non-MANUAL) pattern assignment is locked
   // to it — never pulled onto a shift on their pattern's OFF day, even to
   // patch a coverage gap. usePatterns=false means nobody is in this set,
@@ -471,7 +472,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   const lmpmLockedUserIds = usePatterns ? Object.keys(patternByUser || {}) : [];
 
   const { assignments, violations, advisoryGaps, flexiAssignments } = buildRosterAssignments({
-    staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
+    staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode, shiftHoursByCode,
     mandatoryCoverageConfig: workloadContext.mandatoryCoverageConfig,
     lmpmLockedUserIds, trainingPendingUserIds,
     // Ordinary coverage shortfalls are resolved by SAME-DAY REDISTRIBUTION

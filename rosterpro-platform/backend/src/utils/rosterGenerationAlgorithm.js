@@ -70,6 +70,26 @@
 
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
+// Duty-time safety limits, confirmed directly with the user: nobody may
+// work more than 6 consecutive days regardless of shift type. After a
+// 6-day run, the required rest is 2 days if that run included any Night
+// shift, 1 day otherwise. Separately, nobody's rolling 7-day total may
+// exceed 48 hours. These are enforced as a hard floor on every candidate
+// the coverage-fill pass (rebalanceDay/restGapOk below) considers for
+// same-day redistribution or a flexi off-day pull — the ONLY place a run
+// longer than 6 days can actually be created, since the base ROTATION/
+// NIGHT_ONLY_CYCLE cycles (6-on-2-off and 2-on-2-off respectively) already
+// structurally cap every unpatterned staff member's base assignment well
+// under 6 regardless of how leave interrupts it, and a named Staff
+// Allocation pattern is the admin's own deliberate choice, same as every
+// other place this file leaves patterns untouched. Confirmed directly
+// against a live roster: with Mandatory Minimum Coverage requiring >=1 B1
+// per shift and several B1 staff on leave at once, the flexi fallback had
+// nothing stopping it from repeatedly pulling the same few remaining B1
+// staff off their OFF days, producing 7-8 day duty runs.
+const MAX_CONSECUTIVE_DUTY_DAYS = 6;
+const MAX_WEEKLY_HOURS = 48;
+
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 // The other half of the no-pattern "which cycle does an unpatterned
 // category get" story below — a plain, dedicated Night pattern. Never
@@ -310,7 +330,7 @@ function resyncCycleStart(codes, tail, preferredOffset) {
 function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
-  absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds,
+  absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds, shiftHoursByCode,
 }) {
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
@@ -521,6 +541,98 @@ function buildRosterAssignments({
     return true;
   }
 
+  // codeAt(s, d, day, shift): what `s` is doing on day `d`, treating `day`
+  // as hypothetically holding `shift` (the move/pull being evaluated) —
+  // looks at the already-built grid for this month, or tailByUser for the
+  // 3 real days immediately before day 1. Returns undefined when `d` is
+  // outside both (ran out of known history, or past month end) — callers
+  // treat that as "unknown, don't block on it," same conservative
+  // month-boundary stance every other rest-gap check in this file takes.
+  function codeAt(s, d, day, shift) {
+    if (d === day) return shift;
+    if (d >= 1 && d <= nDays) return grid[s.id]?.[d - 1];
+    if (d < 1) { const idx = -d; const tail = tailByUser?.[s.id]; return idx <= 2 ? tail?.[idx] : undefined; }
+    return undefined;
+  }
+  function workingAt(s, d, day, shift) {
+    const code = codeAt(s, d, day, shift);
+    if (code === undefined) return null;
+    const t = shiftType(code, shiftDefsByCode);
+    return t === "duty" || t === "night";
+  }
+  function nightAt(s, d, day, shift) {
+    return shiftType(codeAt(s, d, day, shift), shiftDefsByCode) === "night";
+  }
+
+  // Would putting `shift` on `day` for `s` create (or extend into) a
+  // consecutive working-day run longer than MAX_CONSECUTIVE_DUTY_DAYS, or
+  // land inside / create a rest window that isn't fully served yet? See
+  // the constants' own comment above for the exact rule and why this is
+  // the one place it needs to be enforced.
+  function violatesMaxConsecutiveDuty(s, day, shift) {
+    // 1) Total consecutive working run that would include `day`, counting
+    // backward and forward through whatever's already known/fixed.
+    let runLen = 1, hadNight = nightAt(s, day, day, shift);
+    let d = day - 1;
+    while (workingAt(s, d, day, shift) === true && runLen <= MAX_CONSECUTIVE_DUTY_DAYS + 4) {
+      runLen++; if (nightAt(s, d, day, shift)) hadNight = true; d--;
+    }
+    let after = day + 1;
+    while (workingAt(s, after, day, shift) === true && runLen <= MAX_CONSECUTIVE_DUTY_DAYS + 4) {
+      runLen++; if (nightAt(s, after, day, shift)) hadNight = true; after++;
+    }
+    if (runLen > MAX_CONSECUTIVE_DUTY_DAYS) return true;
+
+    // 2) If `day` completes a run of exactly the max length, the days
+    // immediately after it must already have enough rest lined up (2 if
+    // the run included a Night, else 1) — never lock in a maxed-out run
+    // with insufficient rest already fixed right after it.
+    if (runLen === MAX_CONSECUTIVE_DUTY_DAYS) {
+      const required = hadNight ? 2 : 1;
+      let restSeen = 0, d2 = after;
+      while (restSeen < required) {
+        const w = workingAt(s, d2, day, shift);
+        if (w === null) break;
+        if (w === true) return true;
+        restSeen++; d2++;
+      }
+    }
+
+    // 3) If `day` itself would be the first working day back after an
+    // EARLIER maxed-out run (i.e. day-1 and before are still inside that
+    // run's mandatory rest window), that window isn't fully served yet.
+    if (workingAt(s, day - 1, day, shift) !== true) {
+      let restLen = 0, d3 = day - 1;
+      while (workingAt(s, d3, day, shift) === false) { restLen++; d3--; if (restLen > 3) break; }
+      if (workingAt(s, d3, day, shift) === true) {
+        let priorRun = 0, priorNight = false, d4 = d3;
+        while (workingAt(s, d4, day, shift) === true) {
+          priorRun++; if (nightAt(s, d4, day, shift)) priorNight = true; d4--; if (priorRun > MAX_CONSECUTIVE_DUTY_DAYS + 4) break;
+        }
+        const required = priorNight ? 2 : 1;
+        if (priorRun >= MAX_CONSECUTIVE_DUTY_DAYS && restLen < required) return true;
+      }
+    }
+    return false;
+  }
+
+  // Would putting `shift` on `day` push any 7-day rolling window
+  // containing `day` over MAX_WEEKLY_HOURS? Only the windows that actually
+  // contain `day` can be affected by this one change.
+  function violatesWeeklyHours(s, day, shift) {
+    if (!shiftHoursByCode) return false;
+    function hoursAt(d) {
+      const code = codeAt(s, d, day, shift);
+      return code !== undefined ? (shiftHoursByCode[code] || 0) : 0;
+    }
+    for (let start = day - 6; start <= day; start++) {
+      let total = 0;
+      for (let k = start; k < start + 7; k++) total += hoursAt(k);
+      if (total > MAX_WEEKLY_HOURS) return true;
+    }
+    return false;
+  }
+
   // Whether `s` could safely be assigned `shift` on `day`, looking at both
   // the days BEFORE it (their own grid up to day-1, or tailByUser for days
   // 1-3) AND the days after — independent of whatever `s` is currently
@@ -539,6 +651,8 @@ function buildRosterAssignments({
   // day+1 would see as its own "prev", closes that gap.
   function restGapOk(s, day, shift) {
     if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
+    if (violatesMaxConsecutiveDuty(s, day, shift)) return false;
+    if (violatesWeeklyHours(s, day, shift)) return false;
     const tail = tailByUser?.[s.id] || ["O", "O", "O"];
     const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
     const prev2 = day > 2 ? grid[s.id][day - 3] : (day === 2 ? tail[0] : tail[1]);

@@ -998,12 +998,129 @@ describe("buildRosterAssignments — flexi/redistribution pulls spread fairly in
     const pullsByUser = {};
     result.flexiAssignments.forEach(f => { pullsByUser[f.userId] = (pullsByUser[f.userId] || 0) + 1; });
     const counts = Object.values(pullsByUser);
-    expect(result.flexiAssignments.length).toBeGreaterThan(5); // the scenario genuinely needs repeated flexi pulls
-    // At least half the staff pool shares the load — never all concentrated
-    // on one or two people the way the first-match-wins selection did.
-    expect(Object.keys(pullsByUser).length).toBeGreaterThanOrEqual(staff.length / 2);
-    // No single person absorbs more than half of all the pulls.
-    expect(Math.max(...counts)).toBeLessThanOrEqual(Math.ceil(result.flexiAssignments.length / 2));
+    // This scenario asks for more daily coverage (7 mandatory slots) than 6
+    // people can safely provide within the duty-time cap below — any pulls
+    // that DO happen must still spread fairly, never concentrating on one
+    // or two people the way the old first-match-wins selection did.
+    if (result.flexiAssignments.length > 1) {
+      expect(Object.keys(pullsByUser).length).toBeGreaterThanOrEqual(Math.min(staff.length / 2, result.flexiAssignments.length));
+      expect(Math.max(...counts)).toBeLessThanOrEqual(Math.ceil(result.flexiAssignments.length / 2) || 1);
+    }
+    // The duty-time cap takes priority over closing every gap: demand this
+    // genuinely unmeetable is honestly reported as shortfall violations
+    // rather than closed with duty-time-violating flexi pulls.
+    expect(result.violations.length).toBeGreaterThan(0);
+  });
+
+  it("never lets a flexi/redistribution pull push anyone past 6 consecutive working days", () => {
+    const staff = Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, category: "NCS" }));
+    const mandatoryCoverageConfig = { NCS: { M: { enabled: true, min: 4 }, A: { enabled: true, min: 2 }, N: { enabled: true, min: 1 } } };
+    const result = buildRosterAssignments({ staff, nDays: 28, leaveByUserDay: {}, blockedUserIds: [], mandatoryCoverageConfig });
+    const byUserDay = {};
+    result.assignments.forEach(a => { (byUserDay[a.userId] ??= {})[a.day] = a.code; });
+    const isWorking = c => c === "M" || c === "A" || c === "N";
+    staff.forEach(s => {
+      let run = 0, maxRun = 0;
+      for (let d = 1; d <= 28; d++) {
+        if (isWorking(byUserDay[s.id][d])) { run++; maxRun = Math.max(maxRun, run); } else run = 0;
+      }
+      expect(maxRun).toBeLessThanOrEqual(6);
+    });
+  });
+});
+
+describe("buildRosterAssignments — 6-consecutive-day duty-time cap (never silently created by flexi/redistribution)", () => {
+  function fixedPattern(codes) { return { codes, offset: 0 }; }
+  const onlyM = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } } };
+
+  it("blocks a flexi pull that would be the 7th consecutive working day", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: fixedPattern(["M", "M", "A", "A", "A", "A", "O", "O", "O", "O", "O", "O", "O", "O"]) };
+    const result = buildRosterAssignments({ staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: onlyM });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[7]).toBe("O"); // 0 rest days served yet after the 6-day run — must stay OFF
+  });
+
+  it("allows working again after just 1 rest day when the 6-day run had NO Night shift", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: fixedPattern(["M", "M", "A", "A", "A", "A", "O", "O", "O", "O", "O", "O", "O", "O"]) };
+    const result = buildRosterAssignments({ staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: onlyM });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[7]).toBe("O"); // still the mandatory rest day
+    expect(byDay[8]).toBe("M"); // 1 full rest day served — allowed again
+  });
+
+  it("requires TWO rest days (not one) after a 6-day run that included a Night shift", () => {
+    // All three shifts carry a real floor here (not just M) — a disabled
+    // shift's floor is 0, which makes the pre-existing same-day
+    // redistribution step treat EVERYONE on it as infinite "surplus" and
+    // move them onto whatever shift IS short, silently rewriting the very
+    // pattern (including the Night days) this test depends on. Floor=1 on
+    // all three, matching this lone staff member's own headcount, means
+    // nobody is ever a real surplus, so the pattern stays intact.
+    const allShifts = { B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: true, min: 1 } } };
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: fixedPattern(["M", "M", "A", "A", "N", "N", "O", "O", "O", "O", "O", "O", "O", "O"]) };
+    const result = buildRosterAssignments({ staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: allShifts });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[5]).toBe("N");
+    expect(byDay[6]).toBe("N"); // confirms the pattern's Night days survived untouched
+    expect(byDay[7]).toBe("O");
+    expect(byDay[8]).toBe("O"); // only 1 rest day so far — a Night-containing run needs 2
+    expect(byDay[9]).toBe("M"); // 2 full rest days served — allowed again
+  });
+
+  it("never lets the SAME-DAY redistribution step create a 7th consecutive working day either", () => {
+    // s1 is already maxed at 6 straight days; s2 and s3 are a genuine
+    // Afternoon surplus (2 people against a floor of 1) the same day —
+    // redistribution must skip s1 (at the cap) and pull from the real
+    // surplus instead, even though s1 is technically eligible by every
+    // OTHER rule.
+    const staff = [{ id: "s1", category: "B1" }, { id: "s2", category: "B1" }, { id: "s3", category: "B1" }];
+    const off6 = ["O", "O", "O", "O", "O", "O"];
+    const patternByUser = {
+      s1: fixedPattern(["M", "M", "A", "A", "A", "A", "O", "O", "O", "O", "O", "O", "O", "O"]),
+      s2: fixedPattern([...off6, "A", "O", "O", "O", "O", "O", "O", "O"]),
+      s3: fixedPattern([...off6, "A", "O", "O", "O", "O", "O", "O", "O"]),
+    };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: true, min: 1 }, N: { enabled: false, min: 1 } } };
+    const result = buildRosterAssignments({ staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig });
+    const byUserDay = {};
+    result.assignments.forEach(a => { (byUserDay[a.userId] ??= {})[a.day] = a.code; });
+    expect(byUserDay.s1[7]).toBe("O"); // at the cap — must be skipped as a donor
+    // Exactly one of the genuine Afternoon-surplus pair covers the Morning
+    // shortfall instead; the other keeps their own Afternoon duty.
+    const moved = [byUserDay.s2[7], byUserDay.s3[7]].filter(c => c === "M").length;
+    expect(moved).toBe(1);
+  });
+});
+
+describe("buildRosterAssignments — 48-hour rolling weekly cap", () => {
+  it("blocks a flexi pull that would push a rolling 7-day total over 48 hours, even within the 6-day run cap", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    // 12h shifts: 4 in a row already uses the full 48h budget — a 5th
+    // consecutive day (well under the 6-day run cap) must still be
+    // refused on hours alone.
+    const patternByUser = { s1: { codes: ["M", "M", "M", "M", "O", "O", "O", "O", "O", "O"], offset: 0 } };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } } };
+    const shiftHoursByCode = { M: 12, O: 0 };
+    const result = buildRosterAssignments({
+      staff, nDays: 10, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig, shiftHoursByCode,
+    });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[5]).toBe("O"); // would be 60h across days 1-5 — refused
+  });
+
+  it("still allows a flexi pull that stays within both the day-count and hour caps", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: { codes: ["M", "M", "O", "O", "O", "O", "O", "O"], offset: 0 } };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: true, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } } };
+    const shiftHoursByCode = { M: 8, O: 0 };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig, shiftHoursByCode,
+    });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[3]).toBe("M"); // only 24h so far — well within the 48h cap
   });
 });
 
