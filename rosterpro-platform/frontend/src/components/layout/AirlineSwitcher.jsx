@@ -82,6 +82,7 @@ export default function AirlineSwitcher() {
       )}
       {showAddStation && (
         <AddStationModal
+          airlineId={currentAirlineId}
           airlineName={currentAirlineName}
           onClose={() => setShowAddStation(false)}
           onCreated={(station) => reloadStations(station?.id)}

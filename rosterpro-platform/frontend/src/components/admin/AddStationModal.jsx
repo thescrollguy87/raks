@@ -11,7 +11,7 @@ const EMPTY = { name: "", iataCode: "", icaoCode: "" };
 // app already uses for stationId. Reachable by SUPER_ADMIN (any airline)
 // and AIRLINE_ADMIN (their own airline only — enforced server-side in
 // stationService.createStation, not just by hiding the button).
-export default function AddStationModal({ airlineName, onClose, onCreated }) {
+export default function AddStationModal({ airlineId, airlineName, onClose, onCreated }) {
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -23,7 +23,7 @@ export default function AddStationModal({ airlineName, onClose, onCreated }) {
     setError("");
     try {
       const station = await stationsApi.createStation({
-        name: form.name, iataCode: form.iataCode, icaoCode: form.icaoCode || undefined,
+        airlineId, name: form.name, iataCode: form.iataCode, icaoCode: form.icaoCode || undefined,
       });
       onCreated(station);
       onClose();
