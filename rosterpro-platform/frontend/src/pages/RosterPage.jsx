@@ -27,6 +27,41 @@ import { shiftNetHours, shiftBucket, effectiveShiftWindow, restGapHours } from "
 // something that can silently go unchecked because nobody set it up.
 const MIN_REST_HOURS = 11;
 
+// Same "fixed safety rule, checked unconditionally" philosophy as
+// MIN_REST_HOURS above: no more than 2 consecutive Night shifts, and after
+// 2+ of them, the next 2 calendar days must both be rest (off/leave/etc,
+// never another working shift) — checked purely from this staff member's
+// own month of codes, independent of whether a Rule Builder hard rule
+// happens to be configured for max_consecutive_nights/forced_off_after_
+// nights. Manual edits on this grid (upsertShift/bulkUpsertShifts) have no
+// server-side duty-time validation at all, so this is the only place that
+// catches it — confirmed directly: a hand-edited roster had 4 consecutive
+// Night shifts with no warning anywhere in the app.
+function computeNightRestViolations(assignmentsByDay, shiftDefByCode) {
+  const codes = assignmentsByDay.map(a => a?.shiftDef.code || "O");
+  const isNightCode = code => shiftDefByCode[code]?.type === "night";
+  const isWorkingCode = code => { const t = shiftDefByCode[code]?.type; return t === "duty" || t === "night"; };
+  const violations = new Array(codes.length).fill(null);
+  let nrun = 0;
+  for (let i = 0; i < codes.length; i++) {
+    if (isNightCode(codes[i])) {
+      nrun++;
+      if (nrun > 2) violations[i] = `${nrun} consecutive Night shifts — exceeds the maximum of 2 in a row without a rest break`;
+    } else {
+      if (nrun >= 2) {
+        for (let k = i; k < Math.min(codes.length, i + 2); k++) {
+          const restDaysServed = k - i;
+          if (isWorkingCode(codes[k]) && !violations[k]) {
+            violations[k] = `Working here after only ${restDaysServed} rest day${restDaysServed === 1 ? "" : "s"} following ${nrun} consecutive Night shifts — 2 full rest days are required`;
+          }
+        }
+      }
+      nrun = 0;
+    }
+  }
+  return violations;
+}
+
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
@@ -1189,6 +1224,7 @@ const RosterRow = memo(function RosterRow({
     const dateStr = dateAt(monthKey, i + 1).toISOString().slice(0, 10);
     return shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
   });
+  const nightRestViolations = computeNightRestViolations(assignmentsByDay, shiftDefByCode);
   const blocks = weekBlocks(nDays);
   const weekHours = blocks.map(([from, to]) => {
     let hrs = 0;
@@ -1256,6 +1292,14 @@ const RosterRow = memo(function RosterRow({
           }
         }
 
+        // Consecutive-Night / post-Night-rest violation — see
+        // computeNightRestViolations above. Independent of (and checked in
+        // addition to) the hour-gap check above: two Nights back-to-back
+        // pass the hour-gap check easily (a full day between shift ends),
+        // so that check alone never catches an excessive Night run.
+        const nightViolation = !isBlocked ? nightRestViolations[day - 1] : null;
+        const violationMsg = nightViolation || restViolation;
+
         // A display-only overlay — the real shift assignment underneath
         // (assignmentsByDay, used for weekHours/totalHours above) is never
         // touched, so as soon as isBlocked next computes false (the
@@ -1266,11 +1310,11 @@ const RosterRow = memo(function RosterRow({
             key={day} userId={userId} day={day}
             code={isBlocked ? "🔒" : code}
             colorHex={isBlocked ? "rgba(220,38,38,.22)" : (def?.color || "rgba(180,180,180,.1)")}
-            title={isBlocked ? `Blocked from duty — ${blockReason || "expired compliance record"}. Originally scheduled: ${originalTitle}` : restViolation ? `⚠ ${restViolation}\n\n${originalTitle}` : originalTitle}
+            title={isBlocked ? `Blocked from duty — ${blockReason || "expired compliance record"}. Originally scheduled: ${originalTitle}` : violationMsg ? `⚠ ${violationMsg}\n\n${originalTitle}` : originalTitle}
             in1={isBlocked ? null : in1} out1={isBlocked ? null : out1}
             in2={isBlocked ? null : in2} out2={isBlocked ? null : out2}
             isSelected={isSelected} isCutPending={isCutPending}
-            isRestViolation={!!restViolation}
+            isRestViolation={!!violationMsg}
             dayClass={dayCellClasses(monthKey, day, todayDayNum)}
             onCellClick={onCellClick} onCellDoubleClick={onCellDoubleClick}
           />
