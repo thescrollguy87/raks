@@ -1095,6 +1095,38 @@ describe("buildRosterAssignments — 6-consecutive-day duty-time cap (never sile
   });
 });
 
+describe("buildRosterAssignments — night-pair rest survives a NEIGHBORING redistribution/flexi move", () => {
+  it("never lets a flexi pull orphan an already-fixed Night into a pair with insufficient rest, even when an EARLIER unrelated move set up the conditions", () => {
+    // Confirmed live (Workload-only mode, 4 of 37 staff): redistributing
+    // one day off Night looks safe in isolation (it only checks that
+    // day's own neighbors), but it can orphan an adjacent already-fixed
+    // Night that a LATER, separately-evaluated flexi pull then treats as
+    // just a single night rather than recognizing it as half of a pair
+    // already owed 2 full rest days — producing a pair with only 1 rest
+    // day. Day 1 is redistributed off Night for a Morning shortfall; day 3
+    // (naturally OFF) is then an advisory Night shortfall a flexi pull
+    // would otherwise fill, using day 2 (orphaned by day 1's move) as the
+    // "previous night" — which must now correctly read as the makings of
+    // a pair owed 2 rest days, not a lone night needing only the ordinary
+    // transition check.
+    const staff = [{ id: "s1", category: "CM" }];
+    const patternByUser = { s1: { codes: ["N", "N", "O", "O", "N", "N", "O", "O"], offset: 0 } };
+    const mandatoryCoverageConfig = { CM: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const advisoryDemand = { 1: { M: { CM: 1 } }, 3: { N: { CM: 1 } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig, advisoryDemand,
+      allowPatternOverrideForCoverage: true,
+    });
+    const byDay = {}; result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[1]).toBe("M"); // the first, independently-safe move still happens
+    expect(byDay[3]).toBe("O"); // the second move is now correctly refused
+    expect(byDay[4]).toBe("O"); // day 2's orphaned Night still gets its full rest
+    // The genuinely-unmeetable advisory demand is honestly reported
+    // instead of silently violating rest.
+    expect(result.advisoryGaps.some(g => g.day === 3 && g.shift === "N")).toBe(true);
+  });
+});
+
 describe("buildRosterAssignments — 48-hour rolling weekly cap", () => {
   it("blocks a flexi pull that would push a rolling 7-day total over 48 hours, even within the 6-day run cap", () => {
     const staff = [{ id: "s1", category: "B1" }];

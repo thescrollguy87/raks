@@ -616,6 +616,48 @@ function buildRosterAssignments({
     return false;
   }
 
+  // Would putting `shift` on `day` break the "2+ consecutive nights needs
+  // 2 rest days" invariant for a night-pair that DOESN'T even include
+  // `day`? This is a different failure mode from violatesMaxConsecutiveDuty
+  // above: that one guards runs/rest-windows that `day` is directly part
+  // of. This one exists because redistribution/flexi evaluate each day's
+  // move in isolation against only ITS OWN immediate neighbors (prev/
+  // prev2/prev3, next/next2/next3) — so moving `day` AWAY from Night can
+  // silently "orphan" an adjacent already-fixed Night, erasing the
+  // backward-pair memory a LATER move nearby relies on to judge its own
+  // safety correctly. Confirmed directly: redistributing day1 off Night
+  // (safe in isolation — day2's own pair-completion wasn't re-examined)
+  // followed by a SEPARATE flexi pull onto day3 (also safe in isolation —
+  // its own backward check saw day1 as "M", no longer Night, so didn't
+  // recognize day2 as the second half of a pair already needing rest)
+  // jointly produced a night-pair at days 2-3 with only 1 rest day after
+  // it instead of 2. Re-deriving the whole local window's pair-rest
+  // invariant from the CURRENT grid state (not just `day`'s own neighbors)
+  // after the hypothetical change closes this regardless of which exact
+  // sequence of prior moves set the surrounding days up.
+  const NIGHT_PAIR_WINDOW = 4;
+  function violatesNightPairRest(s, day, shift) {
+    const seq = [];
+    for (let d = day - NIGHT_PAIR_WINDOW; d <= day + NIGHT_PAIR_WINDOW; d++) seq.push(codeAt(s, d, day, shift));
+    let nrun = 0;
+    for (let i = 0; i < seq.length; i++) {
+      const code = seq[i];
+      if (code === undefined) { nrun = 0; continue; }
+      const t = shiftType(code, shiftDefsByCode);
+      if (t === "night") { nrun++; continue; }
+      if (nrun >= 2) {
+        for (let k = i; k < Math.min(seq.length, i + 2); k++) {
+          const c = seq[k];
+          if (c === undefined) continue; // unknown — don't block on it
+          const ct = shiftType(c, shiftDefsByCode);
+          if (ct === "duty" || ct === "night") return true; // confirmed working day inside the required rest window
+        }
+      }
+      nrun = 0;
+    }
+    return false;
+  }
+
   // Would putting `shift` on `day` push any 7-day rolling window
   // containing `day` over MAX_WEEKLY_HOURS? Only the windows that actually
   // contain `day` can be affected by this one change.
@@ -652,6 +694,7 @@ function buildRosterAssignments({
   function restGapOk(s, day, shift) {
     if (violatesNightRestriction(nightRules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId)) return false;
     if (violatesMaxConsecutiveDuty(s, day, shift)) return false;
+    if (violatesNightPairRest(s, day, shift)) return false;
     if (violatesWeeklyHours(s, day, shift)) return false;
     const tail = tailByUser?.[s.id] || ["O", "O", "O"];
     const prev = day > 1 ? grid[s.id][day - 2] : tail[0];
