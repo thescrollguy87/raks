@@ -171,6 +171,30 @@ describe("buildRosterAssignments — full rest-gap rule set (ported from referen
     expect(codes).toEqual(["N", "N", "O", "O"]);
   });
 
+  it("resyncs a 6-long-repeated-run pattern (e.g. 'G,G,G,G,G,G,O') from the full real tail, not just the first 2 days of it", () => {
+    // Reproduces the real Station Incharge bug exactly: a hand-authored
+    // "6 General shifts then 1 OFF" pattern, with the staff member's real
+    // last 6 days all General (confirmed from a real October export) and
+    // the 7th day back (the one before that run started) OFF. Before the
+    // resyncCycleStart fix, only the first 2 tail days were ever checked,
+    // leaving 5 of the 6 positions in the run tied — the offset tiebreaker
+    // (reasonably, for cases that stay genuinely ambiguous) picked one that
+    // implied only 1 of the real 6 days already served, so day 1 of the
+    // new month continued with 4 MORE General shifts before any rest,
+    // instead of immediately resting as the real 6-day run already earned.
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const patternByUser = { b1_0: { codes: ["G", "G", "G", "G", "G", "G", "O"], offset: 0 } };
+    const tailByUser = { b1_0: ["G", "G", "G", "G", "G", "G", "O"] }; // real last 6 days: all G; 7th day back: O
+    const noMandatory = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], patternByUser, tailByUser, mandatoryCoverageConfig: noMandatory,
+    });
+    const codes = result.assignments.sort((a, b) => a.day - b.day).map(a => a.code);
+    // Day 1 must be the immediate rest day the real 6-day run already
+    // earned, then the cycle continues cleanly from there.
+    expect(codes).toEqual(["O", "G", "G", "G", "G", "G", "G", "O"]);
+  });
+
   it("falls back to the day-anchor formula (no resync) for a staff member with no real previous-month record at all", () => {
     // tailByUser[s.id] is entirely absent (e.g. a brand-new hire with
     // nothing to resync from) — must behave exactly as if continueFromPrevious
@@ -947,31 +971,55 @@ describe("resyncCycleStart — preferred-offset tiebreaker for ambiguous continu
   });
 
   it("never picks a position inconsistent with real history just to chase the preferred offset", () => {
-    // tail fully disambiguates to position 2 regardless of what's preferred.
+    // All 3 real tail days are now checked (not just the first 2), and
+    // together they fully disambiguate this case to position 2 regardless
+    // of what's preferred: tail[0]="M" candidates [0,1,2]; tail[1]="M"
+    // narrows to [1,2] (pos0 preceded by O doesn't match); tail[2]="M"
+    // narrows further to [2] alone (pos1's 2-back is O, not M) — so the
+    // tiebreaker never even runs here, confirming it's real history, not
+    // the preferred offset, that decided this.
     const result = resyncCycleStart(cycle, ["M", "M", "M"], /* preferredOffset */ 7);
-    // tail[0]="M" candidates [0,1,2]; tail[1]="M" refines to [1,2] (pos0
-    // preceded by O doesn't match); still ambiguous between 1 and 2, so
-    // the tiebreaker IS used here — this case only confirms it never
-    // returns something outside the real candidate set.
-    expect([2, 3]).toContain(result);
+    expect(result).toBe((2 + 1) % 8);
+  });
+
+  it("disambiguates as far as the real tail allows, even when the first 2 days alone would stay ambiguous", () => {
+    // A 6-long repeated run (the real shape of a hand-authored "6 General
+    // shifts then 1 OFF" pattern) — 2 days of tail leaves 5 of the 6
+    // positions tied; the fuller tail below narrows that further using
+    // every real day actually available, not just the first 2.
+    const sixRun = ["G", "G", "G", "G", "G", "G", "O"];
+    // Real history: the last 5 days were all G, the 6th day back was O —
+    // i.e. this person is on day 5 of their 6-day run (one day of real
+    // visibility past what a 2-day-only check could ever have resolved).
+    const result = resyncCycleStart(sixRun, ["G", "G", "G", "G", "G", "O"]);
+    // Only position 4 (0-indexed) is consistent with ALL 6 tail days: its
+    // own 5 positions back are G,G,G,G,G and the 6th back is O.
+    expect(result).toBe((4 + 1) % 7);
   });
 });
 
 describe("buildRosterAssignments — continuity into an ambiguous custom pattern doesn't re-clump staff", () => {
   it("two staff members on the same hand-defined pattern, continuing identical recent history, land on different phases, not the same one", () => {
     const staff = [{ id: "x0", category: "X" }, { id: "x1", category: "X" }];
-    // Both staff ended last month on the same 2 days: Morning then Morning
-    // again — a real, plausible coincidence for two different people on
-    // the same named Staff Allocation pattern.
-    const tailByUser = { x0: ["M", "M", "O"], x1: ["M", "M", "O"] };
-    // A hand-defined pattern with 3 consecutive Mornings (duplicate M,M
-    // pairs) — the kind of shape an admin, not computeNightOnlyCount, is
-    // responsible for now; x0 and x1 are on the SAME named pattern but
-    // started it on different weeks (different `offset`), same as two
-    // real staff members would be.
+    // Both staff ended last month on the same 3 real days: Morning, Morning,
+    // Morning — a real, plausible coincidence for two different people on
+    // the same named Staff Allocation pattern. The pattern's repeated run
+    // (5 Mornings in a row) is deliberately LONGER than this 3-day tail can
+    // fully pin down — resyncCycleStart now uses every tail day it's given
+    // (see its own comment), so this is genuinely, unavoidably ambiguous
+    // even with all 3 real days checked, exactly the case the offset
+    // tiebreaker below exists to resolve. A SHORTER repeated run (e.g. the
+    // old 3-long one this test used to use) is no longer a good example
+    // here: 3 real days fully disambiguates a 3-long run on its own, so it
+    // stopped being a genuine ambiguity case once that fix landed.
+    const tailByUser = { x0: ["M", "M", "M"], x1: ["M", "M", "M"] };
+    // A hand-defined pattern with 5 consecutive Mornings — the kind of
+    // shape an admin, not computeNightOnlyCount, is responsible for now;
+    // x0 and x1 are on the SAME named pattern but started it on different
+    // weeks (different `offset`), same as two real staff members would be.
     const patternByUser = {
-      x0: { codes: ["M", "M", "M", "A", "N", "N", "O", "O"], offset: 0 },
-      x1: { codes: ["M", "M", "M", "A", "N", "N", "O", "O"], offset: 4 },
+      x0: { codes: ["M", "M", "M", "M", "M", "O", "O"], offset: 0 },
+      x1: { codes: ["M", "M", "M", "M", "M", "O", "O"], offset: 4 },
     };
     const result = buildRosterAssignments({ staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, patternByUser });
     const codesFor = (id) => result.assignments.filter(a => a.userId === id).sort((a, b) => a.day - b.day).map(a => a.code);

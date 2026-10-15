@@ -294,11 +294,32 @@ function creditedCategories(s) {
 function resyncCycleStart(codes, tail, preferredOffset) {
   if (!codes?.length || tail?.[0] == null) return null;
   const len = codes.length;
-  const candidates = [];
+  let candidates = [];
   for (let i = 0; i < len; i++) if (codes[i] === tail[0]) candidates.push(i);
   if (!candidates.length) return null;
-  const refined = candidates.length > 1 ? candidates.filter(i => codes[(i - 1 + len) % len] === tail[1]) : candidates;
-  const pool = refined.length ? refined : candidates;
+  // Narrow using every further real tail day available (tail[1], tail[2],
+  // ...), not just the first — a repeated-code run only 2 long (e.g. "M,M"
+  // in a pattern with 3 Mornings in a row) is fully disambiguated by 1 day
+  // of look-back, but a LONGER run (e.g. 6 General shifts in a row) needs
+  // more. Each step only commits its narrowing when it leaves at least one
+  // candidate standing — a day that would eliminate every remaining
+  // candidate is inconclusive (a contradiction this function has no way to
+  // resolve, same stance the original single-step version already took),
+  // not "no valid position at all." Confirmed directly: a Station Incharge
+  // on a hand-authored "6 General shifts then 1 OFF" pattern (7-day cycle,
+  // a 6-long repeated run) crossed a month boundary and came back out as a
+  // FRESH 4-day run instead of immediately resting — the old 2-day-only
+  // check left 5 candidate positions tied, and the offset tiebreaker below
+  // (reasonably, for genuine ambiguity) picked one that implied only 1-4
+  // of the real 6 consecutive days already served, extending the run to
+  // 10 days instead of correctly landing on the OFF day due next.
+  for (let back = 1; back < tail.length && candidates.length > 1; back++) {
+    const day = tail[back];
+    if (day == null) break; // ran out of real history to check against
+    const refined = candidates.filter(i => codes[(((i - back) % len) + len) % len] === day);
+    if (refined.length) candidates = refined;
+  }
+  const pool = candidates;
   // Neither built-in no-pattern cycle has a repeated consecutive-code
   // pair (ROTATION's 8 pairs — MM/MA/AA/AN/NN/NO/OO/OM — are all
   // distinct, and NIGHT_ONLY_CYCLE's 4 are too), so `pool` is normally

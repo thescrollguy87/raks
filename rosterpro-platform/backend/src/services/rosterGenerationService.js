@@ -127,10 +127,22 @@ async function buildContinuationTails(stationId, monthKey, staff) {
     // rotation/pattern phase from" and leaves them on the normal day-anchor
     // formula, same as before this file started tracking per-user cycle
     // continuity. Someone who DOES have a record just missing a day or two
-    // of the 3-day tail (e.g. joined mid previous-month) still defaults
-    // those gaps to "O", exactly as before.
+    // of the tail (e.g. joined mid previous-month) still defaults those
+    // gaps to "O", exactly as before.
+    //
+    // 7 days, not 3: resyncCycleStart only ever needs tail[0..2] for its
+    // OWN rest-gap/illegal-transition checks, but it also uses however much
+    // of this array is given to disambiguate which position in a repeated-
+    // code run (e.g. a hand-authored "6 General shifts then 1 OFF" pattern)
+    // a staff member's real history actually puts them at. 3 days can't
+    // tell apart 5 of the 6 positions in a 6-long run; confirmed directly:
+    // a Station Incharge on exactly that pattern crossed the month boundary
+    // and came back as a fresh 4-day run instead of immediately resting,
+    // because only 2 of his real 6 consecutive days were ever visible to
+    // check against. 7 covers the longest run this app's own duty-time
+    // rule allows (6 consecutive working days) with one day to spare.
     const hasRecord = assignments.length > 0;
-    const tail = [0, 1, 2].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
+    const tail = [0, 1, 2, 3, 4, 5, 6].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
     return [s.id, tail];
   }));
 }
