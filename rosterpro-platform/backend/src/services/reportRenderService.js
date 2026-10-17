@@ -115,7 +115,11 @@ const ROSTER_PDF_WHITE = "#FFFFFF";
 const ROSTER_PDF_BORDER = "#E2E5EA";
 const ROSTER_PDF_TEXT_DARK = "#241F33";
 const ROSTER_PDF_FOOTER_GRAY = "#8A8698";
-const ROSTER_PDF_STAFF_COL_W = 118;
+// Wide enough for a full name on line 1 plus "Designation · Employee ID ·
+// Category" on line 2 without truncating the designation text too
+// aggressively — widened from 118 (name only) when those 3 fields were
+// added to the row; see drawStaffRow.
+const ROSTER_PDF_STAFF_COL_W = 160;
 
 function rosterPdfTimeCompact(t) { return t ? String(t).replace(":", "") : ""; }
 
@@ -130,7 +134,9 @@ function rosterPdfLayout(nDays, pageWidth) {
   const dayColWidth = (contentWidth - staffColWidth) / nDays;
   const codeFontSize = Math.max(6.5, Math.min(9, (dayColWidth / 68) * 9));
   const timeFontSize = Math.max(4.6, Math.min(7, (dayColWidth / 68) * 7));
-  const rowHeight = 22;
+  // Taller than a single-line name alone needs, to fit the Designation ·
+  // Employee ID · Category line underneath the name without crowding it.
+  const rowHeight = 27;
   return { contentWidth, staffColWidth, dayColWidth, codeFontSize, timeFontSize, rowHeight };
 }
 
@@ -216,7 +222,19 @@ function toRosterPdfBuffer(pdfData) {
     function drawStaffRow(y, staff) {
       doc.rect(M, y, layout.staffColWidth, layout.rowHeight).fillAndStroke(ROSTER_PDF_WHITE, ROSTER_PDF_BORDER);
       doc.fillColor(ROSTER_PDF_TEXT_DARK).font("Helvetica-Bold").fontSize(9)
-        .text(staff.fullName, M + 8, y + layout.rowHeight / 2 - 5, { width: layout.staffColWidth - 12, lineBreak: false, ellipsis: true });
+        .text(staff.fullName, M + 8, y + 4, { width: layout.staffColWidth - 12, lineBreak: false, ellipsis: true });
+      // Designation, Employee ID and Category on their own line underneath
+      // the name — on screen these are 3 separate pieces of info (see
+      // RosterRow in RosterPage.jsx); printed, there's only room for one
+      // compact line, so they're joined with a middle dot. Category is
+      // already implied by which section a row sits under, but it's
+      // repeated here too so a row is still identifiable on its own once
+      // printed or scrolled away from its section header.
+      const subline = [staff.designation, staff.employeeId, staff.category].filter(Boolean).join("  ·  ");
+      if (subline) {
+        doc.fillColor(ROSTER_PDF_FOOTER_GRAY).font("Helvetica").fontSize(6.5)
+          .text(subline, M + 8, y + 16, { width: layout.staffColWidth - 12, lineBreak: false, ellipsis: true });
+      }
 
       let x = M + layout.staffColWidth;
       for (const cell of staff.days) {

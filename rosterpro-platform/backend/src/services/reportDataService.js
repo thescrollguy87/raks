@@ -166,6 +166,9 @@ async function getRosterPdfData(stationId, monthKey) {
         const byDate = new Map(s.shiftAssignments.map(sa => [new Date(sa.shiftDate).toISOString().slice(0, 10), sa]));
         return {
           fullName: s.fullName,
+          designation: s.designation || "",
+          employeeId: s.employeeId || "",
+          category: catCode,
           days: dayLabels.map(({ iso }) => {
             const sa = byDate.get(iso);
             const code = sa?.shiftDef.code || "O";

@@ -50,6 +50,49 @@ describe("reportDataService.getRosterReportData", () => {
   });
 });
 
+describe("reportDataService.getRosterPdfData — per-staff Designation/Employee ID/Category", () => {
+  it("includes designation, employeeId and category on every staff row, for the Shift Roster PDF", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: true });
+    stationRepo.findStationWithAirline.mockResolvedValue({
+      name: "Ahmedabad Line Maintenance", iataCode: "AMD", airline: { name: "Akasa Air" },
+    });
+    stationRepo.findStationAirlineId.mockResolvedValue({ airlineId: "airline-1" });
+    rosterRepo.findAllShiftDefs.mockResolvedValue([
+      { code: "M", name: "Morning", color: "#60CFFF", type: "duty", startTime: "06:30", endTime: "14:00", sortOrder: 1 },
+    ]);
+    rosterRepo.getRosterGrid.mockResolvedValue([{
+      id: "s1", fullName: "Rakesh Patel", category: "B1", designation: "Station Incharge", employeeId: "700577",
+      shiftAssignments: [{ shiftDate: new Date("2026-11-01T00:00:00.000Z"), shiftDef: { code: "M" } }],
+    }]);
+
+    const data = await reportDataService.getRosterPdfData("station-1", "2026-11");
+
+    const b1 = data.categories.find(c => c.code === "B1");
+    expect(b1.staff[0]).toMatchObject({
+      fullName: "Rakesh Patel", designation: "Station Incharge", employeeId: "700577", category: "B1",
+    });
+  });
+
+  it("defaults designation/employeeId to empty strings rather than undefined when a staff record has none", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1", isPublished: true });
+    stationRepo.findStationWithAirline.mockResolvedValue({
+      name: "Ahmedabad Line Maintenance", iataCode: "AMD", airline: { name: "Akasa Air" },
+    });
+    stationRepo.findStationAirlineId.mockResolvedValue({ airlineId: "airline-1" });
+    rosterRepo.findAllShiftDefs.mockResolvedValue([]);
+    rosterRepo.getRosterGrid.mockResolvedValue([{
+      id: "s1", fullName: "New Hire", category: "NCS", designation: null, employeeId: null, shiftAssignments: [],
+    }]);
+
+    const data = await reportDataService.getRosterPdfData("station-1", "2026-11");
+
+    const ncs = data.categories.find(c => c.code === "NCS");
+    expect(ncs.staff[0].designation).toBe("");
+    expect(ncs.staff[0].employeeId).toBe("");
+    expect(ncs.staff[0].category).toBe("NCS");
+  });
+});
+
 describe("reportDataService.getComplianceReportData", () => {
   it("sorts EXPIRED records first regardless of staff name order", async () => {
     rosterRepo.getActiveStaffContacts.mockResolvedValue([
