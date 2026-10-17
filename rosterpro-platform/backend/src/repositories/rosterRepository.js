@@ -67,7 +67,7 @@ function getRosterGrid(stationId, rosterId) {
         where: { rosterId, deletedAt: null },
         select: {
           shiftDate: true, shiftDefId: true,
-          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } },
+          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true, peopleStrongLabel: true } },
           note: true, in1: true, out1: true, in2: true, out2: true,
         },
       },
@@ -91,7 +91,7 @@ function getRosterGridForExport(stationId, rosterId) {
         where: { rosterId, deletedAt: null },
         select: {
           shiftDate: true, shiftDefId: true,
-          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true } },
+          shiftDef: { select: { code: true, name: true, color: true, type: true, startTime: true, endTime: true, breakMin: true, peopleStrongLabel: true } },
           note: true, in1: true, out1: true, in2: true, out2: true,
         },
       },
@@ -184,8 +184,15 @@ function findAllShiftDefsIncludingInactive(airlineId) {
 // Shift definitions are per-airline reference data — upserted by their
 // (airlineId, code) unique pair, same as prisma/seed.js's own bootstrap of
 // the default M/A/N/G/O/L/SL set for a new tenant.
-function upsertShiftDef(airlineId, { code, name, startTime, endTime, breakMin, type, color, sortOrder }) {
-  const data = { name, startTime, endTime, breakMin, type, isActive: true, ...(color ? { color } : {}), ...(sortOrder !== undefined ? { sortOrder } : {}) };
+function upsertShiftDef(airlineId, { code, name, startTime, endTime, breakMin, type, color, sortOrder, peopleStrongLabel }) {
+  const data = {
+    name, startTime, endTime, breakMin, type, isActive: true,
+    ...(color ? { color } : {}),
+    ...(sortOrder !== undefined ? { sortOrder } : {}),
+    // "" from the settings UI means "explicitly unmapped" — store as null,
+    // same as never having set it, so the export leaves the cell blank.
+    ...(peopleStrongLabel !== undefined ? { peopleStrongLabel: peopleStrongLabel || null } : {}),
+  };
   return prisma.shiftDefinition.upsert({
     where: { airlineId_code: { airlineId, code } },
     update: data,

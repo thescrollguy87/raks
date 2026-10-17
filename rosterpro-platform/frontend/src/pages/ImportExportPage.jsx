@@ -46,7 +46,19 @@ function ResultBanner({ result }) {
       </div>
       {lists.filter(l => l.items?.length).map(l => (
         <div key={l.label} style={{ marginTop: 6, fontSize: 11, color: "var(--text-dim)" }}>
-          <strong>{l.label}:</strong> {l.items.slice(0, 8).join("; ")}{l.items.length > 8 ? ` … +${l.items.length - 8} more` : ""}
+          <strong>{l.label} ({l.items.length}):</strong>
+          <div
+            style={{
+              marginTop: 4, maxHeight: 160, overflowY: "auto", padding: "6px 8px",
+              background: "var(--navy-lite)", borderRadius: 6, border: "1px solid var(--border)",
+            }}
+          >
+            {l.items.map((item, i) => (
+              <div key={i} style={{ padding: "2px 0", borderBottom: i < l.items.length - 1 ? "1px solid var(--border)" : "none" }}>
+                {item}
+              </div>
+            ))}
+          </div>
         </div>
       ))}
     </div>
@@ -182,12 +194,24 @@ export default function ImportExportPage() {
         downloadPeopleStrongRoster(stationId, psMonthKey),
       ]);
       const items = warningsResult.warnings.map(w => `${w.fullName} — ${w.date} (${w.code})`);
+      // Grouped by code first — this is what actually fixes the problem
+      // (map the code once on the Shift Definitions tab) rather than the
+      // day-by-day list, which can run to dozens of lines for one unmapped
+      // code used all month.
+      const byCode = new Map();
+      for (const w of warningsResult.warnings) byCode.set(w.code, (byCode.get(w.code) || 0) + 1);
+      const codeItems = [...byCode.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([code, count]) => `${code} — ${count} cell(s) left blank`);
       setPsResult({
         tone: items.length ? "red" : "green",
         headline: items.length
-          ? `Exported — but ${items.length} day(s) had no PeopleStrong shift mapping and were left blank. Fill these in by hand before uploading:`
+          ? `Exported — but ${items.length} day(s) had no PeopleStrong shift mapping and were left blank. Map these codes on the Shift Definitions tab (Auto-Roster → Shift Definitions → PeopleStrong Label column), then re-export:`
           : `PeopleStrong Roster exported — all ${warningsResult.staffCount} staff mapped cleanly.`,
-        lists: [{ label: "Needs manual fix", items }],
+        lists: [
+          { label: "Unmapped codes", items: codeItems },
+          { label: "Every affected day", items },
+        ],
       });
     } catch (err) {
       setPsResult({ tone: "red", headline: err.message });

@@ -1,4 +1,5 @@
 const { z } = require("zod");
+const { PEOPLESTRONG_SHIFT_LIST } = require("../data/peopleStrongShiftList");
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected date as YYYY-MM-DD");
 const monthKey = z.string().regex(/^\d{4}-\d{2}$/, "Expected month as YYYY-MM");
@@ -91,6 +92,10 @@ const upsertShiftDefSchema = z.object({
   type: shiftDefTypes,
   color: z.string().regex(/^#[0-9A-Fa-f]{6}$/).optional(),
   sortOrder: z.number().int().optional(),
+  // Which PeopleStrong Shift_List label this code should export as for
+  // biometric attendance — empty string/null means "leave unmapped" (the
+  // cell comes back blank in the export, flagged as a warning).
+  peopleStrongLabel: z.enum(PEOPLESTRONG_SHIFT_LIST).optional().nullable().or(z.literal("")),
 });
 
 // ─── Shift patterns (Shift Patterns tab) ─────────────────────────────────────

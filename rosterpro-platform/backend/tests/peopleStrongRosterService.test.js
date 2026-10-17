@@ -95,6 +95,29 @@ describe("peopleStrongRosterService.buildPeopleStrongRosterData", () => {
   // Unlike the BA Roster export (airside-only), biometric attendance
   // covers everyone physically at the station — Stores/STO staff must
   // appear here.
+  // The admin's own configured mapping (Shift Definitions tab) always wins
+  // over the built-in defaults, and is what lets a custom code (no entry
+  // in the hardcoded table at all) resolve to a real label instead of
+  // coming back blank.
+  it("prefers a shift definition's own configured peopleStrongLabel over the built-in default table", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([{
+      id: "s1", fullName: "Rakesh Patel", category: "B1", employeeId: "700577",
+      shiftAssignments: [
+        // "M" has a built-in default, but an explicit configured label overrides it.
+        { shiftDate: new Date("2026-11-01T00:00:00.000Z"), shiftDef: { code: "M", peopleStrongLabel: "19  Shift (09:00 - 17:30)" } },
+        // "G" has no built-in default at all — only the configured label resolves it.
+        { shiftDate: new Date("2026-11-02T00:00:00.000Z"), shiftDef: { code: "G", peopleStrongLabel: "Holiday" } },
+      ],
+    }]);
+
+    const { staff, warnings } = await peopleStrongRosterService.buildPeopleStrongRosterData("station-1", "2026-11");
+
+    expect(staff[0].cells[0]).toBe("19  Shift (09:00 - 17:30)");
+    expect(staff[0].cells[1]).toBe("Holiday");
+    expect(warnings).toHaveLength(0);
+  });
+
   it("includes Stores (STO) category staff, unlike the BA Roster export", async () => {
     rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
     rosterRepo.getRosterGrid.mockResolvedValue([{

@@ -4,6 +4,12 @@ export function getShiftDefinitions(stationId) {
   return api.get("/api/roster/shift-definitions", { stationId });
 }
 
+// The full PeopleStrong Shift_List (294 entries) — static reference data for
+// the Shift Definitions tab's PeopleStrong-label dropdown.
+export function getPeopleStrongShiftLabels() {
+  return api.get("/api/roster/shift-definitions/people-strong-labels");
+}
+
 export function getRosterGrid(stationId, monthKey) {
   return api.get("/api/roster", { stationId, monthKey });
 }

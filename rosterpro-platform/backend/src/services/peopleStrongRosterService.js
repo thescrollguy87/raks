@@ -3,9 +3,10 @@ const rosterRepo = require("../repositories/rosterRepository");
 const ApiError = require("../utils/ApiError");
 const { PEOPLESTRONG_SHIFT_LIST } = require("../data/peopleStrongShiftList");
 
-// Confirmed directly against the real template + the user's own already-
-// submitted file: these 7 codes are the only ones this app's roster can
-// produce that map cleanly onto a PeopleStrong Shift_List entry. L/TRG/D
+// Built-in defaults for the handful of codes every station already relies
+// on without configuring anything — every other code needs its label set
+// once on the Shift Definitions tab's PeopleStrong column (ShiftDefinition.
+// peopleStrongLabel), which takes priority over this table when set. L/TRG/D
 // (ordinary leave / training / deputation) all collapse onto the same "19
 // Shift" admin slot per explicit instruction — PeopleStrong has no concept
 // of "why" someone wasn't on a real line shift, just that they weren't.
@@ -70,8 +71,11 @@ async function buildPeopleStrongRosterData(stationId, monthKey) {
     for (let day = 1; day <= nDays; day++) {
       const sa = byDate.get(isoDate(monthKey, day));
       const code = sa?.shiftDef.code || "O"; // no assignment that day = Off, same convention every other export in this app uses
-      const label = SHIFT_LABEL_BY_CODE[code];
-      if (label === undefined) {
+      // The admin's own configured mapping (Shift Definitions tab) always
+      // wins; only fall back to the built-in defaults when it's unset.
+      const configured = sa?.shiftDef.peopleStrongLabel;
+      const label = configured || SHIFT_LABEL_BY_CODE[code];
+      if (!label) {
         warnings.push({ employeeId: s.employeeId || "", fullName: s.fullName, date: dateLabel(monthKey, day), code });
         cells.push("");
       } else {

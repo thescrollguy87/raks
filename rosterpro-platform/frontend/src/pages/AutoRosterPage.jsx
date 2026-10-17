@@ -83,6 +83,7 @@ export default function AutoRosterPage() {
 // ═══ TAB 1: SHIFT DEFINITIONS ════════════════════════════════════════════════
 function ShiftDefinitionsTab({ stationId }) {
   const [defs, setDefs] = useState(null);
+  const [psLabels, setPsLabels] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -91,6 +92,9 @@ function ShiftDefinitionsTab({ stationId }) {
     rosterApi.getShiftDefinitions(stationId).then(setDefs).catch(err => setError(err.message));
   }, [stationId]);
   useEffect(load, [load]);
+  useEffect(() => {
+    rosterApi.getPeopleStrongShiftLabels().then(r => setPsLabels(r.labels || [])).catch(() => {});
+  }, []);
 
   function netHours(d) {
     if (!d.startTime || !d.endTime) return 0;
@@ -112,6 +116,7 @@ function ShiftDefinitionsTab({ stationId }) {
       await planningApi.upsertShiftDefinition({
         code: d.code, name: d.name, startTime: d.startTime || null, endTime: d.endTime || null,
         breakMin: Number(d.breakMin) || 0, type: d.type, color: d.color,
+        peopleStrongLabel: d.peopleStrongLabel || "",
       }, stationId);
       load();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
@@ -137,16 +142,19 @@ function ShiftDefinitionsTab({ stationId }) {
   return (
     <>
       <HowToUseTab>
-        Define every shift code this station uses — its start/end time, break, and type (duty/night/off/leave/other). The generator reads these times directly for rest-gap and mandatory-coverage checks, so a Night shift must be typed "night" (not "duty") or the rest-gap and no-night rules won't recognize it.
+        Define every shift code this station uses — its start/end time, break, and type (duty/night/off/leave/other). The generator reads these times directly for rest-gap and mandatory-coverage checks, so a Night shift must be typed "night" (not "duty") or the rest-gap and no-night rules won't recognize it. The PeopleStrong Label column sets which Shift_List entry this code exports as in the PeopleStrong biometric-attendance roster (Import/Export tab) — leave it "— Unmapped —" and that code's cells come back blank in the file, flagged as a warning, instead of guessing.
       </HowToUseTab>
       <div className="two-col">
       <div>
         <div className="card">
           <div className="card-title">⏱ Define Shifts & Timings</div>
           {error && <div className="ab red">{error}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "60px minmax(140px,2fr) 100px 100px 60px 90px 50px minmax(160px,1.4fr) 32px", gap: 7, marginBottom: 4, fontSize: 9, color: "var(--text-dim)", fontWeight: 700 }}>
+            <span>Code</span><span>Name</span><span>Start</span><span>End</span><span>Brk</span><span>Type</span><span>Colour</span><span>PeopleStrong Label</span><span />
+          </div>
           <div className="wl-scroll">
             {defs.map(d => (
-              <div key={d.id} style={{ display: "grid", gridTemplateColumns: "60px minmax(140px,2fr) 100px 100px 60px 90px 50px 32px", gap: 7, marginBottom: 6, alignItems: "center" }}>
+              <div key={d.id} style={{ display: "grid", gridTemplateColumns: "60px minmax(140px,2fr) 100px 100px 60px 90px 50px minmax(160px,1.4fr) 32px", gap: 7, marginBottom: 6, alignItems: "center" }}>
                 <input className="fi" value={d.code} style={{ fontSize: 10, fontWeight: 700, color: d.color }}
                   onChange={e => updateField(d.id, "code", e.target.value.toUpperCase())} onBlur={() => save(defs.find(x => x.id === d.id))} disabled={busy} />
                 <input className="fi" value={d.name} style={{ fontSize: 10 }}
@@ -163,6 +171,12 @@ function ShiftDefinitionsTab({ stationId }) {
                 </select>
                 <input type="color" value={d.color} title="Shift colour" style={{ width: "100%", height: 28, padding: 2, border: "1px solid var(--border)", borderRadius: 6, background: "var(--navy-lite)", cursor: "pointer" }}
                   onChange={e => { updateField(d.id, "color", e.target.value); save({ ...d, color: e.target.value }); }} disabled={busy} />
+                <select className="fi" title="Label this code exports as in the PeopleStrong biometric-attendance roster. Leave unmapped and the cell comes back blank, flagged as a warning."
+                  value={d.peopleStrongLabel || ""} style={{ fontSize: 10 }}
+                  onChange={e => { updateField(d.id, "peopleStrongLabel", e.target.value); save({ ...d, peopleStrongLabel: e.target.value }); }} disabled={busy}>
+                  <option value="">— Unmapped —</option>
+                  {psLabels.map(l => <option key={l} value={l}>{l}</option>)}
+                </select>
                 <button className="wl-del" onClick={() => remove(d.id)} disabled={busy}>✕</button>
               </div>
             ))}

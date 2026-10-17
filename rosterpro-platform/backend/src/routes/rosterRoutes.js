@@ -20,6 +20,7 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.get("/shift-definitions", requirePermission("shift", "read"), ctrl.shiftDefinitions);
+router.get("/shift-definitions/people-strong-labels", requirePermission("shift", "read"), ctrl.peopleStrongShiftLabels);
 
 // Shift definitions are airline-wide (no stationId on the model) — these
 // deliberately have no requireOwnStation check, unlike everything else in

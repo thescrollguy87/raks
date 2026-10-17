@@ -8,6 +8,7 @@ const rosterPlanningService = require("../services/rosterPlanningService");
 const rosterAnalysisService = require("../services/rosterAnalysisService");
 const asyncHandler = require("../utils/asyncHandler");
 const ApiError = require("../utils/ApiError");
+const { PEOPLESTRONG_SHIFT_LIST } = require("../data/peopleStrongShiftList");
 
 function sendXlsx(res, buffer, filename) {
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -46,6 +47,12 @@ const unpublish = asyncHandler(async (req, res) => {
 const shiftDefinitions = asyncHandler(async (req, res) => {
   const result = await rosterService.listShiftDefinitions(req.user, req.query.stationId);
   res.json(result);
+});
+
+// Static reference data for the Shift Definitions tab's PeopleStrong-label
+// dropdown — the full 294-entry Shift_List, no DB access needed.
+const peopleStrongShiftLabels = asyncHandler(async (req, res) => {
+  res.json({ labels: PEOPLESTRONG_SHIFT_LIST });
 });
 
 const generate = asyncHandler(async (req, res) => {
@@ -201,7 +208,7 @@ const manhoursSummary = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, generate, archive, importRoster,
+  getGrid, upsertShift, bulkUpsertShifts, publish, unpublish, shiftDefinitions, peopleStrongShiftLabels, generate, archive, importRoster,
   validateImport, downloadImportErrors, commitImport,
   listVersions, getVersion, compareVersionsCtrl, createVersionCtrl, restoreVersionCtrl,
   shiftDefinitionsTemplate, shiftDefinitionsExport, importShiftDefinitions,
