@@ -16,8 +16,10 @@ export function emailReport(type, format, params, toEmail) {
   return api.post("/api/reports/email", { type, format, ...params, toEmail });
 }
 
-export async function downloadBARoster(stationId, date) {
-  const { blob, filename } = await api.download("/api/reports/ba-roster", { stationId, date });
+// toDate is optional — omit it (or pass the same value as fromDate) for the
+// original single-day export; pass a later toDate to export a range in one file.
+export async function downloadBARoster(stationId, fromDate, toDate) {
+  const { blob, filename } = await api.download("/api/reports/ba-roster", { stationId, fromDate, toDate });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

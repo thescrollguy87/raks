@@ -37,51 +37,88 @@ function byCategoryThenName(staff) {
   });
 }
 
-async function buildBARosterRows(stationId, dateStr) {
-  const monthKey = monthKeyOf(dateStr);
-  const [y, m, d] = dateStr.split("-").map(Number);
+// A deliberately generous but bounded cap — "a longer period" was the ask,
+// not "every roster ever generated." ~6 months keeps a single export from
+// silently fetching and holding a year-plus of roster grids in memory at
+// once; the portal's own format has no inherent limit, so this is purely a
+// sanity bound on this app's side.
+const MAX_BA_ROSTER_RANGE_DAYS = 184;
 
-  const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
-  if (!roster) {
-    throw ApiError.notFound(`No roster exists for ${monthKey} yet — generate or create it first.`);
+function datesBetween(fromDateStr, toDateStr) {
+  const dates = [];
+  let cur = new Date(`${fromDateStr}T00:00:00.000Z`);
+  const end = new Date(`${toDateStr}T00:00:00.000Z`);
+  while (cur <= end) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return dates;
+}
+
+// Each row already carries its own Roster Date/Month/Year — the portal's
+// format was always inherently per-day, just previously only ever called
+// for a single date. `toDateStr` defaults to `fromDateStr` so an existing
+// single-date caller is unaffected; a real range just means more dates to
+// loop, grouped by month so each month's roster+grid is fetched once no
+// matter how many days of it are included, not once per day.
+async function buildBARosterRows(stationId, fromDateStr, toDateStr = fromDateStr) {
+  if (toDateStr < fromDateStr) {
+    throw ApiError.badRequest(`"To" date (${toDateStr}) is before "From" date (${fromDateStr}).`);
+  }
+  const dates = datesBetween(fromDateStr, toDateStr);
+  if (dates.length > MAX_BA_ROSTER_RANGE_DAYS) {
+    throw ApiError.badRequest(`That's ${dates.length} days — the BA Roster export is limited to ${MAX_BA_ROSTER_RANGE_DAYS} days at a time. Pick a shorter range.`);
   }
 
-  const staff = byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id));
+  const monthKeys = [...new Set(dates.map(monthKeyOf))];
+  const staffByMonth = new Map();
+  for (const monthKey of monthKeys) {
+    const roster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
+    if (!roster) {
+      throw ApiError.notFound(`No roster exists for ${monthKey} yet — generate or create it first.`);
+    }
+    staffByMonth.set(monthKey, byCategoryThenName(await rosterRepo.getRosterGrid(stationId, roster.id)));
+  }
+
   const rows = [];
+  for (const dateStr of dates) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    const staff = staffByMonth.get(monthKeyOf(dateStr));
 
-  for (const s of staff) {
-    // Stores (STO) staff don't go airside and were never put through the
-    // airport's own ground-staff access test this portal gates on —
-    // confirmed directly with the user: they're not meant to appear in
-    // this export at all, regardless of whether they're rostered on duty
-    // that day.
-    if (s.category === "STO") continue;
-    const todayShift = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
-    if (!todayShift) continue;
-    const def = todayShift.shiftDef;
-    if (def.type !== "duty" && def.type !== "night") continue; // BA roster = who's actually reporting for duty
-    // A per-day override (in1/out1) takes priority over the definition's
-    // default times — e.g. a manually retimed shift for this one date.
-    const startTime = todayShift.in1 || def.startTime;
-    const endTime = todayShift.out1 || def.endTime;
-    if (!startTime || !endTime) continue; // shift types with no real time can't produce a valid row
-    if (!s.employeeId) continue; // no way to identify this person to the portal without one — e.g. a test/admin account with a stray shift assignment but no real Staff Registry record
+    for (const s of staff) {
+      // Stores (STO) staff don't go airside and were never put through the
+      // airport's own ground-staff access test this portal gates on —
+      // confirmed directly with the user: they're not meant to appear in
+      // this export at all, regardless of whether they're rostered on duty
+      // that day.
+      if (s.category === "STO") continue;
+      const todayShift = s.shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
+      if (!todayShift) continue;
+      const def = todayShift.shiftDef;
+      if (def.type !== "duty" && def.type !== "night") continue; // BA roster = who's actually reporting for duty
+      // A per-day override (in1/out1) takes priority over the definition's
+      // default times — e.g. a manually retimed shift for this one date.
+      const startTime = todayShift.in1 || def.startTime;
+      const endTime = todayShift.out1 || def.endTime;
+      if (!startTime || !endTime) continue; // shift types with no real time can't produce a valid row
+      if (!s.employeeId) continue; // no way to identify this person to the portal without one — e.g. a test/admin account with a stray shift assignment but no real Staff Registry record
 
-    rows.push([
-      s.employeeId,
-      d, m, y,
-      d, m, y, // "Roster End Date" — always the same day as "Roster Date" (no overnight-shift adjustment)
-      SHIFT_ROLE,
-      toBATime(startTime), toBATime(endTime),
-    ]);
+      rows.push([
+        s.employeeId,
+        d, m, y,
+        d, m, y, // "Roster End Date" — always the same day as "Roster Date" (no overnight-shift adjustment)
+        SHIFT_ROLE,
+        toBATime(startTime), toBATime(endTime),
+      ]);
+    }
   }
 
   return rows;
 }
 
-async function generateBARosterExcel(stationId, dateStr) {
-  const rows = await buildBARosterRows(stationId, dateStr);
-  if (!rows.length) throw ApiError.badRequest("No staff are on duty that day — nothing to export");
+async function generateBARosterExcel(stationId, fromDateStr, toDateStr = fromDateStr) {
+  const rows = await buildBARosterRows(stationId, fromDateStr, toDateStr);
+  if (!rows.length) throw ApiError.badRequest("No staff are on duty in that period — nothing to export");
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Roster");
@@ -89,7 +126,8 @@ async function generateBARosterExcel(stationId, dateStr) {
   rows.forEach(r => ws.addRow(r));
 
   const buffer = await wb.xlsx.writeBuffer();
-  return { buffer, rowCount: rows.length, filename: `BA_Roster_${dateStr}.xlsx` };
+  const filename = toDateStr === fromDateStr ? `BA_Roster_${fromDateStr}.xlsx` : `BA_Roster_${fromDateStr}_to_${toDateStr}.xlsx`;
+  return { buffer, rowCount: rows.length, filename };
 }
 
 module.exports = { buildBARosterRows, generateBARosterExcel };

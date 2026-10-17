@@ -139,17 +139,24 @@ export default function ImportExportPage() {
     }
   }
 
-  // ── Daily BA Roster (already exists on the Reports page — reachable
+  // ── BA Roster (already exists on the Reports page — reachable
   // here too, clearly labeled) ────────────────────────────────────────
-  const [baDate, setBaDate] = useState(todayISO());
+  const [baFromDate, setBaFromDate] = useState(todayISO());
+  const [baToDate, setBaToDate] = useState(todayISO());
   const [baBusy, setBaBusy] = useState(false);
   const [baResult, setBaResult] = useState(null);
+  // Keep "To" from silently sitting before a newly-picked "From".
+  function handleBaFromDateChange(value) {
+    setBaFromDate(value);
+    if (baToDate < value) setBaToDate(value);
+  }
   async function handleBaExport() {
     if (!stationId) return;
+    if (baToDate < baFromDate) { setBaResult({ tone: "red", headline: '"To" date is before "From" date.' }); return; }
     setBaBusy(true); setBaResult(null);
     try {
-      await downloadBARoster(stationId, baDate);
-      setBaResult({ tone: "green", headline: "BA Roster exported." });
+      await downloadBARoster(stationId, baFromDate, baToDate);
+      setBaResult({ tone: "green", headline: baToDate === baFromDate ? "BA Roster exported." : "BA Roster exported for the whole period, in one file." });
     } catch (err) {
       setBaResult({ tone: "red", headline: err.message });
     } finally {
@@ -240,13 +247,19 @@ export default function ImportExportPage() {
 
       {canExport && (
         <div className="card">
-          <div className="card-title">🫁 Daily BA Roster</div>
+          <div className="card-title">🫁 BA Roster</div>
           <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-            On-duty staff for one day at {currentStation?.name}, formatted for the BA test portal upload.
+            On-duty staff at {currentStation?.name}, formatted for the BA test portal upload — pick a single date, or a From/To range to export a longer period in one file.
           </div>
-          <div className="fg" style={{ marginBottom: 10, maxWidth: 200 }}>
-            <label className="fl">Date</label>
-            <input className="fi" type="date" value={baDate} onChange={(e) => setBaDate(e.target.value)} />
+          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+            <div className="fg" style={{ maxWidth: 200 }}>
+              <label className="fl">From</label>
+              <input className="fi" type="date" value={baFromDate} onChange={(e) => handleBaFromDateChange(e.target.value)} />
+            </div>
+            <div className="fg" style={{ maxWidth: 200 }}>
+              <label className="fl">To</label>
+              <input className="fi" type="date" value={baToDate} min={baFromDate} onChange={(e) => setBaToDate(e.target.value)} />
+            </div>
           </div>
           <button className="btn btn-ghost" disabled={baBusy} onClick={handleBaExport}>
             {baBusy ? "Exporting…" : "⬇ Export BA Roster"}

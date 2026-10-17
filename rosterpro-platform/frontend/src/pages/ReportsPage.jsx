@@ -23,9 +23,19 @@ export default function ReportsPage() {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
-  const [baDate, setBaDate] = useState(new Date().toISOString().slice(0, 10));
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [baFromDate, setBaFromDate] = useState(todayISO);
+  const [baToDate, setBaToDate] = useState(todayISO);
   const [baBusy, setBaBusy] = useState(false);
   const [baMessage, setBaMessage] = useState(null);
+
+  // Keep "To" from silently sitting before a newly-picked "From" — nudge it
+  // up to match rather than letting the export fail with a 400 the user
+  // then has to decode.
+  function handleBaFromDateChange(value) {
+    setBaFromDate(value);
+    if (baToDate < value) setBaToDate(value);
+  }
 
   usePageHeader({ title: "Reports", subtitle: "Excel, PDF & CSV export" });
 
@@ -60,11 +70,12 @@ export default function ReportsPage() {
   }
 
   async function handleBARoster() {
+    if (baToDate < baFromDate) { setBaMessage({ tone: "red", text: '"To" date is before "From" date.' }); return; }
     setBaBusy(true);
     setBaMessage(null);
     try {
-      await downloadBARoster(stationId, baDate);
-      setBaMessage({ tone: "green", text: "BA Roster exported." });
+      await downloadBARoster(stationId, baFromDate, baToDate);
+      setBaMessage({ tone: "green", text: baToDate === baFromDate ? "BA Roster exported." : "BA Roster exported for the whole period, in one file." });
     } catch (err) {
       setBaMessage({ tone: "red", text: err.message });
     } finally {
@@ -75,13 +86,19 @@ export default function ReportsPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 480 }}>
     <div className="card">
-      <div className="card-title">🫁 Daily BA (Breath Analyser) Roster Export</div>
+      <div className="card-title">🫁 BA (Breath Analyser) Roster Export</div>
       <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
-        Pick a date to export the on-duty staff list in the exact format required for the BA test portal upload.
+        Pick a single date, or a From/To range to export a longer period's on-duty staff list in one file — in the exact format required for the BA test portal upload.
       </div>
-      <div className="fg" style={{ marginBottom: 12 }}>
-        <label className="fl">Date</label>
-        <input className="fi" type="date" value={baDate} onChange={(e) => setBaDate(e.target.value)} />
+      <div className="fg2" style={{ marginBottom: 12 }}>
+        <div className="fg">
+          <label className="fl">From</label>
+          <input className="fi" type="date" value={baFromDate} onChange={(e) => handleBaFromDateChange(e.target.value)} />
+        </div>
+        <div className="fg">
+          <label className="fl">To</label>
+          <input className="fi" type="date" value={baToDate} min={baFromDate} onChange={(e) => setBaToDate(e.target.value)} />
+        </div>
       </div>
       {baMessage && (
         <div className="ab" style={{ background: baMessage.tone === "green" ? "rgba(0,200,83,.1)" : "rgba(229,57,53,.12)", color: baMessage.tone === "green" ? "var(--rp-green)" : "var(--rp-red)", marginBottom: 12 }}>

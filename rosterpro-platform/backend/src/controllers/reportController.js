@@ -18,8 +18,8 @@ const emailReport = asyncHandler(async (req, res) => {
 });
 
 const downloadBARoster = asyncHandler(async (req, res) => {
-  const { stationId, date } = req.query;
-  const { buffer, filename } = await baRosterService.generateBARosterExcel(stationId, date);
+  const { stationId, fromDate, toDate } = req.query;
+  const { buffer, filename } = await baRosterService.generateBARosterExcel(stationId, fromDate, toDate);
   res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(buffer);

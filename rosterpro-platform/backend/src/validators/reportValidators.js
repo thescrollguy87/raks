@@ -31,9 +31,14 @@ const emailReportSchema = z.object({
   toEmail: z.string().email(),
 });
 
+const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected date as YYYY-MM-DD");
+// toDate is optional — baRosterService defaults it to fromDate itself
+// (the original single-date behavior), so omitting it keeps a single-day
+// export exactly as it worked before a range was ever possible.
 const baRosterQuerySchema = z.object({
   stationId: z.string().uuid(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected date as YYYY-MM-DD"),
+  fromDate: dateOnly,
+  toDate: dateOnly.optional(),
 });
 
 module.exports = { reportQuerySchema, emailReportSchema, baRosterQuerySchema };
