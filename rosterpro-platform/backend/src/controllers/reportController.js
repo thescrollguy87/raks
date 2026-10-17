@@ -1,5 +1,6 @@
 const reportService = require("../services/reportService");
 const baRosterService = require("../services/baRosterService");
+const peopleStrongRosterService = require("../services/peopleStrongRosterService");
 const asyncHandler = require("../utils/asyncHandler");
 
 const download = asyncHandler(async (req, res) => {
@@ -25,4 +26,18 @@ const downloadBARoster = asyncHandler(async (req, res) => {
   res.send(buffer);
 });
 
-module.exports = { download, emailReport, downloadBARoster };
+const downloadPeopleStrongRoster = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const { buffer, filename } = await peopleStrongRosterService.generatePeopleStrongRosterExcel(stationId, monthKey);
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.send(buffer);
+});
+
+const peopleStrongRosterWarnings = asyncHandler(async (req, res) => {
+  const { stationId, monthKey } = req.query;
+  const result = await peopleStrongRosterService.getPeopleStrongRosterWarnings(stationId, monthKey);
+  res.json(result);
+});
+
+module.exports = { download, emailReport, downloadBARoster, downloadPeopleStrongRoster, peopleStrongRosterWarnings };

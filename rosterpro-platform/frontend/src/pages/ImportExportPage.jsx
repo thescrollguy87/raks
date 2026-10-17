@@ -4,7 +4,7 @@ import { useStation } from "../store/StationContext.jsx";
 import { useAuth } from "../store/AuthContext.jsx";
 import * as rosterApi from "../api/roster.js";
 import * as staffApi from "../api/staff.js";
-import { downloadReport, downloadBARoster } from "../api/reports.js";
+import { downloadReport, downloadBARoster, downloadPeopleStrongRoster, getPeopleStrongRosterWarnings } from "../api/reports.js";
 import RosterImportWizard from "../components/roster/RosterImportWizard.jsx";
 
 function todayMonthKey() { return new Date().toISOString().slice(0, 7); }
@@ -164,6 +164,38 @@ export default function ImportExportPage() {
     }
   }
 
+  // ── PeopleStrong Biometric Roster ─────────────────────────────────────
+  const [psMonthKey, setPsMonthKey] = useState(todayMonthKey());
+  const [psBusy, setPsBusy] = useState(false);
+  const [psResult, setPsResult] = useState(null);
+  async function handlePeopleStrongExport() {
+    if (!stationId) return;
+    setPsBusy(true); setPsResult(null);
+    try {
+      // Checked alongside the actual download, not instead of it — a code
+      // with no PeopleStrong mapping still comes back as a blank cell in
+      // the file itself (never guessed at), so the file is always usable;
+      // this just surfaces exactly which staff/days need a manual fix,
+      // which the file alone wouldn't make obvious across a 30+ column grid.
+      const [warningsResult] = await Promise.all([
+        getPeopleStrongRosterWarnings(stationId, psMonthKey),
+        downloadPeopleStrongRoster(stationId, psMonthKey),
+      ]);
+      const items = warningsResult.warnings.map(w => `${w.fullName} — ${w.date} (${w.code})`);
+      setPsResult({
+        tone: items.length ? "red" : "green",
+        headline: items.length
+          ? `Exported — but ${items.length} day(s) had no PeopleStrong shift mapping and were left blank. Fill these in by hand before uploading:`
+          : `PeopleStrong Roster exported — all ${warningsResult.staffCount} staff mapped cleanly.`,
+        lists: [{ label: "Needs manual fix", items }],
+      });
+    } catch (err) {
+      setPsResult({ tone: "red", headline: err.message });
+    } finally {
+      setPsBusy(false);
+    }
+  }
+
   if (!stationId) {
     return <div className="ab info">No station has been set up yet — ask an administrator to add one first.</div>;
   }
@@ -265,6 +297,23 @@ export default function ImportExportPage() {
             {baBusy ? "Exporting…" : "⬇ Export BA Roster"}
           </button>
           <ResultBanner result={baResult} />
+        </div>
+      )}
+
+      {canExport && (
+        <div className="card">
+          <div className="card-title">🧬 PeopleStrong Biometric Roster</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 12 }}>
+            A whole month's roster for {currentStation?.name}, formatted for the PeopleStrong portal's monthly biometric-attendance upload — every active staff member, including Stores. Morning/Afternoon/Night map to the matching M&amp;E 6/2 shift, Weekly Off stays Weekly Off, and Leave/Training/Deputation all map to the 19 Shift (09:00-17:30) admin slot.
+          </div>
+          <div className="fg" style={{ marginBottom: 10, maxWidth: 200 }}>
+            <label className="fl">Month</label>
+            <input className="fi" type="month" value={psMonthKey} onChange={(e) => setPsMonthKey(e.target.value)} />
+          </div>
+          <button className="btn btn-ghost" disabled={psBusy} onClick={handlePeopleStrongExport}>
+            {psBusy ? "Exporting…" : "⬇ Export PeopleStrong Roster"}
+          </button>
+          <ResultBanner result={psResult} />
         </div>
       )}
     </div>

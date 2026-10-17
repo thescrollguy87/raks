@@ -4,7 +4,7 @@ const { requireAuth } = require("../middleware/auth");
 const { requirePermission } = require("../middleware/rbac");
 const { validateQuery, validate } = require("../middleware/validate");
 const { requireOwnStation } = require("../utils/stationScope");
-const { reportQuerySchema, emailReportSchema, baRosterQuerySchema } = require("../validators/reportValidators");
+const { reportQuerySchema, emailReportSchema, baRosterQuerySchema, peopleStrongRosterQuerySchema } = require("../validators/reportValidators");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -12,5 +12,7 @@ router.use(requireAuth);
 router.get("/download", requirePermission("reports", "export"), validateQuery(reportQuerySchema), requireOwnStation("query"), ctrl.download);
 router.post("/email", requirePermission("reports", "export"), validate(emailReportSchema), requireOwnStation("body"), ctrl.emailReport);
 router.get("/ba-roster", requirePermission("reports", "export"), validateQuery(baRosterQuerySchema), requireOwnStation("query"), ctrl.downloadBARoster);
+router.get("/people-strong-roster", requirePermission("reports", "export"), validateQuery(peopleStrongRosterQuerySchema), requireOwnStation("query"), ctrl.downloadPeopleStrongRoster);
+router.get("/people-strong-roster/warnings", requirePermission("reports", "export"), validateQuery(peopleStrongRosterQuerySchema), requireOwnStation("query"), ctrl.peopleStrongRosterWarnings);
 
 module.exports = router;

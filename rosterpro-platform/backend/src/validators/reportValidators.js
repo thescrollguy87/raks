@@ -41,4 +41,9 @@ const baRosterQuerySchema = z.object({
   toDate: dateOnly.optional(),
 });
 
-module.exports = { reportQuerySchema, emailReportSchema, baRosterQuerySchema };
+const peopleStrongRosterQuerySchema = z.object({
+  stationId: z.string().uuid(),
+  monthKey,
+});
+
+module.exports = { reportQuerySchema, emailReportSchema, baRosterQuerySchema, peopleStrongRosterQuerySchema };
