@@ -56,6 +56,11 @@ const generateRosterSchema = z.object({
   allowPatternOverride: z.boolean().optional(),
   applyLeave: z.boolean().optional(),
   aogBuffer: z.coerce.number().int().min(0).max(50).optional(),
+  // Partial-month regeneration — both optional, defaulting to the full
+  // month. Must fall within monthKey itself (checked service-side, where
+  // the actual day count and existing-roster requirement are known).
+  fromDate: isoDate.optional(),
+  toDate: isoDate.optional(),
 });
 
 const archiveQuerySchema = z.object({

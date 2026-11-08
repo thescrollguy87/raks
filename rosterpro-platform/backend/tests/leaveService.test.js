@@ -153,6 +153,58 @@ describe("leaveService.decideLeave", () => {
   });
 });
 
+describe("leaveService.updateLeave", () => {
+  const existing = {
+    id: "leave-1", status: "APPROVED", userId: "staff-1", leaveType: "DEPUTATION",
+    fromDate: new Date("2026-11-10"), toDate: new Date("2026-11-20"), reason: null,
+    user: { fullName: "Staff One", stationId: "station-1" },
+  };
+
+  it("edits an approved entry's dates and keeps it APPROVED (no re-approval round-trip)", async () => {
+    leaveRepo.findById.mockResolvedValue(existing);
+    leaveRepo.findOverlapping.mockResolvedValue(null);
+    leaveRepo.update.mockResolvedValue({ id: "leave-1", status: "APPROVED", toDate: new Date("2026-11-25") });
+
+    const result = await leaveService.updateLeave(
+      "leave-1", { leaveType: "DEPUTATION", fromDate: "2026-11-10", toDate: "2026-11-25" }, managerActor, {}
+    );
+
+    expect(result.status).toBe("APPROVED");
+    expect(leaveRepo.update).toHaveBeenCalledWith(
+      "leave-1",
+      { leaveType: "DEPUTATION", fromDate: new Date("2026-11-10T00:00:00.000Z"), toDate: new Date("2026-11-25T00:00:00.000Z"), reason: undefined },
+      managerActor.sub,
+    );
+  });
+
+  it("rejects editing a cancelled entry", async () => {
+    leaveRepo.findById.mockResolvedValue({ ...existing, status: "CANCELLED" });
+    await expect(leaveService.updateLeave(
+      "leave-1", { leaveType: "DEPUTATION", fromDate: "2026-11-10", toDate: "2026-11-25" }, managerActor, {}
+    )).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it("rejects an edit that would overlap another entry for the same person, excluding itself", async () => {
+    leaveRepo.findById.mockResolvedValue(existing);
+    leaveRepo.findOverlapping.mockResolvedValue({ id: "other-leave" });
+
+    await expect(leaveService.updateLeave(
+      "leave-1", { leaveType: "DEPUTATION", fromDate: "2026-11-10", toDate: "2026-11-25" }, managerActor, {}
+    )).rejects.toMatchObject({ statusCode: 409 });
+    expect(leaveRepo.findOverlapping).toHaveBeenCalledWith("staff-1", expect.any(Date), expect.any(Date), "leave-1");
+  });
+
+  it("blocks a Shift Incharge from editing someone who isn't their direct report", async () => {
+    const shiftIncharge = { sub: "si-1", roles: ["SHIFT_INCHARGE"], permissions: ["leave:approve_reports", "leave:read"], stationId: "station-1" };
+    leaveRepo.findById.mockResolvedValue(existing);
+    userRepo.findStationAndManager.mockResolvedValue({ stationId: "station-1", reportsToId: "someone-else" });
+
+    await expect(leaveService.updateLeave(
+      "leave-1", { leaveType: "DEPUTATION", fromDate: "2026-11-10", toDate: "2026-11-25" }, shiftIncharge, {}
+    )).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
 describe("leaveService.cancelLeave", () => {
   it("lets the leave owner cancel their own pending request", async () => {
     leaveRepo.findById.mockResolvedValue({ id: "leave-1", userId: actor.sub, status: "PENDING", user: { stationId: "station-1" } });

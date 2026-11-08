@@ -1265,3 +1265,88 @@ describe("buildRosterAssignments — staff inert for the whole month don't eat a
     }
   });
 });
+
+describe("buildRosterAssignments — partial-month regeneration (regenFromDay/regenToDay)", () => {
+  it("is a complete no-op (identical output) when regenFromDay/regenToDay/lockedCodesByUserDay are all omitted", () => {
+    const staff = [...makeStaff(3, "B1"), ...makeStaff(2, "B2")];
+    const base = { staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [] };
+    const withDefaults = buildRosterAssignments({ ...base, regenFromDay: 1, regenToDay: 14 });
+    const withoutParams = buildRosterAssignments(base);
+    expect(withDefaults.assignments).toEqual(withoutParams.assignments);
+  });
+
+  it("preserves the locked code verbatim for every day outside the window, even one the pure cycle would never produce on its own", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const lockedCodesByUserDay = {
+      // A deliberately "unnatural" value (as if hand-edited) on a locked
+      // day — proves this is preserved rather than recomputed.
+      b1_0: { 1: "G", 2: "G", 3: "O", 13: "O", 14: "G" },
+    };
+    const result = buildRosterAssignments({
+      staff, nDays: 14, leaveByUserDay: {}, blockedUserIds: [],
+      regenFromDay: 4, regenToDay: 12, lockedCodesByUserDay,
+    });
+    const byDay = {};
+    result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[1]).toBe("G");
+    expect(byDay[2]).toBe("G");
+    expect(byDay[3]).toBe("O");
+    expect(byDay[13]).toBe("O");
+    expect(byDay[14]).toBe("G");
+  });
+
+  it("never rebalances (same-day redistribution/flexi) a day outside the window, even under coverage pressure", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    // Locked day 5 is "O" (day off) — if the mandatory coverage pass were
+    // allowed to touch it, a lone B1 staff member would be the only
+    // possible flexi pull and day 5 would flip away from "O".
+    const lockedCodesByUserDay = { b1_0: { 1: "O", 2: "O", 3: "O", 4: "O", 5: "O" } };
+    const result = buildRosterAssignments({
+      staff, nDays: 10, leaveByUserDay: {}, blockedUserIds: [],
+      regenFromDay: 6, regenToDay: 10, lockedCodesByUserDay,
+    });
+    const byDay = {};
+    result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    for (let d = 1; d <= 5; d++) expect(byDay[d]).toBe("O");
+  });
+
+  it("honors real locked history at the seam — two locked Night shifts right before the window still force the window's first two days OFF", () => {
+    const staff = [{ id: "b1_0", category: "B1" }, { id: "b1_1", category: "B1" }];
+    // b1_0 worked Night on locked days 9 and 10 (the two days right before
+    // the window starts at day 11) — the "2 nights -> 2 OFF" rule must
+    // still apply to days 11-12, exactly as if day 9/10 had just been
+    // computed fresh instead of preserved from real history.
+    const lockedCodesByUserDay = {
+      b1_0: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map(d => [d, "O"]).concat([[9, "N"], [10, "N"]])),
+      b1_1: Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(d => [d, "O"])),
+    };
+    const result = buildRosterAssignments({
+      staff, nDays: 16, leaveByUserDay: {}, blockedUserIds: [],
+      regenFromDay: 11, regenToDay: 16, lockedCodesByUserDay,
+      mandatoryCoverageConfig: { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } },
+    });
+    const byUserDay = {};
+    result.assignments.forEach(a => { (byUserDay[a.userId] ??= {})[a.day] = a.code; });
+    expect(byUserDay.b1_0[11]).toBe("O");
+    expect(byUserDay.b1_0[12]).toBe("O");
+  });
+
+  it("locks days both before AND after the window when an end date earlier than month-end is given", () => {
+    const staff = [{ id: "b1_0", category: "B1" }];
+    const lockedCodesByUserDay = { b1_0: { 1: "M", 2: "M", 20: "A", 25: "N", 30: "O" } };
+    const result = buildRosterAssignments({
+      staff, nDays: 30, leaveByUserDay: {}, blockedUserIds: [],
+      regenFromDay: 15, regenToDay: 18, lockedCodesByUserDay,
+    });
+    const byDay = {};
+    result.assignments.forEach(a => { byDay[a.day] = a.code; });
+    expect(byDay[1]).toBe("M");
+    expect(byDay[2]).toBe("M");
+    expect(byDay[20]).toBe("A");
+    expect(byDay[25]).toBe("N");
+    expect(byDay[30]).toBe("O");
+    // Days 15-18 (the actual window) were genuinely recomputed, not locked
+    // — none of them come back undefined/missing.
+    for (let d = 15; d <= 18; d++) expect(byDay[d]).toBeDefined();
+  });
+});

@@ -21,6 +21,18 @@ const { checkHardRuleCompliance, computeSoftRuleScore } = require("../utils/rule
 const { resolveAirlineId } = require("../utils/stationScope");
 const { shiftNetHours } = require("../utils/shiftHours");
 
+// Resolves a "YYYY-MM-DD" option into a 1-indexed day-of-month, validating
+// it actually falls within the month being generated — a fromDate/toDate
+// from a different month would silently clip to day 1 or nDays otherwise,
+// which is exactly the kind of mistake worth rejecting loudly rather than
+// quietly doing something else than what was asked.
+function dayOfMonthFromDate(monthKey, dateStr, label) {
+  if (!dateStr.startsWith(monthKey)) {
+    throw ApiError.badRequest(`${label} (${dateStr}) must fall within ${monthKey}`);
+  }
+  return Number(dateStr.slice(8, 10));
+}
+
 function daysInMonth(monthKey) {
   const [y, m] = monthKey.split("-").map(Number);
   return new Date(Date.UTC(y, m, 0)).getUTCDate();
@@ -144,6 +156,32 @@ async function buildContinuationTails(stationId, monthKey, staff) {
     const hasRecord = assignments.length > 0;
     const tail = [0, 1, 2, 3, 4, 5, 6].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
     return [s.id, tail];
+  }));
+}
+
+// Partial-month regeneration: everything OUTSIDE [fromDay, toDay] must be
+// preserved exactly as it already is on the roster, never recomputed — see
+// buildRosterAssignments' own regenFromDay/regenToDay/lockedCodesByUserDay
+// doc comment for how the algorithm itself uses this. Reads the CURRENT
+// month's own existing grid (not the previous month — this is a mid-month
+// correction, not a cross-month continuation), defaulting a day with no
+// real assignment at all to "O" (a day no one was ever rostered for reads
+// the same as an explicit day off everywhere else in this app).
+async function buildLockedCodesByUserDay(stationId, existingRoster, staff, monthKey, nDays, fromDay, toDay) {
+  const grid = await rosterRepo.getRosterGrid(stationId, existingRoster.id);
+  const byUserId = new Map(grid.map(u => [u.id, u.shiftAssignments]));
+  const monthStart = dateAt(monthKey, 1);
+  return Object.fromEntries(staff.map(s => {
+    const byIso = new Map((byUserId.get(s.id) || []).map(sa => [
+      Math.round((new Date(sa.shiftDate).getTime() - monthStart.getTime()) / 86400000) + 1,
+      sa.shiftDef.code,
+    ]));
+    const locked = {};
+    for (let d = 1; d <= nDays; d++) {
+      if (d >= fromDay && d <= toDay) continue; // inside the window — not locked, left for the algorithm to compute
+      locked[d] = byIso.get(d) ?? "O";
+    }
+    return [s.id, locked];
   }));
 }
 
@@ -445,7 +483,7 @@ function buildStaffWithShifts(staff, assignments, nDays) {
 // "apply this exact previewed plan" path to keep in sync — a second call is
 // the apply.
 async function generateRoster(stationId, monthKey, actor, req, options = {}) {
-  const { preview = false, continueFromPrevious = false, usePatterns = false, allowPatternOverride = false, applyLeave = true, aogBuffer = 0 } = options;
+  const { preview = false, continueFromPrevious = false, usePatterns = false, allowPatternOverride = false, applyLeave = true, aogBuffer = 0, fromDate, toDate } = options;
   const staff = await rosterRepo.getActiveStaffForGeneration(stationId);
   if (staff.length === 0) throw ApiError.badRequest("No active staff at this station to generate a roster for");
 
@@ -457,17 +495,33 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   let existingRoster = await rosterRepo.findRosterByStationAndMonth(stationId, monthKey);
 
   const nDays = daysInMonth(monthKey);
+
+  // Partial-month regeneration: when a mid-month duty/leave/deputation
+  // change only affects part of the month, fromDate/toDate narrow Apply
+  // to that window — everything outside it (already-published, hand-
+  // edited, or simply not meant to change) is left exactly as it is on the
+  // roster today. Defaulting to the full month keeps every existing caller
+  // (which never sends these) byte-for-byte unchanged.
+  const regenFromDay = fromDate ? dayOfMonthFromDate(monthKey, fromDate, "fromDate") : 1;
+  const regenToDay = toDate ? dayOfMonthFromDate(monthKey, toDate, "toDate") : nDays;
+  if (regenFromDay > regenToDay) throw ApiError.badRequest("fromDate must be on or before toDate");
+  const isWindowed = regenFromDay > 1 || regenToDay < nDays;
+  if (isWindowed && !existingRoster) {
+    throw ApiError.badRequest(`Cannot regenerate just part of ${monthKey} — no roster exists for it yet. Generate the full month first.`);
+  }
+
   const monthStart = dateAt(monthKey, 1);
   const monthEnd = dateAt(monthKey, nDays);
   const airlineId = await resolveAirlineId(actor, stationId);
 
-  const [leaves, complianceSummaries, shiftDefs, tailByUser, patternByUser, workloadContext] = await Promise.all([
+  const [leaves, complianceSummaries, shiftDefs, tailByUser, patternByUser, workloadContext, lockedCodesByUserDay] = await Promise.all([
     leaveRepo.approvedLeaveForStaffInRange(staff.map(s => s.id), monthStart, monthEnd),
     Promise.all(staff.map(s => complianceService.getComplianceSummary(s.id))),
     rosterRepo.findAllShiftDefs(airlineId),
     continueFromPrevious ? buildContinuationTails(stationId, monthKey, staff) : Promise.resolve(undefined),
     usePatterns ? buildPatternByUser(stationId, staff, airlineId) : Promise.resolve(undefined),
     buildWorkloadContext(stationId, monthKey, undefined, aogBuffer, airlineId),
+    isWindowed ? buildLockedCodesByUserDay(stationId, existingRoster, staff, monthKey, nDays, regenFromDay, regenToDay) : Promise.resolve(undefined),
   ]);
 
   if (applyLeave && leaves.length) await ensureLeaveShiftDefs(airlineId, leaves, shiftDefs);
@@ -511,6 +565,7 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     // the separate rest-gap look-back — a rotation's own phase was never
     // meant to be a per-month reset in the first place).
     absoluteDayAnchor: Math.round(monthStart.getTime() / 86400000),
+    regenFromDay, regenToDay, lockedCodesByUserDay,
   });
 
   // Resolve shift codes (M/A/N/O/L) to real ShiftDefinition ids — if any of
@@ -608,8 +663,10 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
   if (preview) {
     return {
       preview: true, staffCount: staff.length, blockedCount: blockedUserIds.length,
-      assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
+      assignmentCount: assignments.filter(a => a.day >= regenFromDay && a.day <= regenToDay).length,
+      violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
       existingRosterExists: !!existingRoster,
+      regenWindow: isWindowed ? { fromDay: regenFromDay, toDay: regenToDay } : null,
     };
   }
 
@@ -628,26 +685,34 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
     await rosterVersionService.createVersion(roster.id, "Before auto-generated roster applied", actor, req);
   }
 
-  const rows = assignments.map(a => ({
-    rosterId: roster.id, userId: a.userId, shiftDate: dateAt(monthKey, a.day),
-    shiftDefId: codeToId[a.code], note: null, actorId: actor.sub,
-  }));
+  // `assignments` already spans the whole month (days outside the window
+  // carry their real, untouched code — see buildLockedCodesByUserDay/
+  // buildRosterAssignments) — only persist the days actually regenerated,
+  // so a windowed Apply never bumps version/updatedAt on shifts nobody
+  // asked to touch.
+  const rows = assignments
+    .filter(a => a.day >= regenFromDay && a.day <= regenToDay)
+    .map(a => ({
+      rosterId: roster.id, userId: a.userId, shiftDate: dateAt(monthKey, a.day),
+      shiftDefId: codeToId[a.code], note: null, actorId: actor.sub,
+    }));
   await rosterRepo.bulkUpsertAssignments(rows);
 
   await auditTrail.logActivity(
     "Roster generated",
-    `${stationId} — ${monthKey}: ${staff.length} staff, ${blockedUserIds.length} blocked, ${violations.length} critical gap(s), ${advisoryGaps.length} advisory gap(s), ${flexiAssignments.length} flexi exigency fill(s)`,
+    `${stationId} — ${monthKey}${isWindowed ? ` (days ${regenFromDay}-${regenToDay} only)` : ""}: ${staff.length} staff, ${blockedUserIds.length} blocked, ${violations.length} critical gap(s), ${advisoryGaps.length} advisory gap(s), ${flexiAssignments.length} flexi exigency fill(s)`,
     stationId, actor, req
   );
 
   return {
     roster, staffCount: staff.length, blockedCount: blockedUserIds.length,
-    assignmentCount: assignments.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
+    assignmentCount: rows.length, violations, advisoryGaps, flexiAssignments, manpowerByShift, analysis, manhours,
+    regenWindow: isWindowed ? { fromDay: regenFromDay, toDay: regenToDay } : null,
   };
 }
 
 module.exports = {
-  generateRoster, buildLeaveByUserDay, leaveCodeForType,
+  generateRoster, buildLeaveByUserDay, leaveCodeForType, dayOfMonthFromDate, buildLockedCodesByUserDay,
   // Exported additionally for the Roster Assistant chat tools (see
   // chatToolsService.js) to compose real, already-correct demand/rule
   // logic instead of re-deriving any of it — the CRITICAL architectural

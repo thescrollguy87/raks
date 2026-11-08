@@ -16,6 +16,10 @@ export function decideLeave(id, decision, reason) {
   return api.post(`/api/leave/${id}/decide`, { decision, reason });
 }
 
+export function updateLeave(id, body) {
+  return api.put(`/api/leave/${id}`, body);
+}
+
 export function cancelLeave(id) {
   return api.post(`/api/leave/${id}/cancel`);
 }

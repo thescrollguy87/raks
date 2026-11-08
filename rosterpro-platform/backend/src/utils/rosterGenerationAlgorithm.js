@@ -134,10 +134,14 @@ const NIGHT_ONLY_CYCLE = ["N", "N", "O", "O"];
 // at the cost of a lower overall on-duty cadence for whichever staff move
 // to the Night-only pattern — confirmed directly with the user as the
 // intended tradeoff, not something to engineer back down.
-function computeNightOnlyCount(category, advisoryDemand, nDays, totalHeadcount) {
+// fromDay/toDay (default: the whole month) scope which days' demand actually
+// gets weighed — a partial regeneration (see buildRosterAssignments'
+// regenFromDay/regenToDay) should size this mix off the window actually
+// being (re)computed, not demand on days outside it this run never touches.
+function computeNightOnlyCount(category, advisoryDemand, nDays, totalHeadcount, fromDay = 1, toDay = nDays) {
   if (!totalHeadcount) return 0;
   let dM = 0, dA = 0, dN = 0;
-  for (let d = 1; d <= nDays; d++) {
+  for (let d = fromDay; d <= toDay; d++) {
     const day = advisoryDemand?.[d];
     if (!day) continue;
     dM += day.M?.[category] || 0;
@@ -352,7 +356,25 @@ function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
   absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds, shiftHoursByCode,
+  // Partial-month regeneration: when a station's duty/leave/deputation
+  // picture changes mid-month, regenerating the WHOLE month would discard
+  // every hand edit and every previous generation's redistribution/flexi
+  // decisions on days nobody asked to touch. regenFromDay/regenToDay (both
+  // default to the full month — a strict no-op for every existing caller)
+  // name the one window actually being recomputed; every day outside it is
+  // "locked" to lockedCodesByUserDay's real, already-on-the-roster value
+  // instead of being recomputed from the cycle/pattern/coverage logic below.
+  // Locked days still populate `codes`/`grid` same as any other day, so
+  // every rest-gap/night-pair/weekly-hours/resync lookback that reads a
+  // neighboring day's code (prev/prev2/prev3, the forward check, the
+  // night-pair window) sees the real history at the window's seam exactly
+  // as it would across any other already-correct day — no separate
+  // continuity mechanism needed beyond this.
+  regenFromDay, regenToDay, lockedCodesByUserDay,
 }) {
+  const fromDay = regenFromDay || 1;
+  const toDay = regenToDay || nDays;
+  const isLockedDay = (day) => day < fromDay || day > toDay;
   const blocked = new Set(blockedUserIds || []);
   const lmpmLocked = new Set(lmpmLockedUserIds || []);
   // Distinct from `blocked`: a staff member whose mandatory training was
@@ -416,12 +438,16 @@ function buildRosterAssignments({
   // apart. Excluding genuinely-inert staff here fixes both this spacing
   // AND computeNightOnlyCount's own headcount (which should also reflect
   // only staff actually available to work, not the full roster).
+  // Scoped to [fromDay, toDay] (the whole month, by default) — a staff
+  // member's cycle slot is only ever consumed for days actually being
+  // (re)computed; whether they're on leave for the rest of a month a
+  // partial regeneration never touches is irrelevant here.
   function isFullyInert(s) {
     if (blocked.has(s.id)) return true;
     if (trainingPending.has(s.id) && !patternByUser?.[s.id]?.codes?.length) return true;
     const leaveMap = leaveByUserDay?.[s.id];
     if (!leaveMap) return false;
-    for (let d = 1; d <= nDays; d++) if (!leaveMap.has(d)) return false;
+    for (let d = fromDay; d <= toDay; d++) if (!leaveMap.has(d)) return false;
     return true;
   }
 
@@ -441,7 +467,7 @@ function buildRosterAssignments({
   const nightOnlySelectedByCategory = {}; // category -> Set(local index)
   Object.keys(unpatternedCountByCategory).forEach(cat => {
     const total = unpatternedCountByCategory[cat];
-    const k = computeNightOnlyCount(cat, advisoryDemand, nDays, total);
+    const k = computeNightOnlyCount(cat, advisoryDemand, nDays, total, fromDay, toDay);
     nightOnlyCountByCategory[cat] = k;
     const selected = new Set();
     for (let j = 0; j < k; j++) selected.add(Math.round((j * total) / k));
@@ -494,6 +520,12 @@ function buildRosterAssignments({
     const resyncStart = tailByUser ? resyncCycleStart(cycle, tail, preferredOffset) : null;
 
     for (let day = 1; day <= nDays; day++) {
+      // Outside the regeneration window — preserve whatever's really on
+      // the roster for this day verbatim rather than recomputing it, so
+      // every rest-gap/resync lookback downstream (including this exact
+      // staff member's own prev/prev2/prev3 for the first in-window day)
+      // reads the true, current history at the window's seam.
+      if (isLockedDay(day)) { codes[day - 1] = lockedCodesByUserDay?.[s.id]?.[day] ?? "O"; continue; }
       if (blocked.has(s.id) || unpatternedTrainingPending) { codes[day - 1] = "O"; continue; }
       const onLeaveType = leaveByUserDay?.[s.id]?.get(day);
       if (onLeaveType) { codes[day - 1] = leaveCodeForType(onLeaveType); continue; }
@@ -850,6 +882,7 @@ function buildRosterAssignments({
   }
 
   for (let day = 1; day <= nDays; day++) {
+    if (isLockedDay(day)) continue; // preserved verbatim — never rebalanced
     ["B1", "B2", "CM", "NCS"].forEach(category => {
       const floors = {};
       ["M", "A", "N"].forEach(sh => {
@@ -862,6 +895,7 @@ function buildRosterAssignments({
 
   if (advisoryDemand) {
     for (let day = 1; day <= nDays; day++) {
+      if (isLockedDay(day)) continue; // preserved verbatim — never rebalanced
       const dayDemand = advisoryDemand[day];
       if (!dayDemand) continue;
       const categoriesToday = new Set();

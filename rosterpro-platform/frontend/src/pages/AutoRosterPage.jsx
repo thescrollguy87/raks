@@ -438,6 +438,24 @@ function LeaveAbsenceTab({ stationId }) {
   const [entries, setEntries] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Set while editing an existing entry's own dates/type in place (changed
+  // duty/deputation/leave plans mid-month) instead of cancel-then-recreate
+  // — null means the form below is for adding a brand-new entry.
+  const [editingId, setEditingId] = useState(null);
+
+  function startEdit(e) {
+    setEditingId(e.id);
+    setUserId(e.userId);
+    setFromDate(e.fromDate?.slice(0, 10) || "");
+    setToDate(e.toDate?.slice(0, 10) || "");
+    setLeaveType(e.leaveType);
+    setError("");
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setFromDate(""); setToDate("");
+    setError("");
+  }
 
   useEffect(() => {
     if (!stationId) return;
@@ -463,14 +481,23 @@ function LeaveAbsenceTab({ stationId }) {
     setBusy(true);
     setError("");
     try {
-      const created = await leaveApi.requestLeave({ userId, leaveType, fromDate, toDate });
-      // This tab is an admin/manager tool for recording already-known leave
-      // directly onto the roster plan (matching the PWA's single-step "+Add
-      // Leave" with no separate approval step), so immediately approve it —
-      // the algorithm only ever reads APPROVED leave. If the actor doesn't
-      // have approval rights over this person, this 403s and the error
-      // surfaces rather than silently leaving it pending.
-      await leaveApi.decideLeave(created.id, "APPROVED");
+      if (editingId) {
+        // In-place correction — e.g. a deputation that was entered as
+        // ending the 20th actually runs to the 25th. Keeps the entry's
+        // existing APPROVED status rather than cancel + recreate, which
+        // would also lose its history/audit trail as one continuous record.
+        await leaveApi.updateLeave(editingId, { leaveType, fromDate, toDate });
+        setEditingId(null);
+      } else {
+        const created = await leaveApi.requestLeave({ userId, leaveType, fromDate, toDate });
+        // This tab is an admin/manager tool for recording already-known leave
+        // directly onto the roster plan (matching the PWA's single-step "+Add
+        // Leave" with no separate approval step), so immediately approve it —
+        // the algorithm only ever reads APPROVED leave. If the actor doesn't
+        // have approval rights over this person, this 403s and the error
+        // surfaces rather than silently leaving it pending.
+        await leaveApi.decideLeave(created.id, "APPROVED");
+      }
       setFromDate(""); setToDate("");
       loadEntries();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
@@ -484,6 +511,7 @@ function LeaveAbsenceTab({ stationId }) {
     if (!confirm("Remove this leave entry? This cancels the underlying leave request everywhere it's shown.")) return;
     try {
       await leaveApi.cancelLeave(id);
+      if (editingId === id) cancelEdit();
       loadEntries();
     } catch (err) { alert(`Failed: ${err.message}`); }
   }
@@ -508,15 +536,17 @@ function LeaveAbsenceTab({ stationId }) {
       <div className="two-col">
       <div>
         <div className="card">
-          <div className="card-title">🌴 Leave / Training / Deputation Entries for Target Month</div>
+          <div className="card-title">{editingId ? "✎ Edit Entry" : "🌴 Leave / Training / Deputation Entries for Target Month"}</div>
           <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-            Enter approved leave, scheduled training, or a staff member's deputation to another station. Any of these automatically marks the roster and blocks that staff member from being manually or auto-rostered on those dates — a deputed staff member is deducted from this station's available manpower for the period.
+            {editingId
+              ? "Changing dates or type here corrects this entry in place — it keeps its approved status and history, instead of cancelling and re-adding a brand-new one."
+              : "Enter approved leave, scheduled training, or a staff member's deputation to another station. Any of these automatically marks the roster and blocks that staff member from being manually or auto-rostered on those dates — a deputed staff member is deducted from this station's available manpower for the period."}
           </div>
           {error && <div className="ab red">{error}</div>}
           <div className="fg2" style={{ marginBottom: 10 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
-            <div className="fg"><label className="fl">Add For</label>
-              <select className="fi" value={userId} onChange={e => setUserId(e.target.value)}>
+            <div className="fg"><label className="fl">{editingId ? "For" : "Add For"}</label>
+              <select className="fi" value={userId} onChange={e => setUserId(e.target.value)} disabled={!!editingId} title={editingId ? "Who this entry belongs to can't be changed here — cancel it and add a new one for the right person instead." : undefined}>
                 {staff.map(s => <option key={s.id} value={s.id}>{s.fullName}</option>)}
               </select>
             </div>
@@ -531,7 +561,10 @@ function LeaveAbsenceTab({ stationId }) {
               {LEAVE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
-          <button className="btn btn-primary btn-sm" onClick={addLeave} disabled={busy}>＋ Add Entry</button>
+          <div style={{ display: "flex", gap: 7 }}>
+            <button className="btn btn-primary btn-sm" onClick={addLeave} disabled={busy}>{editingId ? "💾 Save Changes" : "＋ Add Entry"}</button>
+            {editingId && <button className="btn btn-ghost btn-sm" onClick={cancelEdit} disabled={busy}>Cancel</button>}
+          </div>
         </div>
         <div className="card" style={{ marginTop: 0 }}>
           <div className="card-title">📋 Entries This Month</div>
@@ -539,10 +572,13 @@ function LeaveAbsenceTab({ stationId }) {
             {!entries || entries.length === 0 ? (
               <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No entries for this month.</div>
             ) : entries.map(e => (
-              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)" }}>
+              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)", background: editingId === e.id ? "var(--navy-lite)" : undefined }}>
                 <span>{entryIcon(e.leaveType)} {e.user?.fullName || e.userId}</span>
                 <span style={{ color: "var(--text-dim)" }}>{e.leaveType} · {e.fromDate?.slice(0, 10)} → {e.toDate?.slice(0, 10)}</span>
-                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => removeLeave(e.id)} title="Cancel this entry">✕</button>
+                <span>
+                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => startEdit(e)} title="Edit this entry's dates or type">✎</button>
+                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => removeLeave(e.id)} title="Cancel this entry">✕</button>
+                </span>
               </div>
             ))}
           </div>
@@ -1307,6 +1343,15 @@ function GenerateTab({ stationId }) {
   const [applyLeave, setApplyLeave] = useState(true);
   const [continueFromPrevious, setContinueFromPrevious] = useState(true);
   const [aogBuffer, setAogBuffer] = useState(2);
+  // Partial-month regeneration — both blank means "the whole month", same
+  // as before this existed. Only meaningful when a roster already exists
+  // for monthKey (the backend 400s otherwise with a clear message): a
+  // mid-month duty/leave/deputation change can be pushed through without
+  // touching already-published or hand-edited days outside this window.
+  const [regenFromDate, setRegenFromDate] = useState("");
+  const [regenToDate, setRegenToDate] = useState("");
+  const regenOptions = { fromDate: regenFromDate || undefined, toDate: regenToDate || undefined };
+  const isWindowedRegen = !!(regenFromDate || regenToDate);
   const [plan, setPlan] = useState(null);
   const [preview, setPreview] = useState(null);
   const [applied, setApplied] = useState(null);
@@ -1336,7 +1381,7 @@ function GenerateTab({ stationId }) {
     setAnalysisBusy(true);
     setError("");
     try {
-      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
+      const previewResult = await rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, ...regenOptions });
       setPreview(previewResult);
     } catch (err) { setError(err.message); } finally { setAnalysisBusy(false); }
   }
@@ -1348,7 +1393,7 @@ function GenerateTab({ stationId }) {
     try {
       const [planResult, previewResult] = await Promise.all([
         planningApi.getManpowerPlan(stationId, monthKey, aogBuffer),
-        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer }),
+        rosterApi.generateRoster(stationId, monthKey, { preview: true, continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, ...regenOptions }),
       ]);
       setPlan(planResult);
       setPreview(previewResult);
@@ -1357,12 +1402,15 @@ function GenerateTab({ stationId }) {
 
   async function apply() {
     if (preview?.existingRosterExists) {
-      if (!confirm(`A roster already exists for ${monthKey} (may include manual edits).\n\nApplying now will REPLACE it with this newly generated roster. This cannot be undone.\n\nContinue?`)) return;
+      const msg = isWindowedRegen
+        ? `A roster already exists for ${monthKey}.\n\nApplying now will REPLACE only ${regenFromDate || "day 1"} → ${regenToDate || "month-end"} with this newly generated plan — every day outside that window is left exactly as it is. This cannot be undone.\n\nContinue?`
+        : `A roster already exists for ${monthKey} (may include manual edits).\n\nApplying now will REPLACE it with this newly generated roster. This cannot be undone.\n\nContinue?`;
+      if (!confirm(msg)) return;
     }
     setBusy(true);
     setError("");
     try {
-      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer });
+      const result = await rosterApi.generateRoster(stationId, monthKey, { continueFromPrevious, usePatterns, allowPatternOverride, applyLeave, aogBuffer, ...regenOptions });
       setApplied(result);
       // The button itself promises "Apply → Open Shift Roster" — this is
       // that promise kept: land on the exact month just generated (Shift
@@ -1556,7 +1604,7 @@ function GenerateTab({ stationId }) {
         <div className="card">
           <div className="card-title">🤖 Generate Roster</div>
           <div className="fg2" style={{ marginBottom: 12 }}>
-            <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setPlan(null); setPreview(null); setApplied(null); }} /></div>
+            <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setPlan(null); setPreview(null); setApplied(null); setRegenFromDate(""); setRegenToDate(""); }} /></div>
             <div className="fg"><label className="fl">Use defined patterns? <span className="help-tip" tabIndex={0} title="Both modes never pull anyone off their scheduled OFF day for routine coverage. A shortfall is first covered by moving a staff member already on duty elsewhere that day (above their shift's own mandatory minimum) onto the short-staffed shift, respecting rest-gap rules — e.g. a surplus Morning NCS covers an Afternoon shortfall. Strict: if that redistribution can't fully cover it, the gap is reported, not force-filled. Patterns + Automatic: adds one further, rare fallback — an UNLOCKED staff member's OFF day can be rostered as a flexi/exigency shift when redistribution genuinely finds nobody. A pattern-locked staff member's OFF day is never touched, in either mode.">ⓘ</span></label>
               <select className="fi" value={patternMode} onChange={e => setPatternMode(e.target.value)}>
                 <option value="strict">Yes — follow staff pattern assignments (strict)</option>
@@ -1579,8 +1627,23 @@ function GenerateTab({ stationId }) {
             </div>
             <div className="fg"><label className="fl">AOG Buffer (days) <span className="help-tip" tabIndex={0} title="Extra standby reserve for unplanned Aircraft-On-Ground events, entered as a number of DAYS of round-the-clock extra coverage for the month. Converted to man-hours (days x 24h) and spread evenly across the month the same way Task Master demand is, then added identically to B1, B2, CM, and NCS requirement — not B1 only. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
           </div>
+          <div className="fg2" style={{ marginBottom: 12 }}>
+            <div className="fg">
+              <label className="fl">Regenerate From <span className="help-tip" tabIndex={0} title="Leave both From/To blank to generate the whole month, same as always. Set these when a duty/leave/deputation change happened mid-month: only this window gets recomputed — every day outside it (already published, hand-edited, or simply not meant to change) is left exactly as it is. Requires a roster to already exist for this month.">ⓘ</span></label>
+              <input className="fi" type="date" min={`${monthKey}-01`} max={`${monthKey}-31`} value={regenFromDate} onChange={e => setRegenFromDate(e.target.value)} />
+            </div>
+            <div className="fg">
+              <label className="fl">…Till</label>
+              <input className="fi" type="date" min={regenFromDate || `${monthKey}-01`} max={`${monthKey}-31`} value={regenToDate} onChange={e => setRegenToDate(e.target.value)} placeholder="Defaults to month-end" />
+            </div>
+          </div>
+          {isWindowedRegen && (
+            <div className="ab amber" style={{ marginBottom: 12 }}>
+              ⚠ Only {regenFromDate || "day 1"} → {regenToDate || "month-end"} will be regenerated. Every other day this month keeps its current shifts untouched.
+            </div>
+          )}
           <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: 12, fontSize: 13 }} onClick={calculate} disabled={busy}>
-            {busy ? "Calculating…" : "🤖 Calculate & Generate Roster"}
+            {busy ? "Calculating…" : isWindowedRegen ? "🤖 Calculate & Regenerate Window" : "🤖 Calculate & Generate Roster"}
           </button>
         </div>
 
@@ -1641,8 +1704,8 @@ function GenerateTab({ stationId }) {
 
         {applied && (
           <div className="card" style={{ borderColor: "var(--rp-green)", marginTop: 12 }}>
-            <div className="card-title">✅ Applied — {monthKey} Roster Saved</div>
-            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts assigned, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
+            <div className="card-title">✅ Applied — {monthKey} Roster Saved{applied.regenWindow ? ` (days ${applied.regenWindow.fromDay}–${applied.regenWindow.toDay} only)` : ""}</div>
+            <div style={{ fontSize: 11 }}>{applied.staffCount} staff, {applied.assignmentCount} shifts {applied.regenWindow ? "re-assigned in this window" : "assigned"}, {sumShortfall(applied.violations)} critical coverage gap(s){applied.advisoryGaps?.length ? `, ${sumShortfall(applied.advisoryGaps)} advisory gap(s)` : ""}{applied.flexiAssignments?.length ? `, ${applied.flexiAssignments.length} flexi exigency fill(s)${countMandatoryFlexi(applied.flexiAssignments) ? ` (${countMandatoryFlexi(applied.flexiAssignments)} to meet a mandatory floor)` : ""}` : ""} remaining. Open <strong>Shift Roster</strong> to review or hand-edit individual cells, then Publish when ready.</div>
           </div>
         )}
         {applied && <ManhoursCard manhours={applied.manhours} title="Man-Hours — Available vs Expected (Saved Roster)" />}

@@ -3,7 +3,7 @@ const ctrl = require("../controllers/leaveController");
 const { requireAuth } = require("../middleware/auth");
 const { requirePermission, requireAnyPermission } = require("../middleware/rbac");
 const { validate, validateQuery } = require("../middleware/validate");
-const { requestLeaveSchema, decideLeaveSchema, leaveQuerySchema, teamCalendarQuerySchema } = require("../validators/leaveValidators");
+const { requestLeaveSchema, updateLeaveSchema, decideLeaveSchema, leaveQuerySchema, teamCalendarQuerySchema } = require("../validators/leaveValidators");
 
 const router = express.Router();
 router.use(requireAuth);
@@ -18,6 +18,7 @@ router.get(
 );
 router.post("/", requirePermission("leave", "request"), validate(requestLeaveSchema), ctrl.request);
 router.post("/:id/decide", requireAnyPermission(["leave", "approve"], ["leave", "approve_reports"]), validate(decideLeaveSchema), ctrl.decide);
+router.put("/:id", requireAnyPermission(["leave", "approve"], ["leave", "approve_reports"]), validate(updateLeaveSchema), ctrl.update);
 router.post("/:id/cancel", requirePermission("leave", "request"), ctrl.cancel);
 
 module.exports = router;

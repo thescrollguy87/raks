@@ -12,6 +12,17 @@ const requestLeaveSchema = z.object({
   reason: z.string().max(500).optional(),
 }).refine(d => d.fromDate <= d.toDate, { message: "fromDate must be on or before toDate", path: ["toDate"] });
 
+// A full replace of an existing entry's own fields (never a partial PATCH)
+// — same shape as requestLeaveSchema minus userId, since reassigning an
+// entry to a different staff member isn't an "edit"; that's cancel + a new
+// entry for the right person.
+const updateLeaveSchema = z.object({
+  leaveType: z.enum(LEAVE_TYPES),
+  fromDate: isoDate,
+  toDate: isoDate,
+  reason: z.string().max(500).optional(),
+}).refine(d => d.fromDate <= d.toDate, { message: "fromDate must be on or before toDate", path: ["toDate"] });
+
 const decideLeaveSchema = z.object({
   decision: z.enum(["APPROVED", "REJECTED"]),
   reason: z.string().max(500).optional(),
@@ -36,4 +47,4 @@ const teamCalendarQuerySchema = z.object({
   to: isoDate,
 });
 
-module.exports = { requestLeaveSchema, decideLeaveSchema, leaveQuerySchema, teamCalendarQuerySchema, LEAVE_TYPES };
+module.exports = { requestLeaveSchema, updateLeaveSchema, decideLeaveSchema, leaveQuerySchema, teamCalendarQuerySchema, LEAVE_TYPES };

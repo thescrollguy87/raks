@@ -21,6 +21,11 @@ const decide = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
+const update = asyncHandler(async (req, res) => {
+  const result = await leaveService.updateLeave(req.params.id, req.body, req.user, req);
+  res.json(result);
+});
+
 const cancel = asyncHandler(async (req, res) => {
   const result = await leaveService.cancelLeave(req.params.id, req.user, req);
   res.json(result);
@@ -78,4 +83,4 @@ const teamCalendar = asyncHandler(async (req, res) => {
   res.json({ items });
 });
 
-module.exports = { request, decide, cancel, list, balance, teamCalendar };
+module.exports = { request, decide, update, cancel, list, balance, teamCalendar };

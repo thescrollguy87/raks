@@ -17,6 +17,18 @@ function decide(id, status, approvedById, actorId, comment) {
   });
 }
 
+// Admin correction to an existing entry's own fields — distinct from
+// decide()/cancel() above, which only ever change `status`. Always a full
+// replace of these 4 fields (never a partial merge) — the validator
+// requires all of them, so the service always has a complete set to pass
+// through.
+function update(id, { leaveType, fromDate, toDate, reason }, actorId) {
+  return prisma.leave.update({
+    where: { id },
+    data: { leaveType, fromDate, toDate, reason: reason || null, updatedById: actorId, version: { increment: 1 } },
+  });
+}
+
 function cancel(id, actorId) {
   return prisma.leave.update({
     where: { id },
@@ -113,4 +125,4 @@ function approvedLeaveForStaffInRange(userIds, from, to) {
   });
 }
 
-module.exports = { create, findById, decide, cancel, findOverlapping, list, approvedLeavesForYear, approvedLeaveForStaffInRange, DEFAULT_ENTITLEMENT };
+module.exports = { create, findById, decide, update, cancel, findOverlapping, list, approvedLeavesForYear, approvedLeaveForStaffInRange, DEFAULT_ENTITLEMENT };

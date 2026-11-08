@@ -111,6 +111,54 @@ async function notifyLeaveDecisionAsync(leave, decision, reason, actor, req) {
   }
 }
 
+// Admin correction to an already-filed entry's own dates/type/reason — e.g.
+// a deputation that was entered as ending the 20th actually runs to the
+// 25th, or a "Leave" entry should really have been "Deputation". Distinct
+// from decide()/cancel(): those only ever change `status`; this leaves
+// status exactly as it was (an already-APPROVED entry an admin edits stays
+// APPROVED — the Leave & Absence tab's own entries are always entered
+// already-known and self-approved, so demoting them back to PENDING on a
+// routine date correction would just force the same person to immediately
+// re-approve their own edit). Gated the same way decideLeave is — a
+// station-wide approver can edit anyone at their station; an L1-Manager
+// (leave:approve_reports only) only their own direct reports — since
+// changing an APPROVED entry's effective dates is squarely an approver-
+// level action, not a self-service one.
+async function updateLeave(leaveId, body, actor, req) {
+  const leave = await leaveRepo.findById(leaveId);
+  if (!leave) throw ApiError.notFound("Leave request not found");
+  await assertOwnStation(actor, leave.user.stationId);
+
+  if (!actor.permissions?.includes("leave:approve")) {
+    const target = await userRepo.findStationAndManager(leave.userId);
+    if (target?.reportsToId !== actor.sub) {
+      throw ApiError.forbidden("You can only edit leave for your own direct reports");
+    }
+  }
+
+  if (!["PENDING", "APPROVED"].includes(leave.status)) {
+    throw ApiError.conflict(`Cannot edit a ${leave.status.toLowerCase()} leave entry`);
+  }
+
+  const fromDate = toDateOnly(body.fromDate);
+  const toDate = toDateOnly(body.toDate);
+  const overlap = await leaveRepo.findOverlapping(leave.userId, fromDate, toDate, leaveId);
+  if (overlap) throw ApiError.conflict("This overlaps an existing pending/approved leave for this person");
+
+  const before = { leaveType: leave.leaveType, fromDate: leave.fromDate, toDate: leave.toDate, reason: leave.reason };
+  const updated = await leaveRepo.update(leaveId, { leaveType: body.leaveType, fromDate, toDate, reason: body.reason }, actor.sub);
+  await auditTrail.recordUpdate(
+    "Leave", leaveId, leave.user.stationId, before,
+    { leaveType: body.leaveType, fromDate, toDate, reason: body.reason }, actor, req,
+  );
+  await auditTrail.logActivity(
+    "Leave entry edited",
+    `${leave.user.fullName}: ${before.leaveType} ${before.fromDate.toISOString().slice(0, 10)}→${before.toDate.toISOString().slice(0, 10)} changed to ${body.leaveType} ${body.fromDate}→${body.toDate}`,
+    leave.user.stationId, actor, req,
+  );
+  return updated;
+}
+
 async function cancelLeave(leaveId, actor, req) {
   const leave = await leaveRepo.findById(leaveId);
   if (!leave) throw ApiError.notFound("Leave request not found");
@@ -177,4 +225,4 @@ async function getTeamCalendar(actor, scope, from, to) {
   return result.items;
 }
 
-module.exports = { requestLeave, decideLeave, cancelLeave, listLeaves, getBalance, getTeamCalendar };
+module.exports = { requestLeave, decideLeave, updateLeave, cancelLeave, listLeaves, getBalance, getTeamCalendar };
