@@ -527,6 +527,11 @@ function LeaveAbsenceTab({ stationId }) {
   for (const e of leaveEntries) (byLeaveType[e.leaveType] ??= []).push(e);
 
   function entryIcon(type) { return type === "TRAINING" ? "🎓" : type === "DEPUTATION" ? "🔁" : "🏖"; }
+  function entryPillClass(type) { return type === "TRAINING" ? "pill-sky" : type === "DEPUTATION" ? "pill-brand" : "pill-neutral"; }
+  function initials(name) {
+    const parts = (name || "").trim().split(/\s+/);
+    return ((parts[0]?.[0] || "") + (parts[1]?.[0] || parts[0]?.[1] || "")).toUpperCase();
+  }
 
   return (
     <>
@@ -536,12 +541,14 @@ function LeaveAbsenceTab({ stationId }) {
       <div className="two-col">
       <div>
         <div className="card">
-          <div className="card-title">{editingId ? "✎ Edit Entry" : "🌴 Leave / Training / Deputation Entries for Target Month"}</div>
-          <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
-            {editingId
-              ? "Changing dates or type here corrects this entry in place — it keeps its approved status and history, instead of cancelling and re-adding a brand-new one."
-              : "Enter approved leave, scheduled training, or a staff member's deputation to another station. Any of these automatically marks the roster and blocks that staff member from being manually or auto-rostered on those dates — a deputed staff member is deducted from this station's available manpower for the period."}
-          </div>
+          <div className="card-title">{editingId ? "Entry Details" : "🌴 Leave / Training / Deputation Entries for Target Month"}</div>
+          {editingId ? (
+            <div className="editing-banner">✎ Editing <b>{staff.find(s => s.id === userId)?.fullName || "this entry"}</b>'s entry — change the dates or type below and save, or cancel to add a new one instead.</div>
+          ) : (
+            <div style={{ fontSize: 10, color: "var(--text-dim)", marginBottom: 10 }}>
+              Enter approved leave, scheduled training, or a staff member's deputation to another station. Any of these automatically marks the roster and blocks that staff member from being manually or auto-rostered on those dates — a deputed staff member is deducted from this station's available manpower for the period.
+            </div>
+          )}
           {error && <div className="ab red">{error}</div>}
           <div className="fg2" style={{ marginBottom: 10 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => setMonthKey(e.target.value)} /></div>
@@ -557,9 +564,13 @@ function LeaveAbsenceTab({ stationId }) {
           </div>
           <div className="fg" style={{ marginBottom: 10 }}>
             <label className="fl">Type</label>
-            <select className="fi" value={leaveType} onChange={e => setLeaveType(e.target.value)}>
-              {LEAVE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {LEAVE_TYPE_OPTIONS.map(o => (
+                <button key={o.value} type="button" className={`chip-btn${leaveType === o.value ? " active" : ""}`} onClick={() => setLeaveType(o.value)}>
+                  {entryIcon(o.value)} {o.label.split(" — ")[0]}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{ display: "flex", gap: 7 }}>
             <button className="btn btn-primary btn-sm" onClick={addLeave} disabled={busy}>{editingId ? "💾 Save Changes" : "＋ Add Entry"}</button>
@@ -572,12 +583,17 @@ function LeaveAbsenceTab({ stationId }) {
             {!entries || entries.length === 0 ? (
               <div style={{ fontSize: 11, color: "var(--text-dim)" }}>No entries for this month.</div>
             ) : entries.map(e => (
-              <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, padding: "5px 0", borderBottom: "1px solid var(--border)", background: editingId === e.id ? "var(--navy-lite)" : undefined }}>
-                <span>{entryIcon(e.leaveType)} {e.user?.fullName || e.userId}</span>
-                <span style={{ color: "var(--text-dim)" }}>{e.leaveType} · {e.fromDate?.slice(0, 10)} → {e.toDate?.slice(0, 10)}</span>
-                <span>
-                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={() => startEdit(e)} title="Edit this entry's dates or type">✎</button>
-                  <button className="btn btn-ghost btn-sm" style={{ marginLeft: 4 }} onClick={() => removeLeave(e.id)} title="Cancel this entry">✕</button>
+              <div key={e.id} className="entry-row" style={{ background: editingId === e.id ? "var(--navy-lite)" : undefined, borderRadius: editingId === e.id ? 8 : 0 }}>
+                <span className="avatar-chip">{initials(e.user?.fullName || e.userId)}</span>
+                <div className="er-who">
+                  <div className="er-name">{e.user?.fullName || e.userId}</div>
+                  <div className="er-role">{e.user?.category || ""}</div>
+                </div>
+                <span className={`pill ${entryPillClass(e.leaveType)}`}>{entryIcon(e.leaveType)} {e.leaveType}</span>
+                <span className="er-dates">{e.fromDate?.slice(0, 10)} → {e.toDate?.slice(0, 10)}</span>
+                <span className="er-acts">
+                  <button className="btn btn-ghost btn-sm" onClick={() => startEdit(e)} title="Edit this entry's dates or type">✎</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => removeLeave(e.id)} title="Cancel this entry">✕</button>
                 </span>
               </div>
             ))}
@@ -1602,47 +1618,73 @@ function GenerateTab({ stationId }) {
     <div className="two-col">
       <div>
         <div className="card">
-          <div className="card-title">🤖 Generate Roster</div>
-          <div className="fg2" style={{ marginBottom: 12 }}>
+          <div className="card-title">1 · Scope</div>
+          <div className="fg2" style={{ marginBottom: 4 }}>
             <div className="fg"><label className="fl">Target Month</label><input className="fi" type="month" value={monthKey} onChange={e => { setMonthKey(e.target.value); setPlan(null); setPreview(null); setApplied(null); setRegenFromDate(""); setRegenToDate(""); }} /></div>
-            <div className="fg"><label className="fl">Use defined patterns? <span className="help-tip" tabIndex={0} title="Both modes never pull anyone off their scheduled OFF day for routine coverage. A shortfall is first covered by moving a staff member already on duty elsewhere that day (above their shift's own mandatory minimum) onto the short-staffed shift, respecting rest-gap rules — e.g. a surplus Morning NCS covers an Afternoon shortfall. Strict: if that redistribution can't fully cover it, the gap is reported, not force-filled. Patterns + Automatic: adds one further, rare fallback — an UNLOCKED staff member's OFF day can be rostered as a flexi/exigency shift when redistribution genuinely finds nobody. A pattern-locked staff member's OFF day is never touched, in either mode.">ⓘ</span></label>
-              <select className="fi" value={patternMode} onChange={e => setPatternMode(e.target.value)}>
-                <option value="strict">Yes — follow staff pattern assignments (strict)</option>
-                <option value="hybrid">Yes — patterns + automatic override for gaps</option>
-                <option value="off">No — auto-distribute by workload only</option>
-              </select>
-            </div>
-            <div className="fg"><label className="fl">Apply leave entries?</label>
-              <select className="fi" value={applyLeave ? "1" : "0"} onChange={e => setApplyLeave(e.target.value === "1")}>
-                <option value="1">Yes — block leave days automatically</option>
-                <option value="0">No — ignore leave entries</option>
-              </select>
-            </div>
-            <div className="fg">
-              <label className="fl">Continue from Previous Roster? <span className="help-tip" tabIndex={0} title="ON: looks at how each staff member's PREVIOUS month ended (their last 2-3 shifts) and continues the rotation from there. OFF: every staff member starts fresh from day 1.">ⓘ</span></label>
-              <select className="fi" value={continueFromPrevious ? "1" : "0"} onChange={e => setContinueFromPrevious(e.target.value === "1")}>
-                <option value="1">Yes — continue rotation & rest rules from last month (recommended)</option>
-                <option value="0">No — start a completely new cycle</option>
-              </select>
-            </div>
-            <div className="fg"><label className="fl">AOG Buffer (days) <span className="help-tip" tabIndex={0} title="Extra standby reserve for unplanned Aircraft-On-Ground events, entered as a number of DAYS of round-the-clock extra coverage for the month. Converted to man-hours (days x 24h) and spread evenly across the month the same way Task Master demand is, then added identically to B1, B2, CM, and NCS requirement — not B1 only. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></label><input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} /></div>
           </div>
-          <div className="fg2" style={{ marginBottom: 12 }}>
-            <div className="fg">
-              <label className="fl">Regenerate From <span className="help-tip" tabIndex={0} title="Leave both From/To blank to generate the whole month, same as always. Set these when a duty/leave/deputation change happened mid-month: only this window gets recomputed — every day outside it (already published, hand-edited, or simply not meant to change) is left exactly as it is. Requires a roster to already exist for this month.">ⓘ</span></label>
-              <input className="fi" type="date" min={`${monthKey}-01`} max={`${monthKey}-31`} value={regenFromDate} onChange={e => setRegenFromDate(e.target.value)} />
+          <div className="toggle-row">
+            <div>
+              <div className="toggle-row-t">Regenerate a window only</div>
+              <div className="toggle-row-d">Leave off to generate the whole month, same as always. Requires a roster to already exist for this month.</div>
             </div>
-            <div className="fg">
-              <label className="fl">…Till</label>
-              <input className="fi" type="date" min={regenFromDate || `${monthKey}-01`} max={`${monthKey}-31`} value={regenToDate} onChange={e => setRegenToDate(e.target.value)} placeholder="Defaults to month-end" />
-            </div>
+            <button type="button" className="toggle-switch" role="switch" aria-pressed={isWindowedRegen} onClick={() => {
+              if (isWindowedRegen) { setRegenFromDate(""); setRegenToDate(""); }
+              else { const today = new Date().toISOString().slice(0, 10); setRegenFromDate(today.startsWith(monthKey) ? today : `${monthKey}-15`); }
+            }} />
           </div>
           {isWindowedRegen && (
-            <div className="ab amber" style={{ marginBottom: 12 }}>
-              ⚠ Only {regenFromDate || "day 1"} → {regenToDate || "month-end"} will be regenerated. Every other day this month keeps its current shifts untouched.
-            </div>
+            <>
+              <div className="fg2" style={{ marginTop: 10 }}>
+                <div className="fg"><label className="fl">From</label>
+                  <input className="fi" type="date" min={`${monthKey}-01`} max={`${monthKey}-31`} value={regenFromDate} onChange={e => setRegenFromDate(e.target.value)} />
+                </div>
+                <div className="fg"><label className="fl">…Till</label>
+                  <input className="fi" type="date" min={regenFromDate || `${monthKey}-01`} max={`${monthKey}-31`} value={regenToDate} onChange={e => setRegenToDate(e.target.value)} placeholder="Defaults to month-end" />
+                </div>
+              </div>
+              <div className="ab amber" style={{ marginTop: 10, marginBottom: 0 }}>
+                ⚠ Only {regenFromDate || "day 1"} → {regenToDate || "month-end"} will be regenerated. Every other day this month keeps its current shifts untouched.
+              </div>
+            </>
           )}
-          <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: 12, fontSize: 13 }} onClick={calculate} disabled={busy}>
+        </div>
+
+        <div className="card">
+          <div className="card-title">2 · Rules</div>
+          <div style={{ fontSize: 11, color: "var(--text-dim)", marginBottom: 10 }}>
+            How strictly generated shifts should follow each staff member's assigned Staff Allocation pattern. Neither mode ever pulls anyone off their scheduled OFF day for routine coverage — a shortfall is covered first by moving someone already on duty elsewhere that day, above their own shift's mandatory minimum.
+          </div>
+          <div className="option-tiles" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <button type="button" className={`option-tile${patternMode === "off" ? " active" : ""}`} onClick={() => setPatternMode("off")}>
+              <div className="ot-t">⚡ Auto-distribute</div>
+              <div className="ot-d">Ignore patterns, balance purely by workload.</div>
+            </button>
+            <button type="button" className={`option-tile${patternMode === "strict" ? " active" : ""}`} onClick={() => setPatternMode("strict")}>
+              <div className="ot-t">📋 Follow patterns</div>
+              <div className="ot-d">Honour assignments; report gaps rather than force-fill.</div>
+            </button>
+            <button type="button" className={`option-tile${patternMode === "hybrid" ? " active" : ""}`} onClick={() => setPatternMode("hybrid")}>
+              <div className="ot-t">🤖 Patterns + automatic</div>
+              <div className="ot-d">Same, plus a last-resort off-day fill for real gaps.</div>
+            </button>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-title">3 · Safety Nets</div>
+          <div className="toggle-row">
+            <div><div className="toggle-row-t">Apply leave entries</div><div className="toggle-row-d">Block leave/training/deputation days automatically — the generator never rosters over them.</div></div>
+            <button type="button" className="toggle-switch" role="switch" aria-pressed={applyLeave} onClick={() => setApplyLeave(v => !v)} />
+          </div>
+          <div className="toggle-row">
+            <div><div className="toggle-row-t">Continue from Previous Roster</div><div className="toggle-row-d">Resume each staff member's real rotation phase and rest-gap history from last month, instead of starting everyone fresh.</div></div>
+            <button type="button" className="toggle-switch" role="switch" aria-pressed={continueFromPrevious} onClick={() => setContinueFromPrevious(v => !v)} />
+          </div>
+          <div className="toggle-row">
+            <div><div className="toggle-row-t">AOG Buffer (days) <span className="help-tip" tabIndex={0} title="Extra standby reserve for unplanned Aircraft-On-Ground events, entered as a number of DAYS of round-the-clock extra coverage for the month. Converted to man-hours (days x 24h) and spread evenly across the month the same way Task Master demand is, then added identically to B1, B2, CM, and NCS requirement — not B1 only. Feeds both the Explainable Workload Analysis and the actual generated roster.">ⓘ</span></div></div>
+            <input className="fi" type="number" min="0" value={aogBuffer} onChange={e => setAogBuffer(e.target.value)} style={{ width: 64, textAlign: "center", flexShrink: 0 }} />
+          </div>
+          <button className="btn btn-primary" style={{ width: "100%", justifyContent: "center", padding: 12, fontSize: 13, marginTop: 14 }} onClick={calculate} disabled={busy}>
             {busy ? "Calculating…" : isWindowedRegen ? "🤖 Calculate & Regenerate Window" : "🤖 Calculate & Generate Roster"}
           </button>
         </div>

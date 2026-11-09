@@ -65,6 +65,10 @@ function computeNightRestViolations(assignmentsByDay, shiftDefByCode) {
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
+// Groups the shift legend by family — a shift definition's own `type`
+// already carries this distinction, so no new per-code mapping is needed.
+const LEGEND_GROUP_BY_TYPE = { duty: "Duty", night: "Duty", off: "Rest", leave: "Away", training: "Away", deputation: "Away" };
+const LEGEND_GROUP_ORDER = ["Duty", "Rest", "Away", "Other"];
 
 // Mirrors creditedCategories in the backend's rosterGenerationAlgorithm.js
 // exactly. An earlier version of both this and the backend's function
@@ -826,10 +830,12 @@ export default function RosterPage() {
           <span style={{ fontSize: 12, fontWeight: 700, minWidth: 88, textAlign: "center" }}>{monthLabel(monthKey)}</span>
           <button onClick={() => setMonthKey(m => shiftMonth(m, 1))} style={navBtnStyle}>›</button>
         </div>
-        <select className="fi" style={{ width: 170, fontSize: 11 }} value={catFilter} onChange={(e) => setCatFilter(e.target.value)}>
-          <option value="ALL">All Categories</option>
-          {CATEGORIES.map(c => <option key={c} value={c}>{CAT_LABELS[c]}</option>)}
-        </select>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} role="group" aria-label="Category filter">
+          <button type="button" className={`chip-btn${catFilter === "ALL" ? " active" : ""}`} onClick={() => setCatFilter("ALL")}>All</button>
+          {CATEGORIES.map(c => (
+            <button key={c} type="button" className={`chip-btn${catFilter === c ? " active" : ""}`} onClick={() => setCatFilter(c)} title={CAT_LABELS[c]}>{c}</button>
+          ))}
+        </div>
         <input
           className="fi" style={{ width: 200, fontSize: 11 }} type="text" placeholder="🔍 Search staff…"
           value={search} onChange={(e) => setSearch(e.target.value)}
@@ -852,18 +858,30 @@ export default function RosterPage() {
         <StatCard tone={kpi.coveragePct >= 90 ? "green" : kpi.coveragePct >= 70 ? "amber" : "red"} icon="📈" label="Coverage" value={`${kpi.coveragePct}%`} />
       </div>
 
-      {/* Shift legend */}
+      {/* Shift legend — grouped by family rather than one flat row, so a
+          station with a dozen custom codes still reads at a glance. */}
       {legendDefs.length > 0 && (
         <div className="card" style={{ padding: "10px 14px" }}>
-          <div className="legend-row">
-            {legendDefs.map(d => (
-              <div key={d.code} className="legend-chip">
-                <span className="legend-swatch" style={{ background: d.color }} />
-                <span className="legend-code">{d.code}</span>
-                <span>{d.name}</span>
-                {d.startTime && <span className="legend-time">{d.startTime}–{d.endTime}</span>}
-              </div>
-            ))}
+          <div className="legend-group-wrap">
+            {LEGEND_GROUP_ORDER.map(group => {
+              const defs = legendDefs.filter(d => (LEGEND_GROUP_BY_TYPE[d.type] || "Other") === group);
+              if (!defs.length) return null;
+              return (
+                <div key={group}>
+                  <div className="legend-group-label">{group}</div>
+                  <div className="legend-group-chips">
+                    {defs.map(d => (
+                      <div key={d.code} className="legend-chip">
+                        <span className="legend-swatch" style={{ background: d.color }} />
+                        <span className="legend-code">{d.code}</span>
+                        <span>{d.name}</span>
+                        {d.startTime && <span className="legend-time">{d.startTime}–{d.endTime}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
