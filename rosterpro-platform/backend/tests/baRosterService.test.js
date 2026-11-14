@@ -94,6 +94,54 @@ describe("baRosterService.buildBARosterRows", () => {
     expect(rows[0][0]).toBe("700577");
   });
 
+  // A Break Shift (or any split-duty code) has two real duty windows the
+  // same day, with a genuine break in between — in1/out1 for the first,
+  // in2/out2 for the second. The portal's own row format has no "second
+  // segment" columns, so the second window must come through as a SECOND
+  // row for the same employee/date, not get silently dropped.
+  it("emits a second row for a Break Shift's second in/out segment (in2/out2)", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      {
+        id: "s1", fullName: "Rakesh Patel", category: "B1", employeeId: "700577",
+        shiftAssignments: [
+          {
+            shiftDate: new Date("2026-09-05T00:00:00.000Z"),
+            shiftDef: { code: "BS", name: "Break Shift", type: "duty", startTime: "06:30", endTime: "21:30" },
+            in1: "06:30", out1: "10:30", in2: "17:30", out2: "21:30",
+          },
+        ],
+      },
+    ]);
+
+    const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
+
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual(["700577", 5, 9, 2026, 5, 9, 2026, "Ground Staff", "0630", "1030"]);
+    expect(rows[1]).toEqual(["700577", 5, 9, 2026, 5, 9, 2026, "Ground Staff", "1730", "2130"]);
+  });
+
+  it("emits only one row when in2/out2 aren't both set (no partial second segment)", async () => {
+    rosterRepo.findRosterByStationAndMonth.mockResolvedValue({ id: "roster-1" });
+    rosterRepo.getRosterGrid.mockResolvedValue([
+      {
+        id: "s1", fullName: "Rakesh Patel", category: "B1", employeeId: "700577",
+        shiftAssignments: [
+          {
+            shiftDate: new Date("2026-09-05T00:00:00.000Z"),
+            shiftDef: { code: "BS", name: "Break Shift", type: "duty", startTime: "06:30", endTime: "21:30" },
+            in1: "06:30", out1: "10:30", in2: "17:30", out2: null,
+          },
+        ],
+      },
+    ]);
+
+    const rows = await baRosterService.buildBARosterRows("station-1", "2026-09-05");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(["700577", 5, 9, 2026, 5, 9, 2026, "Ground Staff", "0630", "1030"]);
+  });
+
   // Stores (STO) staff don't go airside and were never put through the
   // airport's own ground-staff access test this portal gates on —
   // confirmed directly with the user: they must never appear in this

@@ -110,6 +110,24 @@ async function buildBARosterRows(stationId, fromDateStr, toDateStr = fromDateStr
         SHIFT_ROLE,
         toBATime(startTime), toBATime(endTime),
       ]);
+
+      // Break Shift (and any other split-duty code) has a SECOND real duty
+      // window the same day — in2/out2 — with a genuine break in between
+      // (the staff member isn't on the premises during that gap, unlike an
+      // ordinary single-shift meal break). The portal's own format has no
+      // "second segment" columns, so the second window is a second row for
+      // the same employee/date, exactly like the first — this is what
+      // actually gets both check-in/out pairs into the export, rather than
+      // silently dropping the second one the way a single row would.
+      if (todayShift.in2 && todayShift.out2) {
+        rows.push([
+          s.employeeId,
+          d, m, y,
+          d, m, y,
+          SHIFT_ROLE,
+          toBATime(todayShift.in2), toBATime(todayShift.out2),
+        ]);
+      }
     }
   }
 
