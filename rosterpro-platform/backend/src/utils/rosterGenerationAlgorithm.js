@@ -674,7 +674,23 @@ function buildRosterAssignments({
   function codeAt(s, d, day, shift) {
     if (d === day) return shift;
     if (d >= 1 && d <= nDays) return grid[s.id]?.[d - 1];
-    if (d < 1) { const idx = -d; const tail = tailByUser?.[s.id]; return idx <= 2 ? tail?.[idx] : undefined; }
+    // Before day 1: read as far back into tailByUser's real previous-month
+    // history as it actually goes (buildContinuationTails provides 7 real
+    // days), not just 2. The old `idx <= 2` cap silently treated day -3 and
+    // earlier as "unknown, don't block" even when the real code for that
+    // day was sitting right there in the tail — undercounting a genuinely
+    // longer consecutive-duty run or a real pre-month-boundary workday's
+    // hours whenever violatesMaxConsecutiveDuty/violatesNightPairRest/
+    // violatesWeeklyHours (the only callers of codeAt) needed to look back
+    // more than 2 days to see it. Confirmed directly: a staff member who
+    // finished November on a real 4-day working run (M,M,A,A) was
+    // redistributed onto Afternoon again for December's first days,
+    // extending that run to 7-8 consecutive working days with no rest in
+    // between — restGapOk approved the move because it could only see 2 of
+    // the 4 real November days that made the move unsafe. A stored `null`
+    // (no real record at all — a brand-new hire) still reads as unknown,
+    // exactly as before.
+    if (d < 1) { const idx = -d; const tail = tailByUser?.[s.id]; const code = tail && idx < tail.length ? tail[idx] : undefined; return code ?? undefined; }
     return undefined;
   }
   function workingAt(s, d, day, shift) {

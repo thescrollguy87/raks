@@ -1231,6 +1231,63 @@ describe("buildRosterAssignments — 6-consecutive-day duty-time cap (never sile
   });
 });
 
+describe("buildRosterAssignments — cross-month rest-gap lookback uses the FULL previous-month tail, not just 2 days", () => {
+  it("refuses to redistribute a staff member into a shift that would extend a real cross-month working run past 6 consecutive days, using all 7 real tail days", () => {
+    // Confirmed directly against a live roster: a staff member finished
+    // November on a real 4-day working run (M, M, A, A) — tail days 4-1 are
+    // all duty, tail day 5 (further back) is OFF. With only a 2-day
+    // cross-month lookback, redistribution could see Nov's last 2 days
+    // (A, A) but not Nov's 3rd/4th-to-last day, so it had no way to know a
+    // longer real run was already in progress — and happily extended it
+    // into December's Afternoon demand (days 1-2), then December's Night
+    // demand (days 3-4), creating an un-rested 8-day run with two Night
+    // shifts at the end and nothing stopping it.
+    const staff = [{ id: "sumbhav", category: "B1" }, { id: "other", category: "B1" }];
+    const tailByUser = {
+      // [last, 2nd-last, 3rd-last, 4th-last, 5th-last, ...] — the real Nov
+      // 27-30 run (M,M,A,A) plus a genuine OFF day (Nov 26) before it.
+      sumbhav: ["A", "A", "M", "M", "O", "O", "M"],
+      other: ["O", "O", "O"],
+    };
+    // "other" is on leave the whole window so they can never be the donor —
+    // isolates whether Sumbhav himself gets pulled unsafely.
+    const leaveByUserDay = { other: new Map([[1, "ANNUAL"], [2, "ANNUAL"], [3, "ANNUAL"], [4, "ANNUAL"]]) };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const advisoryDemand = {
+      1: { A: { B1: 1 } }, 2: { A: { B1: 1 } }, 3: { N: { B1: 1 } }, 4: { N: { B1: 1 } },
+    };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay, blockedUserIds: [], tailByUser, mandatoryCoverageConfig, advisoryDemand,
+      allowPatternOverrideForCoverage: true,
+    });
+    const sumbhavCodes = result.assignments.filter(a => a.userId === "sumbhav").sort((a, b) => a.day - b.day).map(a => a.code);
+    // Days 1-2 (Afternoon) are still safe redistributions — Nov 27-30 plus
+    // Dec 1-2 is exactly 6 consecutive days, right at (not over) the cap.
+    expect(sumbhavCodes[0]).toBe("A");
+    expect(sumbhavCodes[1]).toBe("A");
+    // But days 3-4 (Night) would push the SAME real run to 7 and 8
+    // consecutive days — correctly refused now that the full 7-day tail is
+    // visible, honestly reported as an unmet advisory gap instead of a
+    // fabricated, unsafe assignment.
+    expect(sumbhavCodes[2]).not.toBe("N");
+    expect(sumbhavCodes[3]).not.toBe("N");
+    expect(result.advisoryGaps.some(g => g.day === 3 && g.shift === "N")).toBe(true);
+    expect(result.advisoryGaps.some(g => g.day === 4 && g.shift === "N")).toBe(true);
+  });
+
+  it("the base cycle's own resync still correctly continues from the full real tail (sanity check — Step 1 was never the problem)", () => {
+    const staff = [{ id: "sumbhav", category: "B1" }];
+    const tailByUser = { sumbhav: ["A", "A", "M", "M", "O", "O", "M"] };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], tailByUser, mandatoryCoverageConfig,
+    });
+    // Nov ended "...M, A, A" — the next legal step in the 8-day ROTATION
+    // cycle (M,M,A,A,N,N,O,O) is Night, not another Afternoon.
+    expect(result.assignments.map(a => a.code)).toEqual(["N", "N", "O", "O"]);
+  });
+});
+
 describe("buildRosterAssignments — night-pair rest survives a NEIGHBORING redistribution/flexi move", () => {
   it("never lets a flexi pull orphan an already-fixed Night into a pair with insufficient rest, even when an EARLIER unrelated move set up the conditions", () => {
     // Confirmed live (Workload-only mode, 4 of 37 staff): redistributing
