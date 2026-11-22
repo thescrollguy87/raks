@@ -1082,6 +1082,46 @@ describe("buildRosterAssignments — resync collision guard (a deliberately stag
     expect(codesFor("a")).toEqual(["N", "N", "O", "O"]);
     expect(codesFor("b")).toEqual(["N", "N", "O", "O"]);
   });
+
+  it("a collision between ONE pair on a widely-shared pattern never disables resync for everyone else sharing that pattern", () => {
+    // Confirmed directly against a live station: a popular named pattern
+    // (e.g. "P1: Standard 8-day") is routinely held by a dozen-plus staff,
+    // each with their own Cycle Start Day. The guard used to null
+    // resyncStart for the WHOLE group the instant it found a single
+    // colliding pair anywhere in it — so one unrelated collision wiped out
+    // real-history continuity for every other staff member on that
+    // pattern too, even ones whose own resync was perfectly correct and
+    // in no conflict with anyone. It must now affect ONLY the actual
+    // colliding pair.
+    const cycle = ["M", "M", "A", "A", "N", "N", "O", "O"];
+    const staff = [
+      { id: "collider1", category: "B1" }, { id: "collider2", category: "B1" },
+      { id: "clean1", category: "B1" }, { id: "clean2", category: "B1" }, { id: "clean3", category: "B1" },
+    ];
+    const patternByUser = {
+      collider1: { codes: cycle, offset: 0 }, collider2: { codes: cycle, offset: 2 },
+      clean1: { codes: cycle, offset: 6 }, clean2: { codes: cycle, offset: 4 }, clean3: { codes: cycle, offset: 1 },
+    };
+    const tailByUser = {
+      collider1: ["A", "A", "M", "M", "O", "O", "M"],
+      collider2: ["A", "A", "M", "M", "O", "O", "M"], // identical to collider1 -> a real collision
+      clean1: ["N", "N", "O", "O", "M", "M", "A"],
+      clean2: ["O", "O", "M", "M", "A", "A", "N"],
+      clean3: ["M", "A", "A", "N", "N", "O", "O"],
+    };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], tailByUser, patternByUser, mandatoryCoverageConfig,
+    });
+    const codesFor = (id) => result.assignments.filter(a => a.userId === id).map(a => a.code);
+    // The colliding pair diverge from each other (the guard did its job).
+    expect(codesFor("collider1")).not.toEqual(codesFor("collider2"));
+    // Everyone else resyncs correctly from their OWN real tail, exactly as
+    // if the collision elsewhere in the group never happened.
+    expect(codesFor("clean1")).toEqual(["O", "O", "M", "M"]);
+    expect(codesFor("clean2")).toEqual(["M", "M", "A", "A"]);
+    expect(codesFor("clean3")).toEqual(["M", "A", "A", "N"]);
+  });
 });
 
 describe("buildRosterAssignments — General-pattern staff reachable by Mandatory coverage (live Deputation-overlap scenario)", () => {

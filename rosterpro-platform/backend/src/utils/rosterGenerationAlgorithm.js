@@ -562,8 +562,17 @@ function buildRosterAssignments({
   // math below actually operates on, and is exactly as good a grouping key)
   // and, within any group of 2+ where two members configured DIFFERENT
   // Cycle Start Days but resync nonetheless put them on the SAME effective
-  // phase, discards resync for the whole group so every member falls back
-  // to their own configured offset instead.
+  // phase, discards resync ONLY for that specific colliding pair — never
+  // for the rest of a shared pattern's cohort. A popular named pattern
+  // (e.g. "P1: Standard 8-day") is routinely held by a dozen-plus staff,
+  // each with their own Cycle Start Day; nulling the WHOLE group the
+  // instant any single pair anywhere in it collided silently discarded
+  // correct, non-conflicting resync for everyone else in that pattern too —
+  // confirmed directly: a live station's entire P1 cohort came back with
+  // zero real-history continuity at all, not because every one of them
+  // individually collided, but because ONE unrelated pair sharing that
+  // cycle did, and the group-wide null caught everyone else in the blast
+  // radius.
   const resyncGroups = {};
   staff.forEach((s) => {
     const rec = perStaff[s.id];
@@ -573,16 +582,16 @@ function buildRosterAssignments({
   });
   Object.values(resyncGroups).forEach((ids) => {
     if (ids.length < 2) return;
-    let collision = false;
-    for (let i = 0; i < ids.length && !collision; i++) {
+    const collided = new Set();
+    for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const a = perStaff[ids[i]], b = perStaff[ids[j]];
         if (a.preferredOffset === b.preferredOffset) continue; // not meant to differ — nothing to protect
         const len = a.cycle.length;
-        if (a.resyncStart % len === b.resyncStart % len) { collision = true; break; }
+        if (a.resyncStart % len === b.resyncStart % len) { collided.add(ids[i]); collided.add(ids[j]); }
       }
     }
-    if (collision) ids.forEach((id) => { perStaff[id].resyncStart = null; });
+    collided.forEach((id) => { perStaff[id].resyncStart = null; });
   });
 
   staff.forEach((s) => {
