@@ -62,6 +62,54 @@ function computeNightRestViolations(assignmentsByDay, shiftDefByCode) {
   return violations;
 }
 
+// Same "fixed safety rule, checked unconditionally" philosophy as the other
+// two checks here — mirrors rosterGenerationAlgorithm.js's own
+// MAX_CONSECUTIVE_DUTY_DAYS (6), which the auto-generator enforces on every
+// candidate it considers. A MANUAL edit never goes through that algorithm
+// at all, so this is the only place a hand-edited roster's total
+// consecutive-working-day count (regardless of shift TYPE — Morning,
+// Afternoon, Night, General, all count the same way) ever gets checked.
+// This is deliberately independent of computeNightRestViolations above:
+// that one only counts NIGHT shifts specifically and resets to 0 on any
+// non-Night day, so a run like Morning,Morning,Morning,Morning,Afternoon,
+// Afternoon,Night,Night (8 consecutive working days, only the last 2 of
+// which are Night) never trips it — confirmed directly: exactly this
+// sequence was hand-edited into a live roster with no warning shown
+// anywhere, since the Night-specific, hour-gap, and weekly-total checks
+// each individually pass it.
+const MAX_CONSECUTIVE_DUTY_DAYS = 6;
+function computeConsecutiveDutyViolations(assignmentsByDay, shiftDefByCode) {
+  const codes = assignmentsByDay.map(a => a?.shiftDef.code || "O");
+  const isWorkingCode = code => { const t = shiftDefByCode[code]?.type; return t === "duty" || t === "night"; };
+  const isNightCode = code => shiftDefByCode[code]?.type === "night";
+  const violations = new Array(codes.length).fill(null);
+  let run = 0, runHadNight = false;
+  for (let i = 0; i < codes.length; i++) {
+    if (isWorkingCode(codes[i])) {
+      run++;
+      if (isNightCode(codes[i])) runHadNight = true;
+      if (run > MAX_CONSECUTIVE_DUTY_DAYS) {
+        violations[i] = `${run} consecutive working days — exceeds the maximum of ${MAX_CONSECUTIVE_DUTY_DAYS} in a row without a rest break`;
+      }
+    } else {
+      // A maxed-out run needs 2 full rest days if it included any Night,
+      // 1 otherwise — same rule rosterGenerationAlgorithm.js's own
+      // violatesMaxConsecutiveDuty enforces during auto-generation.
+      if (run >= MAX_CONSECUTIVE_DUTY_DAYS) {
+        const required = runHadNight ? 2 : 1;
+        for (let k = i; k < Math.min(codes.length, i + required); k++) {
+          const restDaysServed = k - i;
+          if (isWorkingCode(codes[k]) && !violations[k]) {
+            violations[k] = `Working here after only ${restDaysServed} rest day${restDaysServed === 1 ? "" : "s"} following ${run} consecutive working days — ${required} full rest day${required === 1 ? "" : "s"} required`;
+          }
+        }
+      }
+      run = 0; runHadNight = false;
+    }
+  }
+  return violations;
+}
+
 const CATEGORIES = ["B1", "B2", "CM", "NCS", "STO"];
 const CAT_LABELS = { B1: "B1 AME", B2: "B2 AME", CM: "Certifying Mechanic", NCS: "NCS / Tech", STO: "Stores" };
 const SHIFT_KEYS = [{ key: "M", label: "Morning" }, { key: "A", label: "Afternoon" }, { key: "N", label: "Night" }];
@@ -1243,6 +1291,7 @@ const RosterRow = memo(function RosterRow({
     return shiftAssignments.find(sa => new Date(sa.shiftDate).toISOString().slice(0, 10) === dateStr);
   });
   const nightRestViolations = computeNightRestViolations(assignmentsByDay, shiftDefByCode);
+  const consecutiveDutyViolations = computeConsecutiveDutyViolations(assignmentsByDay, shiftDefByCode);
   const blocks = weekBlocks(nDays);
   const weekHours = blocks.map(([from, to]) => {
     let hrs = 0;
@@ -1316,7 +1365,8 @@ const RosterRow = memo(function RosterRow({
         // pass the hour-gap check easily (a full day between shift ends),
         // so that check alone never catches an excessive Night run.
         const nightViolation = !isBlocked ? nightRestViolations[day - 1] : null;
-        const violationMsg = nightViolation || restViolation;
+        const dutyRunViolation = !isBlocked ? consecutiveDutyViolations[day - 1] : null;
+        const violationMsg = nightViolation || dutyRunViolation || restViolation;
 
         // A display-only overlay — the real shift assignment underneath
         // (assignmentsByDay, used for weekHours/totalHours above) is never
