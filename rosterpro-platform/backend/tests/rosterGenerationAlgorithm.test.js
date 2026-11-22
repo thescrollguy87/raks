@@ -1425,6 +1425,70 @@ describe("buildRosterAssignments — 48-hour rolling weekly cap", () => {
   });
 });
 
+describe("buildRosterAssignments — generic 11-hour minimum rest gap (shiftTimesByCode)", () => {
+  // Confirmed directly against a live station: the old rest-gap rules only
+  // ever blocked 3 specific hardcoded pairs by CODE NAME (Morning/Afternoon
+  // after Night, Morning after Afternoon) — which happened to keep the
+  // built-in M/A/N shift times legal, but left every OTHER real transition
+  // completely unchecked, since any custom or secondary code (General,
+  // Stores, a station-defined variant) was never in those lists. A Night
+  // shift (21:00-07:00) followed by a General shift (09:00-17:00) the very
+  // next day is only a 2-hour real gap — nothing previously stopped it.
+  const shiftTimesByCode = {
+    N: { start: "21:00", end: "07:00" },
+    G: { start: "09:00", end: "17:00" },
+    M: { start: "06:30", end: "14:00" },
+    A: { start: "13:30", end: "21:30" },
+  };
+  const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+
+  it("Step 1's own base proposal refuses a Night-then-General day (only a 2-hour real gap), a pair none of the named-code rules ever covered", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: { codes: ["N", "G"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig, shiftTimesByCode,
+    });
+    const codes = result.assignments.map(a => a.code);
+    expect(codes).toEqual(["N", "O", "N", "O"]); // "G" forced to "O" both times it would otherwise follow a Night
+  });
+
+  it("without shiftTimesByCode, existing callers see no change at all (same Night-then-General sequence goes through unchecked, exactly as before this fix)", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: { codes: ["N", "G"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 4, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+    });
+    expect(result.assignments.map(a => a.code)).toEqual(["N", "G", "N", "G"]);
+  });
+
+  it("still allows a Night followed by a shift starting late enough to clear 11 hours (e.g. a later General start)", () => {
+    const staff = [{ id: "s1", category: "B1" }];
+    const patternByUser = { s1: { codes: ["N", "G2"], offset: 0 } };
+    const result = buildRosterAssignments({
+      staff, nDays: 2, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig,
+      shiftTimesByCode: { ...shiftTimesByCode, G2: { start: "18:00", end: "22:00" } }, // 11.0h gap exactly — not below the floor
+    });
+    expect(result.assignments.map(a => a.code)).toEqual(["N", "G2"]);
+  });
+
+  it("Step 5's redistribution/flexi candidates are held to the same real-time gap, both backward into an already-fixed previous day and forward into an already-fixed next day", () => {
+    // s1 is already on "G" (ending 17:00) the day before a Night mandatory
+    // gap — redistributing/flexi-pulling them INTO that Night (21:00 start)
+    // would be a 4-hour gap, refused; s2 has no such conflict and must be
+    // the one picked instead.
+    const staff = [{ id: "s1", category: "B1" }, { id: "s2", category: "B1" }];
+    const patternByUser = { s1: { codes: ["G", "O"], offset: 0 }, s2: { codes: ["O", "O"], offset: 0 } };
+    const mandatoryCoverageConfig2 = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: true, min: 1 } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 2, leaveByUserDay: {}, blockedUserIds: [], patternByUser, mandatoryCoverageConfig: mandatoryCoverageConfig2,
+      shiftTimesByCode, allowPatternOverrideForCoverage: true,
+    });
+    const day2 = result.assignments.filter(a => a.day === 2);
+    expect(day2.find(a => a.userId === "s1").code).toBe("O"); // stays — the real gap from their own Night day 1 blocks it
+    expect(day2.find(a => a.userId === "s2").code).toBe("N"); // the unconflicted candidate covers it instead
+  });
+});
+
 describe("buildRosterAssignments — staff inert for the whole month don't eat a real offset slot", () => {
   // Confirmed directly against a live B1 roster: 7 total B1 staff, 2 of
   // them on leave/training for literally every day of the month. The

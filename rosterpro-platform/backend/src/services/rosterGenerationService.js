@@ -142,7 +142,7 @@ async function buildContinuationTails(stationId, monthKey, staff) {
     // of the tail (e.g. joined mid previous-month) still defaults those
     // gaps to "O", exactly as before.
     //
-    // 7 days, not 3: resyncCycleStart only ever needs tail[0..2] for its
+    // 10 days, not 3: resyncCycleStart only ever needs tail[0..2] for its
     // OWN rest-gap/illegal-transition checks, but it also uses however much
     // of this array is given to disambiguate which position in a repeated-
     // code run (e.g. a hand-authored "6 General shifts then 1 OFF" pattern)
@@ -151,10 +151,12 @@ async function buildContinuationTails(stationId, monthKey, staff) {
     // a Station Incharge on exactly that pattern crossed the month boundary
     // and came back as a fresh 4-day run instead of immediately resting,
     // because only 2 of his real 6 consecutive days were ever visible to
-    // check against. 7 covers the longest run this app's own duty-time
-    // rule allows (6 consecutive working days) with one day to spare.
+    // check against. 10 (confirmed directly as the requested lookback)
+    // comfortably covers the longest run this app's own duty-time rule
+    // allows (6 consecutive working days) with room to spare for
+    // violatesCrossMonthDutyCap's own backward scan too.
     const hasRecord = assignments.length > 0;
-    const tail = [0, 1, 2, 3, 4, 5, 6].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
+    const tail = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => assignments[i]?.shiftDef?.code ?? (hasRecord ? "O" : null));
     return [s.id, tail];
   }));
 }
@@ -539,6 +541,11 @@ async function generateRoster(stationId, monthKey, actor, req, options = {}) {
 
   const { assignments, violations, advisoryGaps, flexiAssignments } = buildRosterAssignments({
     staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode, shiftHoursByCode,
+    // Real per-code start/end times, for the generic MIN_REST_HOURS check —
+    // already computed for the post-generation compliance report, reused
+    // here so the SAME 11-hour minimum rest is now actually enforced
+    // during generation instead of only ever reported afterward.
+    shiftTimesByCode: workloadContext.ruleShiftDefsByCode,
     mandatoryCoverageConfig: workloadContext.mandatoryCoverageConfig,
     lmpmLockedUserIds, trainingPendingUserIds,
     // Ordinary coverage shortfalls are resolved by SAME-DAY REDISTRIBUTION

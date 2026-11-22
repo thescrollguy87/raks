@@ -98,6 +98,15 @@
 //      pattern with only one person on it, or a group that resynced onto
 //      genuinely distinct phases, is unaffected and keeps the exact
 //      continuity behavior as before.
+//   7. A generic, real-time MIN_REST_HOURS (11h) floor between the end of
+//      one shift and the start of the next, computed from each code's
+//      actual clock start/end time (shiftTimesByCode) rather than the 3
+//      hardcoded M/A/N-named pairs Steps 1 and 5 otherwise only ever
+//      checked — the same default Rule Builder's own "min_rest_hours" hard
+//      rule already uses, except that rule only ever ran AFTER generation
+//      to report a violation, never during generation to prevent one. See
+//      restGapHours/violatesMinRestGap's own comments for the exact math
+//      and why this needed its own generic check.
 
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
@@ -127,6 +136,50 @@ const { ruleAppliesToStaff } = require("./ruleEngine");
 // rather than reusing restGapOk directly.
 const MAX_CONSECUTIVE_DUTY_DAYS = 6;
 const MAX_WEEKLY_HOURS = 48;
+// Minimum real rest between the END of one shift and the START of the
+// next, in hours — the same default Rule Builder's own "min_rest_hours"
+// hard rule already uses (ruleEngine.js's checkMinRestHours: `+rule.
+// limitValue || 11`), but that check only ever ran AFTER generation, to
+// REPORT a violation, never to prevent one. Enforced here unconditionally,
+// same as MAX_CONSECUTIVE_DUTY_DAYS/MAX_WEEKLY_HOURS above, rather than
+// gated behind an admin remembering to add that Rule Builder row — this is
+// a baseline safety floor, not an opt-in. Confirmed directly: the file's
+// OWN rest-gap rules only ever blocked 3 specific hardcoded pairs
+// (Morning/Afternoon-after-Night, Morning-after-Afternoon) by CODE NAME,
+// which happened to keep the built-in M/A/N shift times legal by
+// coincidence, but left every OTHER real transition — e.g. a Night shift
+// (ending 07:00) followed by a General/custom shift starting as early as
+// 09:00, a 2-hour gap — completely unchecked, since "General" was never in
+// any of those hardcoded code lists. restGapHours/violatesMinRestGap below
+// compute the REAL gap from each code's actual start/end time instead, so
+// this now protects any shift code the station defines, not just the 3
+// built-in ones.
+const MIN_REST_HOURS = 11;
+
+// Real hours of rest between `prevCode` ending and `nextCode` starting the
+// following calendar day, using each code's actual clock start/end time
+// (shiftTimesByCode: {code: {start: "HH:MM", end: "HH:MM"}}) — the exact
+// same math ruleEngine.js's checkMinRestHours already uses for its
+// post-generation report, just evaluated for one transition at a time
+// instead of a whole month. Returns null (nothing to check) when either
+// code has no known real time — a non-duty code (O/L/D/TRG) or a code this
+// particular caller didn't supply times for; callers treat that the same
+// as "not a violation," consistent with every other rest-gap check in this
+// file defaulting to "unknown, don't block."
+function restGapHours(prevCode, nextCode, shiftTimesByCode) {
+  const prevDef = shiftTimesByCode?.[prevCode], nextDef = shiftTimesByCode?.[nextCode];
+  if (!prevDef?.start || !prevDef?.end || !nextDef?.start) return null;
+  const toMin = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
+  const prevStart = toMin(prevDef.start);
+  let prevEnd = toMin(prevDef.end);
+  if (prevEnd <= prevStart) prevEnd += 1440; // overnight shift (e.g. Night 21:00-07:00)
+  const nextStart = 1440 + toMin(nextDef.start); // the following calendar day
+  return (nextStart - prevEnd) / 60;
+}
+function violatesMinRestGap(prevCode, nextCode, shiftTimesByCode) {
+  const gap = restGapHours(prevCode, nextCode, shiftTimesByCode);
+  return gap !== null && gap < MIN_REST_HOURS;
+}
 
 const ROTATION = ["M", "M", "A", "A", "N", "N", "O", "O"];
 // The other half of the no-pattern "which cycle does an unpatterned
@@ -447,6 +500,13 @@ function buildRosterAssignments({
   staff, nDays, leaveByUserDay, blockedUserIds, tailByUser, patternByUser, shiftDefsByCode,
   mandatoryCoverageConfig, lmpmLockedUserIds, nightRestrictionRules, staffGroupMembersByGroupId, advisoryDemand,
   absoluteDayAnchor, allowPatternOverrideForCoverage, trainingPendingUserIds, shiftHoursByCode,
+  // Real clock start/end times per code ({code: {start,end}}), for the
+  // generic MIN_REST_HOURS check — a separate, richer shape from
+  // shiftDefsByCode's own plain type-string map (see restGapHours above).
+  // Optional: omitted entirely, every existing caller/test that doesn't
+  // supply it sees no change (restGapHours returns null for every pair,
+  // same as "unknown, don't block" everywhere else in this file).
+  shiftTimesByCode,
   // Partial-month regeneration: when a station's duty/leave/deputation
   // picture changes mid-month, regenerating the WHOLE month would discard
   // every hand edit and every previous generation's redistribution/flexi
@@ -687,6 +747,7 @@ function buildRosterAssignments({
         if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") proposed = "O"; // 2nd mandatory OFF day
         if (violatesNightRestriction(nightRules, s, proposed, shiftDefsByCode, staffGroupMembersByGroupId)) proposed = "O";
         if (violatesCrossMonthDutyCap(codes, tail, day, proposed, shiftDefsByCode, shiftHoursByCode)) proposed = "O";
+        if (violatesMinRestGap(prev, proposed, shiftTimesByCode)) proposed = "O"; // real-time gap, any code pair
       }
 
       codes[day - 1] = proposed;
@@ -913,11 +974,13 @@ function buildRosterAssignments({
     if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") return false;
     if (shift === "M" && (isNight(prev, shiftDefsByCode) || isAft(prev))) return false;
     if (shift === "A" && isNight(prev, shiftDefsByCode)) return false;
+    if (violatesMinRestGap(prev, shift, shiftTimesByCode)) return false; // real-time gap, any code pair
 
     const next = day < nDays ? grid[s.id][day] : undefined;
     if (next !== undefined) {
       if (isMorn(next) && (isNight(shift, shiftDefsByCode) || isAft(shift))) return false; // day+1 Morning can't follow this Night/Afternoon
       if (isAft(next) && isNight(shift, shiftDefsByCode)) return false; // day+1 Afternoon can't follow this Night
+      if (violatesMinRestGap(shift, next, shiftTimesByCode)) return false; // real-time gap INTO the already-fixed next day
       if (isNight(shift, shiftDefsByCode) && isNight(next, shiftDefsByCode)) {
         // Two Nights in a row (this move's `shift` plus the already-fixed
         // `next`) need BOTH mandatory rest days after them, mirroring Step
