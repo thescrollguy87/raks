@@ -693,13 +693,37 @@ function buildRosterAssignments({
   // individually collided, but because ONE unrelated pair sharing that
   // cycle did, and the group-wide null caught everyone else in the blast
   // radius.
+  // Includes EVERY pattern-holder sharing a cycle, not just the ones whose
+  // own resync happened to succeed — a collision can just as easily be
+  // between one staff member who resynced cleanly and another whose resync
+  // failed outright (and is already quietly running the day-anchor
+  // fallback instead). Confirmed directly: one B2 staff spent the end of
+  // November on a General-shift stint, so their real last-known code ("G")
+  // doesn't appear anywhere in their own Night Rotation (NNOO) pattern at
+  // all — resyncCycleStart correctly gives up and returns null for them —
+  // while the OTHER B2 staff on the same pattern had a clean Night-pattern
+  // tail and resynced successfully. Each number looked "right" in
+  // isolation, but the two independently-derived phases still landed on
+  // the identical effective day-1 position, recreating the exact
+  // same-shift collision this guard exists to prevent.
   const resyncGroups = {};
   staff.forEach((s) => {
     const rec = perStaff[s.id];
-    if (!rec.pattern?.codes?.length || rec.resyncStart == null) return;
+    if (!rec.pattern?.codes?.length) return;
     const key = rec.cycle.join(",");
     (resyncGroups[key] = resyncGroups[key] || []).push(s.id);
   });
+  // The effective day-1 cycle index this staff member will actually land
+  // on — via resync if it succeeded, or the SAME day-anchor+offset formula
+  // the day loop below falls back to otherwise (day=1 there reduces to
+  // just `dayAnchor + offset`). This is the one number that actually
+  // determines whether two staff collide, regardless of which of the two
+  // mechanisms produced it.
+  function effectiveIndex(rec) {
+    const len = rec.cycle.length;
+    const raw = rec.resyncStart != null ? rec.resyncStart : (dayAnchor + rec.preferredOffset);
+    return ((raw % len) + len) % len;
+  }
   Object.values(resyncGroups).forEach((ids) => {
     if (ids.length < 2) return;
     const collided = new Set();
@@ -707,10 +731,14 @@ function buildRosterAssignments({
       for (let j = i + 1; j < ids.length; j++) {
         const a = perStaff[ids[i]], b = perStaff[ids[j]];
         if (a.preferredOffset === b.preferredOffset) continue; // not meant to differ — nothing to protect
-        const len = a.cycle.length;
-        if (a.resyncStart % len === b.resyncStart % len) { collided.add(ids[i]); collided.add(ids[j]); }
+        if (effectiveIndex(a) === effectiveIndex(b)) { collided.add(ids[i]); collided.add(ids[j]); }
       }
     }
+    // Only resync (the mechanism this guard can actually influence) gets
+    // nulled — a colliding pair already on the fallback for OTHER reasons
+    // (e.g. two configured offsets that are mathematically identical modulo
+    // the cycle length) has no third mechanism left to separate them; that
+    // is an admin configuration question, not something this guard can fix.
     collided.forEach((id) => { perStaff[id].resyncStart = null; });
   });
 

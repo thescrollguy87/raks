@@ -1125,6 +1125,34 @@ describe("buildRosterAssignments — resync collision guard (a deliberately stag
     expect(codesFor("clean2")).toEqual(["M", "M", "A", "A"]);
     expect(codesFor("clean3")).toEqual(["M", "A", "A", "N"]);
   });
+
+  it("detects a collision between a staff member whose resync SUCCEEDED and one whose resync FAILED outright and is silently on the fallback", () => {
+    // Confirmed directly against a live station: Ajai's real tail cleanly
+    // matched his own Night Rotation (NNOO) pattern and resynced
+    // successfully. Sudhir spent the end of November on a General-shift
+    // stint — his real last-known code ("G") doesn't appear anywhere in
+    // his OWN Night Rotation pattern at all, so resyncCycleStart correctly
+    // gave up and returned null for him, silently falling back to the
+    // plain day-anchor+offset formula. The OLD guard only ever compared
+    // staff who BOTH had a non-null resyncStart, so it never even looked
+    // at this pair — yet their two independently-derived phases still
+    // landed on the identical effective day-1 position, recreating the
+    // exact same-shift collision (both doing Night on the same days, both
+    // resting on the same days) the guard exists to prevent.
+    const cycle = ["N", "N", "O", "O"];
+    const staff = [{ id: "ajai", category: "B2" }, { id: "sudhir", category: "B2" }];
+    const patternByUser = { ajai: { codes: cycle, offset: 0 }, sudhir: { codes: cycle, offset: 2 } };
+    const tailByUser = {
+      ajai: ["N", "N", "O", "O", "N", "N", "O", "L", "L", "L"],
+      sudhir: ["G", "G", "G", "BOM", "O", "G", "G", "G", "G", "G"],
+    };
+    const mandatoryCoverageConfig = { B2: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, patternByUser, mandatoryCoverageConfig,
+    });
+    const codesFor = (id) => result.assignments.filter(a => a.userId === id).map(a => a.code);
+    expect(codesFor("ajai")).not.toEqual(codesFor("sudhir"));
+  });
 });
 
 describe("buildRosterAssignments — General-pattern staff reachable by Mandatory coverage (live Deputation-overlap scenario)", () => {
