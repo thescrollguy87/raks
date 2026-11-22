@@ -63,10 +63,41 @@
 //      `flexiAssignments` (each entry flagged `mandatory: true/false`),
 //      never silently indistinguishable from a routine fill, and still
 //      never touching a pattern-locked staff member's protected OFF day
-//      even then. Where NO eligible candidate exists at all for a
-//      MANDATORY slot, it's reported as a (critical) violation; an unmet
-//      ADVISORY slot is reported separately as a non-critical gap, never
-//      blocking generation.
+//      for an ADVISORY slot — a MANDATORY slot may now draw on it too (see
+//      the flexi fallback's own comment in rebalanceDay for why). Where NO
+//      eligible candidate exists at all for a MANDATORY slot, it's reported
+//      as a (critical) violation; an unmet ADVISORY slot is reported
+//      separately as a non-critical gap, never blocking generation. A
+//      staff member working a non-M/A/N duty code (General, or any other
+//      station-defined code outside the M/A/N families) is now also a
+//      valid same-day redistribution donor for a MANDATORY slot — see
+//      rebalanceDay's `generalPool`.
+//   6. A resync collision guard, right after Step 1 resolves every
+//      pattern-holder's own cycle position (see `resyncGroups` below):
+//      resyncCycleStart (used when "Continue from Previous Roster" is on)
+//      re-derives a staff member's phase from THEIR OWN recent history
+//      alone, with no way to know a different staff member on the exact
+//      same pattern was deliberately given a different Cycle Start Day
+//      specifically so the two of them land on opposite phases (e.g. a
+//      2-day-staggered Night pattern so at least one of them is always on
+//      Night while the other rests). When both happen to share the same
+//      recent real history — the normal case the first month they're
+//      placed on a newly-staggered pattern, since neither has actually run
+//      it yet — resync silently narrows both to the identical position,
+//      erasing the very stagger the admin configured. Confirmed directly:
+//      two B2 staff on "Night Rotation (NNOO)" with Cycle Start Day 0 and 2
+//      came out of a live December generation on the byte-identical
+//      schedule, both on Night and both off together every cycle instead
+//      of alternating — leaving that Night shift completely uncovered
+//      every other 2-day block all month. The guard groups pattern-holders
+//      by their actual resolved cycle, and when two members with
+//      DIFFERENT configured offsets resynced to the SAME effective phase,
+//      discards resync for every member of that group this run, falling
+//      back to each person's own configured Cycle Start Day instead — the
+//      one source actually guaranteed to keep them on distinct phases. A
+//      pattern with only one person on it, or a group that resynced onto
+//      genuinely distinct phases, is unaffected and keeps the exact
+//      continuity behavior as before.
 
 const { ruleAppliesToStaff } = require("./ruleEngine");
 
@@ -477,6 +508,11 @@ function buildRosterAssignments({
   const groupOffsetCounters = {}; // "<category>|N" or "<category>|S" -> counter
 
   // Step 1 + 2 + 3 + 4: base rotation, blocked staff, leave overrides, rest-gap.
+  // First pass: resolve each staff member's own cycle/offset/resync
+  // position WITHOUT writing any day's code yet, so the collision guard
+  // right after can see every pattern-holder's result at once and
+  // intervene before anything lands in `grid`.
+  const perStaff = {};
   staff.forEach((s) => {
     const tail = tailByUser?.[s.id] || ["O", "O", "O"]; // [lastDay, 2ndLast, 3rdLast] of previous month
     // Staff Allocation tab: a staff member assigned a Shift Pattern gets
@@ -487,7 +523,6 @@ function buildRosterAssignments({
     // way, exactly as in the reference: only how `proposed` is first
     // computed differs.
     const pattern = patternByUser?.[s.id];
-    const codes = new Array(nDays);
     const unpatternedTrainingPending = trainingPending.has(s.id) && !pattern?.codes?.length;
     let cycle, offset = 0;
     if (pattern?.codes?.length) {
@@ -518,6 +553,41 @@ function buildRosterAssignments({
     // whichever one `cycle` itself actually came from.
     const preferredOffset = pattern?.codes?.length ? (pattern.offset || 0) : offset;
     const resyncStart = tailByUser ? resyncCycleStart(cycle, tail, preferredOffset) : null;
+    perStaff[s.id] = { tail, pattern, cycle, offset, preferredOffset, resyncStart, unpatternedTrainingPending };
+  });
+
+  // See Step 6 in the module-header comment above for the full rationale.
+  // Groups pattern-holders by their actual resolved cycle (patternId isn't
+  // tracked this far down — the resolved code sequence is what the phase
+  // math below actually operates on, and is exactly as good a grouping key)
+  // and, within any group of 2+ where two members configured DIFFERENT
+  // Cycle Start Days but resync nonetheless put them on the SAME effective
+  // phase, discards resync for the whole group so every member falls back
+  // to their own configured offset instead.
+  const resyncGroups = {};
+  staff.forEach((s) => {
+    const rec = perStaff[s.id];
+    if (!rec.pattern?.codes?.length || rec.resyncStart == null) return;
+    const key = rec.cycle.join(",");
+    (resyncGroups[key] = resyncGroups[key] || []).push(s.id);
+  });
+  Object.values(resyncGroups).forEach((ids) => {
+    if (ids.length < 2) return;
+    let collision = false;
+    for (let i = 0; i < ids.length && !collision; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = perStaff[ids[i]], b = perStaff[ids[j]];
+        if (a.preferredOffset === b.preferredOffset) continue; // not meant to differ — nothing to protect
+        const len = a.cycle.length;
+        if (a.resyncStart % len === b.resyncStart % len) { collision = true; break; }
+      }
+    }
+    if (collision) ids.forEach((id) => { perStaff[id].resyncStart = null; });
+  });
+
+  staff.forEach((s) => {
+    const { tail, pattern, cycle, offset, resyncStart, unpatternedTrainingPending } = perStaff[s.id];
+    const codes = new Array(nDays);
 
     for (let day = 1; day <= nDays; day++) {
       // Outside the regeneration window — preserve whatever's really on
@@ -805,6 +875,28 @@ function buildRosterAssignments({
     // Analysis still credits a cross-category shift AFTER it happens, if a
     // human deliberately places one; this pass just never creates one.
     shifts.forEach(sh => { bucket[sh] = staff.filter(s => s.category === category && eligibleBase(s, day) && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === sh); });
+    // A staff member working a non-M/A/N duty code that day (General, or
+    // any other station-defined code outside the M/A/N coverage families)
+    // has an implicit floor of 0 in this system — nothing in Mandatory
+    // Minimum Coverage or Rule Builder ever requires a minimum headcount on
+    // General, so anyone on it is, by definition, full surplus relative to
+    // that floor. They were previously invisible to same-day redistribution
+    // entirely (shiftFamily only recognizes M/A/N, so a General-coded day
+    // was never bucketed anywhere), leaving a real Mandatory gap unfilled
+    // even with a General-pattern staff member sitting right there that
+    // same day. Scoped to the MANDATORY pass only (`generalPool` stays
+    // empty during the advisory pass) — ordinary workload-driven
+    // understaffing is still never, by itself, a reason to pull someone off
+    // their deliberately-assigned General duty; only the non-negotiable
+    // safety floor is. Confirmed directly: a B1 and a B2 staff member both
+    // on a "6 General + 1 Off" pattern sat unused through a Mandatory Night
+    // shortfall (one during a genuine Deputation overlap that removed the
+    // category's only other free staff) that this pool would have closed.
+    const generalPool = mandatory
+      ? staff.filter(s => s.category === category && eligibleBase(s, day)
+          && shiftFamily(grid[s.id][day - 1], shiftDefsByCode) === null
+          && isDutyType(grid[s.id][day - 1], shiftDefsByCode))
+      : [];
 
     shifts.forEach(deficitShift => {
       const target = targets[deficitShift] || 0;
@@ -825,6 +917,18 @@ function buildRosterAssignments({
           bucket[deficitShift].push(donor);
           moved = true;
           break;
+        }
+        // 1b) Same-day redistribution from General (mandatory only) — see
+        // `generalPool`'s own comment above.
+        if (!moved && generalPool.length) {
+          const donor = pickFairest(generalPool, s => restGapOk(s, day, deficitShift));
+          if (donor) {
+            generalPool.splice(generalPool.indexOf(donor), 1);
+            pullCount[donor.id] = (pullCount[donor.id] || 0) + 1;
+            grid[donor.id][day - 1] = deficitShift;
+            bucket[deficitShift].push(donor);
+            moved = true;
+          }
         }
         if (moved) continue;
 
@@ -850,10 +954,21 @@ function buildRosterAssignments({
         // never something the generator decides on its own. Only the
         // ORIGINAL same-category case below still applies unconditionally
         // for a mandatory floor.
+        //
+        // A pattern-locked staff member's OFF day stays fully protected for
+        // an ADVISORY gap (`!lmpmLocked.has(s.id)` below), same as always —
+        // but for a MANDATORY gap specifically, that protection is now
+        // lifted too. The non-pattern-locked flexi pull already applies
+        // unconditionally for a mandatory floor (it's described everywhere
+        // else in this app as non-negotiable); a General-pattern holder's
+        // OFF day is the one day `generalPool` above still can't reach them
+        // on, and confirmed directly, that's exactly the day a live
+        // Mandatory shortfall landed on. Leaving it protected only makes
+        // sense for routine advisory understaffing, not a safety floor.
         if (mandatory || allowPatternOverrideForCoverage) {
           const flexiCandidate = pickFairest(staff, s => (
             s.category === category && eligibleBase(s, day) && grid[s.id][day - 1] === "O"
-            && !lmpmLocked.has(s.id) && restGapOk(s, day, deficitShift)
+            && (mandatory || !lmpmLocked.has(s.id)) && restGapOk(s, day, deficitShift)
           ));
           if (flexiCandidate) {
             pullCount[flexiCandidate.id] = (pullCount[flexiCandidate.id] || 0) + 1;
