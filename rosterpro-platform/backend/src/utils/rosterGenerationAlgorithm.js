@@ -107,17 +107,24 @@ const { ruleAppliesToStaff } = require("./ruleEngine");
 // shift, 1 day otherwise. Separately, nobody's rolling 7-day total may
 // exceed 48 hours. These are enforced as a hard floor on every candidate
 // the coverage-fill pass (rebalanceDay/restGapOk below) considers for
-// same-day redistribution or a flexi off-day pull — the ONLY place a run
-// longer than 6 days can actually be created, since the base ROTATION/
-// NIGHT_ONLY_CYCLE cycles (6-on-2-off and 2-on-2-off respectively) already
-// structurally cap every unpatterned staff member's base assignment well
-// under 6 regardless of how leave interrupts it, and a named Staff
-// Allocation pattern is the admin's own deliberate choice, same as every
+// same-day redistribution or a flexi off-day pull, since the base
+// ROTATION/NIGHT_ONLY_CYCLE cycles (6-on-2-off and 2-on-2-off
+// respectively) already structurally cap every unpatterned staff member's
+// base assignment well under 6 WITHIN a single, uninterrupted month,
+// regardless of how leave interrupts it, and a named Staff Allocation
+// pattern's own shape is the admin's own deliberate choice, same as every
 // other place this file leaves patterns untouched. Confirmed directly
 // against a live roster: with Mandatory Minimum Coverage requiring >=1 B1
 // per shift and several B1 staff on leave at once, the flexi fallback had
 // nothing stopping it from repeatedly pulling the same few remaining B1
 // staff off their OFF days, producing 7-8 day duty runs.
+//
+// That "structurally capped" guarantee does NOT extend across a real month
+// boundary: the cap is also separately enforced on Step 1's own initial
+// proposal via violatesCrossMonthDutyCap (below), specifically for a run
+// that reaches back into the previous month's real tail — see that
+// function's own comment for why this needed its own, narrower check
+// rather than reusing restGapOk directly.
 const MAX_CONSECUTIVE_DUTY_DAYS = 6;
 const MAX_WEEKLY_HOURS = 48;
 
@@ -247,6 +254,59 @@ const DEFAULT_MANDATORY_COVERAGE_CONFIG = {
   CM: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } },
   NCS: { M: { enabled: false, min: 1 }, A: { enabled: false, min: 1 }, N: { enabled: false, min: 1 } },
 };
+
+// Would accepting `proposedCode` on `day` extend a REAL consecutive-duty
+// run that reaches back across the previous month's boundary (via `tail`)
+// past MAX_CONSECUTIVE_DUTY_DAYS, or push a trailing 7-day window that
+// touches that boundary over MAX_WEEKLY_HOURS? Deliberately scoped to ONLY
+// a run that actually touches `tail` — once the backward count stays
+// entirely within the current month's own already-computed `codes`, it's
+// a pattern or rotation's own internal shape, which (per this file's
+// established stance elsewhere) is left alone as the admin's deliberate
+// choice. A run that crosses the real month boundary is different: neither
+// the built-in cycles' own structure nor a hand-authored pattern's shape
+// has any way to know which real calendar day of the PREVIOUS month it's
+// landing after, so nothing had ever validated that specific combination
+// before now — Step 5's restGapOk/violatesMaxConsecutiveDuty already
+// enforce this cap for any candidate IT considers, but Step 1's own
+// initial proposal (via resync or the day-anchor fallback) never checked
+// it at all. Confirmed directly against a live Nov/Dec roster pair: a
+// staff member who genuinely worked 4 straight days into the end of one
+// month was proposed 4 more at the start of the next, every individual
+// day's transition legal in isolation (nothing here blocks a plain
+// Afternoon-after-Afternoon or Night-after-Afternoon), with nothing
+// catching the cumulative 8-day run this created.
+function violatesCrossMonthDutyCap(codes, tail, day, proposedCode, shiftDefsByCode, shiftHoursByCode) {
+  function codeBefore(d) {
+    if (d >= 1) return codes[d - 1];
+    const idx = -d;
+    const code = idx < tail.length ? tail[idx] : undefined;
+    return code ?? undefined;
+  }
+  function isWorking(code) {
+    if (code === undefined) return null;
+    const t = shiftType(code, shiftDefsByCode);
+    return t === "duty" || t === "night";
+  }
+  let runLen = 1, touchedTail = false, d = day - 1;
+  while (true) {
+    if (d < 1) touchedTail = true;
+    if (isWorking(codeBefore(d)) !== true) break;
+    runLen++; d--;
+    if (runLen > MAX_CONSECUTIVE_DUTY_DAYS + 4) break; // safety bound, matches violatesMaxConsecutiveDuty
+  }
+  if (!touchedTail) return false; // entirely this month's own pattern/rotation shape — left alone
+  if (runLen > MAX_CONSECUTIVE_DUTY_DAYS) return true;
+  if (shiftHoursByCode) {
+    let total = shiftHoursByCode[proposedCode] || 0;
+    for (let k = day - 1; k >= day - 6; k--) {
+      const code = codeBefore(k);
+      total += code !== undefined ? (shiftHoursByCode[code] || 0) : 0;
+    }
+    if (total > MAX_WEEKLY_HOURS) return true;
+  }
+  return false;
+}
 
 function violatesNightRestriction(rules, s, shift, shiftDefsByCode, staffGroupMembersByGroupId) {
   if (!rules || !rules.length) return false;
@@ -626,6 +686,7 @@ function buildRosterAssignments({
         if (isNight(prev2, shiftDefsByCode) && isNight(prev, shiftDefsByCode)) proposed = "O"; // after 2N -> OFF
         if (isNight(prev3, shiftDefsByCode) && isNight(prev2, shiftDefsByCode) && prev === "O") proposed = "O"; // 2nd mandatory OFF day
         if (violatesNightRestriction(nightRules, s, proposed, shiftDefsByCode, staffGroupMembersByGroupId)) proposed = "O";
+        if (violatesCrossMonthDutyCap(codes, tail, day, proposed, shiftDefsByCode, shiftHoursByCode)) proposed = "O";
       }
 
       codes[day - 1] = proposed;

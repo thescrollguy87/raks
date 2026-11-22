@@ -1107,7 +1107,10 @@ describe("buildRosterAssignments — resync collision guard (a deliberately stag
       collider2: ["A", "A", "M", "M", "O", "O", "M"], // identical to collider1 -> a real collision
       clean1: ["N", "N", "O", "O", "M", "M", "A"],
       clean2: ["O", "O", "M", "M", "A", "A", "N"],
-      clean3: ["M", "A", "A", "N", "N", "O", "O"],
+      // Only 1 real working day before a clean rest — enough to disambiguate
+      // resync unambiguously without also tripping the cross-month duty cap
+      // this scenario isn't testing.
+      clean3: ["M", "O", "O", "O", "O", "O", "O"],
     };
     const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
     const result = buildRosterAssignments({
@@ -1325,6 +1328,39 @@ describe("buildRosterAssignments — cross-month rest-gap lookback uses the FULL
     // Nov ended "...M, A, A" — the next legal step in the 8-day ROTATION
     // cycle (M,M,A,A,N,N,O,O) is Night, not another Afternoon.
     expect(result.assignments.map(a => a.code)).toEqual(["N", "N", "O", "O"]);
+  });
+
+  it("Step 1's FALLBACK path (resync unavailable, e.g. nulled by the collision guard) also respects the cross-month duty cap", () => {
+    // Confirmed directly against a live station: resync correctly protects
+    // a staff member's OWN continuity, but the moment resync is
+    // unavailable for ANY reason (here: a genuine collision with another
+    // staff member sharing the same pattern, same as the live case), Step
+    // 1 falls back to the plain dayAnchor+offset formula — which, before
+    // this fix, had NO awareness of real cross-month history at all, and
+    // could propose a day that extends a real previous-month run straight
+    // past the 6-day cap with nothing to stop it.
+    const cycle = ["M", "M", "A", "A", "N", "N", "O", "O"];
+    const staff = [{ id: "sumbhav", category: "B1" }, { id: "partner", category: "B1" }];
+    const patternByUser = {
+      sumbhav: { codes: cycle, offset: 2 }, // fallback proposes day1="A", day2="A" -> would reach day3="N" (7th day)
+      partner: { codes: cycle, offset: 5 }, // different offset, identical real tail -> forces the collision
+    };
+    const tailByUser = {
+      sumbhav: ["A", "A", "M", "M", "O", "O", "M"], // real Nov 27-30: M,M,A,A
+      partner: ["A", "A", "M", "M", "O", "O", "M"],
+    };
+    const mandatoryCoverageConfig = { B1: { M: { enabled: false }, A: { enabled: false }, N: { enabled: false } } };
+    const result = buildRosterAssignments({
+      staff, nDays: 8, leaveByUserDay: {}, blockedUserIds: [], tailByUser, patternByUser, mandatoryCoverageConfig,
+    });
+    const sumbhavCodes = result.assignments.filter(a => a.userId === "sumbhav").sort((a, b) => a.day - b.day).map(a => a.code);
+    // Days 1-2 (A, A) bring the real Nov 27-30 run to exactly 6 days — still
+    // compliant. Day 3 would be the 7th consecutive day — correctly forced
+    // to rest instead of extending it, same remedy ("O") the file's other
+    // illegal-sequence checks already use.
+    expect(sumbhavCodes[0]).toBe("A");
+    expect(sumbhavCodes[1]).toBe("A");
+    expect(sumbhavCodes[2]).toBe("O");
   });
 });
 
