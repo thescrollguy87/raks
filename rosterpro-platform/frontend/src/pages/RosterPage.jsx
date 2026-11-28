@@ -877,6 +877,11 @@ export default function RosterPage() {
           <button onClick={() => setMonthKey(m => shiftMonth(m, -1))} style={navBtnStyle}>‹</button>
           <span style={{ fontSize: 12, fontWeight: 700, minWidth: 88, textAlign: "center" }}>{monthLabel(monthKey)}</span>
           <button onClick={() => setMonthKey(m => shiftMonth(m, 1))} style={navBtnStyle}>›</button>
+          <input
+            className="fi" type="month" value={monthKey} onChange={e => e.target.value && setMonthKey(e.target.value)}
+            style={{ fontSize: 11, padding: "4px 6px", width: 128 }}
+            title="Jump directly to a month & year"
+          />
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }} role="group" aria-label="Category filter">
           <button type="button" className={`chip-btn${catFilter === "ALL" ? " active" : ""}`} onClick={() => setCatFilter("ALL")}>All</button>
